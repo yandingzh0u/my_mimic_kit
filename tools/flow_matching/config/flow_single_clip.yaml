@@ -1,0 +1,43 @@
+model_name: "flow_smp"
+arch_name: "DiT"
+num_layers: 2
+num_attention_heads: 4
+attention_head_dim: 64
+dropout: 0.0
+time_embed_scale: 49.0
+
+model_ema: true
+model_ema_decay: 0.995
+model_ema_steps: 10
+model_ema_update_after: 5000
+
+normalizer_std_clip: 0.2
+
+batch_size: 512
+lr: 0.0001
+weight_decay: 0.0
+num_iterations: 50000
+num_samples_stat: 10000
+output_iter: 2000
+log_iter: 100
+grad_clip_norm: 1.0
+
+validation_samples: 2048
+validation_batch_size: 512
+validation_feature_noise_std: 0.35
+validation_foot_slide_distance: 0.25
+validation_severe_random_std: 3.0
+validation_min_win_rate: 0.6
+validation_severe_min_ratio: 2.0
+calibration_floor: 0.000001
+
+reward_times: [0.25, 0.5, 0.75]
+reward_noise_samples: 1
+require_gate_pass: true
+seed: 0
+validation_seed: 10000
+reward_noise_seed: 20000
+
+env_config: "data/envs/smp_humanoid_env.yaml"
+motion_file: "data/motions/humanoid/humanoid_spinkick.pkl"
+control_freq: 30
