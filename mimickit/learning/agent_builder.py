@@ -29,6 +29,9 @@ def build_agent(agent_file, env, device):
     elif (agent_name == "FlowSMP"):
         import learning.flow_smp_agent as flow_smp_agent
         agent = flow_smp_agent.FlowSMPAgent(config=agent_config, env=env, device=device)
+    elif (agent_name == "SkillConditionedFlow"):
+        import learning.skill_conditioned_flow_agent as skill_conditioned_flow_agent
+        agent = skill_conditioned_flow_agent.SkillConditionedFlowAgent(config=agent_config, env=env, device=device)
     elif (agent_name == "ASE"):
         import learning.ase_agent as ase_agent
         agent = ase_agent.ASEAgent(config=agent_config, env=env, device=device)

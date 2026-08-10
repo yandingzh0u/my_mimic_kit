@@ -1,0 +1,69 @@
+model_name: "conditional_flow_smp"
+arch_name: "ConditionalDiT"
+latent_dim: 8
+enforce_unit_latent: true
+num_layers: 2
+num_attention_heads: 4
+attention_head_dim: 64
+dropout: 0.0
+time_embed_scale: 49.0
+
+model_ema: true
+model_ema_decay: 0.995
+model_ema_steps: 1
+model_ema_update_after: 0
+normalizer_std_clip: 0.2
+
+batch_size: 128
+lr: 0.0001
+weight_decay: 0.0
+num_iterations: 1000
+num_samples_stat: 512
+stats_batch_size: 128
+output_iter: 500
+log_iter: 25
+grad_clip_norm: 1.0
+p_null: 0.1
+
+validation_samples_per_clip: 8
+validation_batch_size: 128
+validation_feature_noise_std: 0.35
+validation_foot_slide_distance: 0.25
+validation_severe_random_std: 3.0
+validation_min_paired_win_rate: 0.50
+validation_min_median_ratio: 1.0
+validation_gates:
+  matched_vs_wrong_random: {min_win_rate: 0.50, min_median_ratio: 1.0}
+  matched_vs_wrong_semantic: {min_win_rate: 0.50, min_median_ratio: 1.0}
+  matched_vs_null: {min_win_rate: 0.50, min_median_ratio: 1.0}
+  matched_vs_temporal_shuffle: {min_win_rate: 0.50, min_median_ratio: 1.0}
+  matched_vs_feature_noise: {min_win_rate: 0.50, min_median_ratio: 1.0}
+  matched_vs_foot_slide: {min_win_rate: 0.50, min_median_ratio: 1.0}
+  matched_vs_severe_random: {min_win_rate: 0.50, min_median_ratio: 1.0}
+  wrong_random_vs_severe_random: {min_win_rate: 0.50, min_median_ratio: 1.0}
+  wrong_semantic_vs_severe_random: {min_win_rate: 0.50, min_median_ratio: 1.0}
+calibration_floor: 0.000001
+
+reward_times: [0.25, 0.5, 0.75]
+reward_noise_samples: 1
+require_gate_pass: true
+
+seed: 0
+split_seed: 3
+stats_seed: 1000
+validation_seed: 10000
+reward_noise_seed: 20000
+null_seed: 30000
+
+expected_num_clips: 54
+view_steps: 20
+foot_body_names: ["right_foot", "left_foot"]
+contact_ground_height: 0.0
+contact_height_threshold: 0.08
+contact_speed_threshold: 0.4
+heldout_clip_fraction: 0.2
+
+encoder_artifact: "output/skill_encoder/locomotion/model.pt"
+env_config: "data/envs/smp_location_humanoid_env.yaml"
+motion_file: "data/datasets/dataset_humanoid_locomotion_r2.yaml"
+control_freq: 30

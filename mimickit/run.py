@@ -56,6 +56,29 @@ def test(agent, test_episodes):
     Logger.print("Episodes: {}".format(result["num_eps"]))
     return result
 
+def apply_skill_command(args, agent, mode):
+    has_path = args.has_key("skill_motion_path")
+    has_sha = args.has_key("skill_clip_sha256")
+    has_start = args.has_key("skill_context_start_sec")
+    if not (has_path or has_sha or has_start):
+        return
+    if mode != "test":
+        raise ValueError("external skill commands are supported only in test mode")
+    if has_path == has_sha or not has_start:
+        raise ValueError(
+            "specify exactly one of --skill_motion_path/--skill_clip_sha256 and "
+            "also --skill_context_start_sec"
+        )
+    setter = getattr(agent, "set_skill_command", None)
+    if not callable(setter):
+        raise TypeError("the selected agent does not support external skill commands")
+    setter(
+        motion_path=args.parse_string("skill_motion_path") if has_path else None,
+        clip_sha256=args.parse_string("skill_clip_sha256") if has_sha else None,
+        context_start_sec=args.parse_float("skill_context_start_sec"),
+    )
+    return
+
 def save_config_files(args, out_dir):
     engine_file = args.parse_string("engine_config")
     if (engine_file != ""):
@@ -116,6 +139,8 @@ def run(rank, num_procs, device, master_port, args):
 
     if (model_file != ""):
         agent.load(model_file)
+
+    apply_skill_command(args, agent, mode)
 
     if (mode == "train"):
         save_config_files(args, out_dir)

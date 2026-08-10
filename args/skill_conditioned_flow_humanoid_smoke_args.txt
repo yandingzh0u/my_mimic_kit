@@ -1,0 +1,10 @@
+--num_envs 64
+--visualize false
+
+--engine_config data/engines/isaac_lab_engine.yaml
+--env_config data/envs/skill_conditioned_location_humanoid_env.yaml
+--agent_config data/agents/skill_conditioned_flow_humanoid_smoke_agent.yaml
+
+--out_dir output/skill_conditioned_flow/locomotion_smoke
+--save_int_models true
+--max_samples 512

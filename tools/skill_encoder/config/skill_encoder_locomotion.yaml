@@ -1,0 +1,48 @@
+model_name: "label_free_skill_encoder"
+view_steps: 20
+embedding_dim: 8
+hidden_dim: 128
+num_layers: 3
+
+batch_size: 512
+lr: 0.0003
+weight_decay: 0.0001
+num_iterations: 30000
+log_iter: 100
+output_iter: 1000
+grad_clip_norm: 1.0
+
+vicreg_invariance_weight: 25.0
+vicreg_variance_weight: 25.0
+vicreg_covariance_weight: 1.0
+vicreg_target_std: 1.0
+
+num_samples_stat: 8192
+stats_batch_size: 512
+normalizer_min_std: 0.05
+validation_samples_per_clip: 128
+validation_batch_size: 512
+gate_min_dim_std: 0.05
+gate_min_effective_rank: 1.5
+gate_min_pair_cosine: 0.8
+gate_cross_clip_tag_margin: 0.1
+gate_cross_clip_tag_min_rate: 0.4
+gate_max_clip_probe_lift: 0.65
+gate_max_phase_knn_gain: 0.15
+require_gate_pass: true
+
+foot_body_names: ["right_foot", "left_foot"]
+contact_ground_height: 0.0
+contact_height_threshold: 0.08
+contact_speed_threshold: 0.4
+audit_shuffle_seed: 3000
+
+seed: 0
+split_seed: 3
+stats_seed: 1000
+validation_seed: 2000
+heldout_clip_fraction: 0.2
+
+env_config: "data/envs/smp_location_humanoid_env.yaml"
+motion_file: "data/datasets/dataset_humanoid_locomotion_r2.yaml"
+control_freq: 30
