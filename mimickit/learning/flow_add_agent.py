@@ -15,9 +15,25 @@ class FlowADDAgent(add_agent.ADDAgent):
     space. Positive samples are the ideal transition (x_t-1, x_t) = (0, 0),
     negatives are policy transitions, and the gradient penalty is applied on
     the joint input [x_t-1, x_t]. The reward stays -log(1 - D).
+
+    The potential branch additionally gets a contraction teacher: synthetic
+    transitions (x, c x) with c in [0, 1) are labeled positive. Without it the
+    negative-only BCE suppresses q_prog on improving policy transitions and the
+    S matrix collapses to zero (observed in training). The static score f is
+    detached in this term and q_circ(x, c x) has exactly zero gradient w.r.t.
+    B, so the teacher only shapes the potential matrix S = L L^T toward
+    "radial contraction of the error is progress" and leaves f and A alone.
     """
     def __init__(self, config, env, device):
         super().__init__(config, env, device)
+        return
+
+    def _load_params(self, config):
+        super()._load_params(config)
+
+        # weight of the contraction-teacher loss for the potential branch;
+        # 0 disables the fix (recovers the collapsing behavior)
+        self._disc_flow_contract_weight = config.get("disc_flow_contract_weight", 0.5)
         return
 
     def _build_model(self, config):
@@ -165,7 +181,42 @@ class FlowADDAgent(add_agent.ADDAgent):
             "disc_pos_logit": disc_pos_logit_mean.detach(),
             "disc_neg_logit": disc_neg_logit_mean.detach()
         }
+
+        if (self._enable_contract_teacher()):
+            contract_loss, contract_acc = self._compute_contract_loss(norm_diff_obs.detach())
+            disc_info["disc_loss"] = disc_loss + self._disc_flow_contract_weight * contract_loss
+            disc_info["disc_contract_loss"] = contract_loss.detach()
+            disc_info["disc_contract_acc"] = contract_acc.detach()
+
         return disc_info
+
+    def _enable_contract_teacher(self):
+        if (self._disc_flow_contract_weight <= 0):
+            return False
+        if (self._model.get_disc_mode() == flow_add_model.DISC_MODE_CONCAT):
+            return False
+        return self._model.has_potential()
+
+    def _compute_contract_loss(self, x):
+        """Contraction teacher for the potential branch.
+
+        Builds synthetic transitions (x_t-1, x_t) = (x, c x) with c ~ U[0, 1)
+        from the negative batch and labels them positive: shrinking the error
+        radially toward the ideal point is progress, for any motion. The
+        static score is detached so the teacher does not lift f on nonzero
+        errors, and q_circ(x, c x) = 0 with zero B-gradient, so only L learns
+        from this term.
+        """
+        c = torch.rand([x.shape[0], 1], device=x.device, dtype=x.dtype)
+        x_curr = c * x
+
+        f = self._model.eval_static_score(x_curr).squeeze(-1).detach()
+        q_prog, q_circ = self._model.eval_flow_scores(x_curr, x)
+        contract_logit = f + q_prog + q_circ
+
+        loss = self._disc_loss_pos(contract_logit)
+        acc = torch.mean((contract_logit > 0).float())
+        return loss, acc
 
     def _compute_flow_stats(self, norm_obs_diff, norm_obs_diff_prev):
         if (self._model.get_disc_mode() == flow_add_model.DISC_MODE_CONCAT):
@@ -178,21 +229,53 @@ class FlowADDAgent(add_agent.ADDAgent):
             diff = norm_obs_diff[idx]
             diff_prev = norm_obs_diff_prev[idx]
 
+            f = self._model.eval_static_score(diff).squeeze(-1)
             q_prog, q_circ = self._model.eval_flow_scores(diff, diff_prev)
+            logit = f + q_prog + q_circ
 
             eps = 1e-8
             # mean signed progress: > 0 means the error energy E_S is shrinking
             prog_mean = torch.mean(q_prog)
+            # branch magnitudes: how large each term is relative to the others
+            f_abs = torch.mean(torch.abs(f))
+            prog_abs = torch.mean(torch.abs(q_prog))
+            circ_abs = torch.mean(torch.abs(q_circ))
             # fraction of the flow score magnitude carried by the circulation term
-            circ_ratio = torch.mean(torch.abs(q_circ)) \
-                         / (torch.mean(torch.abs(q_prog)) + torch.mean(torch.abs(q_circ)) + eps)
+            circ_ratio = circ_abs / (prog_abs + circ_abs + eps)
+
+            # actual influence of each branch on the policy reward
+            # r = scale * softplus(logit), so this measures the branch's
+            # contribution after logit saturation
+            r_full = torch.nn.functional.softplus(logit)
+            prog_r_delta = torch.mean(torch.abs(
+                r_full - torch.nn.functional.softplus(logit - q_prog)))
+            circ_r_delta = torch.mean(torch.abs(
+                r_full - torch.nn.functional.softplus(logit - q_circ)))
+            prog_r_delta = self._disc_reward_scale * prog_r_delta
+            circ_r_delta = self._disc_reward_scale * circ_r_delta
+
+            # orientation probes: how much the logit changes when the
+            # transition is reversed or when x_t-1 is shuffled across the batch
+            logit_rev = self._model.eval_disc(diff_prev, diff).squeeze(-1)
+            rev_gap = torch.mean(torch.abs(logit - logit_rev))
+
+            perm = torch.randperm(num_samples, device=self._device, dtype=torch.long)
+            logit_shuf = self._model.eval_disc(diff, diff_prev[perm]).squeeze(-1)
+            shuffle_gap = torch.mean(torch.abs(logit - logit_shuf))
 
             flow_norm = torch.mean(torch.norm(diff - diff_prev, dim=-1))
             s_norm, a_norm = self._model.get_flow_matrix_norms()
 
         info = {
             "disc_flow_prog_mean": prog_mean,
+            "disc_flow_f_abs": f_abs,
+            "disc_flow_prog_abs": prog_abs,
+            "disc_flow_circ_abs": circ_abs,
             "disc_flow_circ_ratio": circ_ratio,
+            "disc_flow_prog_r_delta": prog_r_delta,
+            "disc_flow_circ_r_delta": circ_r_delta,
+            "disc_flow_rev_gap": rev_gap,
+            "disc_flow_shuffle_gap": shuffle_gap,
             "disc_flow_norm": flow_norm,
             "disc_flow_s_norm": s_norm,
             "disc_flow_a_norm": a_norm

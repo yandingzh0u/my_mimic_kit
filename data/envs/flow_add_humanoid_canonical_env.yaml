@@ -10,7 +10,7 @@ global_obs: True
 # circulation term (e.g. spinning motions) while keeping the full relative
 # tracking error, including heading error. Variant of global_obs = True;
 # feature dimensions are unchanged.
-disc_ref_heading_frame: False
+disc_ref_heading_frame: True
 root_height_obs: True
 pose_termination: True
 pose_termination_dist: 1.0 # m

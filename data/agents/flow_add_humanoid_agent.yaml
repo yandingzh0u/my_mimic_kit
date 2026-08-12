@@ -21,6 +21,12 @@ model:
   # E_S ~ scale^2 / 2; B always starts at 0, so training starts close to plain ADD
   disc_flow_init_scale: 1.0
 
+# contraction teacher for the potential branch: synthetic transitions
+# (x, c x), c ~ U[0, 1) sampled from the negative batch are labeled positive,
+# with f detached (only trains L; gradient w.r.t. B is exactly 0). Prevents
+# the S matrix from collapsing under the negative-only BCE. 0 disables.
+disc_flow_contract_weight: 0.5
+
 actor_optimizer:
     type: "SGD"
     learning_rate: 1e-4

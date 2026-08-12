@@ -60,10 +60,10 @@ def randomize_flow_matrices(model, seed=0):
     # terms are non-trivial
     gen = torch.Generator().manual_seed(seed)
     with torch.no_grad():
-        if (model._has_potential()):
+        if (model.has_potential()):
             L = model._disc_flow_potential
             L.copy_(0.3 * torch.randn(L.shape, generator=gen))
-        if (model._has_circulation()):
+        if (model.has_circulation()):
             B = model._disc_flow_circulation
             B.copy_(0.3 * torch.randn(B.shape, generator=gen))
     return
@@ -274,6 +274,192 @@ def test_disc_params_and_logit_weights(disc_mode, num_matrices):
     trunk_out = 64  # fc_2layers_128units => [128, 64]
     expected = trunk_out + num_matrices * DISC_OBS_DIM * DISC_OBS_DIM
     assert logit_weights.numel() == expected
+
+def test_eval_static_score_matches_logit_decomposition():
+    # z(x_prev, x_t) must decompose exactly as f(x_t) + q_prog + q_circ
+    model = build_model("flow")
+    randomize_flow_matrices(model)
+    disc_obs, disc_obs_prev = rand_inputs(64)
+
+    z = model.eval_disc(disc_obs, disc_obs_prev).squeeze(-1)
+    f = model.eval_static_score(disc_obs).squeeze(-1)
+    q_prog, q_circ = model.eval_flow_scores(disc_obs, disc_obs_prev)
+    assert torch.allclose(z, f + q_prog + q_circ, atol=1e-5)
+
+def test_contract_teacher_gradient_routing():
+    # the contraction teacher builds transitions (x, c x) with detached f:
+    #   - L must receive a non-zero gradient (the teacher trains S)
+    #   - B must receive an exactly-zero gradient: dq_circ/dB at (x, c x) is
+    #     x (c x)^T - (c x) x^T = 0, so the teacher cannot bias circulation
+    #   - the trunk/f head must receive no gradient (f is detached)
+    model = build_model("flow")
+    randomize_flow_matrices(model)
+
+    gen = torch.Generator().manual_seed(7)
+    x = torch.randn([64, DISC_OBS_DIM], generator=gen)
+    c = torch.rand([64, 1], generator=gen)
+    x_curr = c * x
+
+    f = model.eval_static_score(x_curr).squeeze(-1).detach()
+    q_prog, q_circ = model.eval_flow_scores(x_curr, x)
+    contract_logit = f + q_prog + q_circ
+
+    # same BCE-with-positive-label loss the agent uses
+    loss = torch.nn.functional.binary_cross_entropy_with_logits(
+        contract_logit, torch.ones_like(contract_logit))
+    loss.backward()
+
+    l_grad = model._disc_flow_potential.grad
+    b_grad = model._disc_flow_circulation.grad
+    assert l_grad is not None and torch.norm(l_grad) > 1e-6
+    assert b_grad is None or torch.all(torch.abs(b_grad) < 1e-6)
+
+    for p in model._disc_layers.parameters():
+        assert p.grad is None or torch.all(p.grad == 0)
+    assert model._disc_logits.weight.grad is None \
+        or torch.all(model._disc_logits.weight.grad == 0)
+
+    # contracting transitions get non-negative progress from a PSD S
+    q_prog_val, q_circ_val = model.eval_flow_scores(x_curr.detach(), x.detach())
+    assert torch.all(q_prog_val >= -1e-5)
+    assert torch.all(torch.abs(q_circ_val) < 1e-4)
+
+def rand_unit_quat(shape, gen):
+    import util.torch_util as torch_util
+    axis = torch.randn(list(shape) + [3], generator=gen)
+    axis = axis / torch.norm(axis, dim=-1, keepdim=True)
+    angle = 2.0 * np.pi * torch.rand(list(shape), generator=gen)
+    return torch_util.axis_angle_to_quat(axis, angle)
+
+def make_char_data(n, s, num_joints, num_bodies, gen):
+    data = {
+        "root_pos": torch.randn([n, s, 3], generator=gen),
+        "root_rot": rand_unit_quat([n, s], gen),
+        "root_vel": torch.randn([n, s, 3], generator=gen),
+        "root_ang_vel": torch.randn([n, s, 3], generator=gen),
+        "joint_rot": rand_unit_quat([n, s, num_joints], gen),
+        "dof_vel": torch.randn([n, s, num_joints], generator=gen),
+        "body_pos": torch.randn([n, s, num_bodies, 3], generator=gen),
+    }
+    return data
+
+def yaw_translate_char_data(data, yaw_quat, offset):
+    # applies a global yaw rotation (about the world origin) plus translation
+    # to a whole scene; yaw_quat: [n, 4], offset: [n, 3]
+    import util.torch_util as torch_util
+    n = yaw_quat.shape[0]
+
+    def expand_to(v, last_dim):
+        src = yaw_quat if last_dim == 4 else offset
+        shape = [n] + [1] * (v.dim() - 2) + [last_dim]
+        return src.reshape(shape).expand(list(v.shape[:-1]) + [last_dim])
+
+    def rot_vec(v):
+        return torch_util.quat_rotate(expand_to(v, 4), v)
+
+    out = {
+        "root_pos": rot_vec(data["root_pos"]) + expand_to(data["root_pos"], 3),
+        "root_rot": torch_util.quat_mul(expand_to(data["root_rot"], 4), data["root_rot"]),
+        "root_vel": rot_vec(data["root_vel"]),
+        "root_ang_vel": rot_vec(data["root_ang_vel"]),
+        "joint_rot": data["joint_rot"].clone(),
+        "dof_vel": data["dof_vel"].clone(),
+        "body_pos": rot_vec(data["body_pos"]) + expand_to(data["body_pos"], 3),
+    }
+    return out
+
+def ref_frame_obs(data, ref_root_pos, ref_root_rot):
+    import envs.flow_add_disc_obs as flow_add_disc_obs
+    return flow_add_disc_obs.compute_ref_frame_disc_obs(
+        ref_root_pos=ref_root_pos,
+        ref_root_rot=ref_root_rot,
+        root_pos=data["root_pos"],
+        root_rot=data["root_rot"],
+        root_vel=data["root_vel"],
+        root_ang_vel=data["root_ang_vel"],
+        joint_rot=data["joint_rot"],
+        dof_vel=data["dof_vel"],
+        body_pos=data["body_pos"])
+
+def test_ref_frame_disc_obs_yaw_translation_invariance():
+    # the reference-frame features must be invariant to a global yaw +
+    # translation of the whole scene (agent, demo, and reference frame all
+    # transformed together), which removes the world-rotation confound from
+    # the circulation term; the world-frame (global_obs) features are not
+    import util.torch_util as torch_util
+    import envs.add_env as add_env
+
+    gen = torch.Generator().manual_seed(11)
+    n, s, num_joints, num_bodies = 4, 2, 5, 6
+    sim = make_char_data(n, s, num_joints, num_bodies, gen)
+    demo = make_char_data(n, s, num_joints, num_bodies, gen)
+    # reference frame: demo root at the current (last) step
+    ref_pos = demo["root_pos"][:, -1]
+    ref_rot = demo["root_rot"][:, -1]
+
+    z_axis = torch.zeros([n, 3])
+    z_axis[:, 2] = 1.0
+    yaw = torch.pi * (2.0 * torch.rand([n], generator=gen) - 1.0)
+    yaw_quat = torch_util.axis_angle_to_quat(z_axis, yaw)
+    offset = torch.randn([n, 3], generator=gen)
+
+    sim_w = yaw_translate_char_data(sim, yaw_quat, offset)
+    demo_w = yaw_translate_char_data(demo, yaw_quat, offset)
+    ref_pos_w = torch_util.quat_rotate(yaw_quat, ref_pos) + offset
+    ref_rot_w = torch_util.quat_mul(yaw_quat, ref_rot)
+
+    diff = ref_frame_obs(demo, ref_pos, ref_rot) - ref_frame_obs(sim, ref_pos, ref_rot)
+    diff_w = ref_frame_obs(demo_w, ref_pos_w, ref_rot_w) - ref_frame_obs(sim_w, ref_pos_w, ref_rot_w)
+    assert torch.allclose(diff, diff_w, atol=1e-4)
+
+    # sanity check of the confound: the same transform changes the world-frame
+    # (global_obs = True) differential
+    def global_obs(data):
+        return add_env.compute_disc_obs(root_pos=data["root_pos"],
+                                        root_rot=data["root_rot"],
+                                        root_vel=data["root_vel"],
+                                        root_ang_vel=data["root_ang_vel"],
+                                        joint_rot=data["joint_rot"],
+                                        dof_vel=data["dof_vel"],
+                                        body_pos=data["body_pos"],
+                                        global_obs=True)
+
+    g_diff = global_obs(demo) - global_obs(sim)
+    g_diff_w = global_obs(demo_w) - global_obs(sim_w)
+    assert not torch.allclose(g_diff, g_diff_w, atol=1e-3)
+
+def test_ref_frame_disc_obs_perfect_tracking_is_zero():
+    # identical agent and demo states give a zero differential in the
+    # reference frame, preserving ADD's universal ideal point
+    gen = torch.Generator().manual_seed(13)
+    demo = make_char_data(3, 2, 5, 6, gen)
+    ref_pos = demo["root_pos"][:, -1]
+    ref_rot = demo["root_rot"][:, -1]
+
+    obs_demo = ref_frame_obs(demo, ref_pos, ref_rot)
+    obs_sim = ref_frame_obs({k: v.clone() for k, v in demo.items()}, ref_pos, ref_rot)
+    assert torch.allclose(obs_demo - obs_sim, torch.zeros_like(obs_demo), atol=1e-6)
+
+def test_ref_frame_disc_obs_dim_matches_global():
+    # the canonical variant must be a drop-in: same feature dimension as the
+    # global_obs = True features
+    import envs.add_env as add_env
+
+    gen = torch.Generator().manual_seed(17)
+    demo = make_char_data(2, 3, 5, 6, gen)
+    ref_pos = demo["root_pos"][:, -1]
+    ref_rot = demo["root_rot"][:, -1]
+
+    obs_ref = ref_frame_obs(demo, ref_pos, ref_rot)
+    obs_global = add_env.compute_disc_obs(root_pos=demo["root_pos"],
+                                          root_rot=demo["root_rot"],
+                                          root_vel=demo["root_vel"],
+                                          root_ang_vel=demo["root_ang_vel"],
+                                          joint_rot=demo["joint_rot"],
+                                          dof_vel=demo["dof_vel"],
+                                          body_pos=demo["body_pos"],
+                                          global_obs=True)
+    assert obs_ref.shape == obs_global.shape
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))

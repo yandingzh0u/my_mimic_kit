@@ -21,6 +21,9 @@ model:
   # E_S ~ scale^2 / 2; B always starts at 0, so training starts close to plain ADD
   disc_flow_init_scale: 1.0
 
+# plain MLP baseline: no structured flow branches, teacher inactive
+disc_flow_contract_weight: 0.0
+
 actor_optimizer:
     type: "SGD"
     learning_rate: 1e-4

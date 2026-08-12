@@ -49,17 +49,23 @@ class FlowADDModel(add_model.ADDModel):
             h = self._disc_layers(disc_in)
             logit = self._disc_logits(h)
         else:
-            h = self._disc_layers(disc_obs)
-            f = self._disc_logits(h)
+            f = self.eval_static_score(disc_obs)
 
             q_prog, q_circ = self.eval_flow_scores(disc_obs, disc_obs_prev)
             logit = f + (q_prog + q_circ).unsqueeze(-1)
         return logit
 
+    def eval_static_score(self, disc_obs):
+        """ADD's pointwise scalarizer f(x_t), without the flow terms."""
+        assert(self._disc_mode != DISC_MODE_CONCAT)
+        h = self._disc_layers(disc_obs)
+        f = self._disc_logits(h)
+        return f
+
     def eval_flow_scores(self, disc_obs, disc_obs_prev):
         assert(self._disc_mode != DISC_MODE_CONCAT)
 
-        if (self._has_potential()):
+        if (self.has_potential()):
             # q_prog = E_S(x_prev) - E_S(x_t) with E_S(x) = 0.5 |L^T x|^2
             Lx = torch.matmul(disc_obs, self._disc_flow_potential)
             Lx_prev = torch.matmul(disc_obs_prev, self._disc_flow_potential)
@@ -68,7 +74,7 @@ class FlowADDModel(add_model.ADDModel):
         else:
             q_prog = torch.zeros(disc_obs.shape[:-1], device=disc_obs.device, dtype=disc_obs.dtype)
 
-        if (self._has_circulation()):
+        if (self.has_circulation()):
             # q_circ = x_prev^T A x_t = x_prev^T B x_t - x_t^T B x_prev
             B = self._disc_flow_circulation
             q_circ = torch.sum(torch.matmul(disc_obs_prev, B) * disc_obs, dim=-1) \
@@ -78,20 +84,25 @@ class FlowADDModel(add_model.ADDModel):
 
         return q_prog, q_circ
 
+    def get_circulation_matrix(self):
+        """Returns the antisymmetric circulation matrix A = B - B^T."""
+        assert(self.has_circulation())
+        B = self._disc_flow_circulation
+        A = B - B.t()
+        return A
+
     def get_flow_matrix_norms(self):
         assert(self._disc_mode != DISC_MODE_CONCAT)
 
-        if (self._has_potential()):
+        if (self.has_potential()):
             L = self._disc_flow_potential
             S = torch.matmul(L, L.t())
             s_norm = torch.norm(S)
         else:
             s_norm = torch.zeros([1], device=self._disc_logits.weight.device)
 
-        if (self._has_circulation()):
-            B = self._disc_flow_circulation
-            A = B - B.t()
-            a_norm = torch.norm(A)
+        if (self.has_circulation()):
+            a_norm = torch.norm(self.get_circulation_matrix())
         else:
             a_norm = torch.zeros([1], device=self._disc_logits.weight.device)
 
@@ -99,24 +110,24 @@ class FlowADDModel(add_model.ADDModel):
 
     def get_disc_logit_weights(self):
         weights = [torch.flatten(self._disc_logits.weight)]
-        if (self._has_potential()):
+        if (self.has_potential()):
             weights.append(torch.flatten(self._disc_flow_potential))
-        if (self._has_circulation()):
+        if (self.has_circulation()):
             weights.append(torch.flatten(self._disc_flow_circulation))
         return torch.cat(weights)
 
     def get_disc_params(self):
         params = super().get_disc_params()
-        if (self._has_potential()):
+        if (self.has_potential()):
             params += [self._disc_flow_potential]
-        if (self._has_circulation()):
+        if (self.has_circulation()):
             params += [self._disc_flow_circulation]
         return params
 
-    def _has_potential(self):
+    def has_potential(self):
         return self._disc_mode in [DISC_MODE_FLOW, DISC_MODE_POTENTIAL]
 
-    def _has_circulation(self):
+    def has_circulation(self):
         return self._disc_mode in [DISC_MODE_FLOW, DISC_MODE_CIRCULATION]
 
     def _build_disc(self, config, env):
@@ -140,7 +151,7 @@ class FlowADDModel(add_model.ADDModel):
             diff_dim = int(np.prod(disc_obs_space.shape))
             flow_init_scale = config.get("disc_flow_init_scale", 1.0)
 
-            if (self._has_potential()):
+            if (self.has_potential()):
                 # small random init: S = L L^T is quadratic in L, so L = 0 is a
                 # saddle point with zero gradient and a too small init starves
                 # the progress term of gradient signal; with std = scale / d the
@@ -149,7 +160,7 @@ class FlowADDModel(add_model.ADDModel):
                 L0 = torch.randn([diff_dim, diff_dim]) * (flow_init_scale / diff_dim)
                 self._disc_flow_potential = torch.nn.Parameter(L0)
 
-            if (self._has_circulation()):
+            if (self.has_circulation()):
                 # q_circ is linear in B, so B = 0 has non-zero gradient and the
                 # model starts exactly as ADD (A = 0)
                 self._disc_flow_circulation = torch.nn.Parameter(torch.zeros([diff_dim, diff_dim]))
