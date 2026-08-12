@@ -5,27 +5,35 @@ import learning.add_model as add_model
 import learning.nets.net_builder as net_builder
 import util.torch_util as torch_util
 
-# structured differential-flow discriminator (FlowADD)
+# full potential-circulation flow discriminator (FlowADD-P+C)
 DISC_MODE_FLOW = "flow"
-# radial-only ablation, tangential component disabled
-DISC_MODE_RADIAL = "radial"
-# plain MLP on the concatenated input [delta, v] (Concat-ADD baseline)
+# potential (progress) term only (FlowADD-P ablation)
+DISC_MODE_POTENTIAL = "potential"
+# circulation term only (FlowADD-C ablation)
+DISC_MODE_CIRCULATION = "circulation"
+# plain MLP on the concatenated input [x_t, v_t] (Concat-ADD baseline)
 DISC_MODE_CONCAT = "concat"
 
-DISC_MODES = [DISC_MODE_FLOW, DISC_MODE_RADIAL, DISC_MODE_CONCAT]
+DISC_MODES = [DISC_MODE_FLOW, DISC_MODE_POTENTIAL, DISC_MODE_CIRCULATION, DISC_MODE_CONCAT]
 
 class FlowADDModel(add_model.ADDModel):
     """ADD discriminator extended from pointwise differential scalarization
-    D(delta) to differential-flow scalarization D(delta, v), where
-    v_t = norm(delta_t) - norm(delta_t-1) is the flow of the tracking-error
-    differential.
+    D(x_t) to a potential-circulation differential-flow scalarization
+    D(x_t-1, x_t), where x_t is the normalized tracking-error differential.
 
-    For disc_mode "flow"/"radial" the logit is:
-        z(delta, v) = f(delta) + q(delta, v)
-        q(delta, v) = A(delta)^T v - 0.5 * v^T G(delta) v,  A = G v*
-        v*(delta)   = -alpha(delta) * delta + |delta| * P_perp(delta) u(delta)
-    with alpha > 0 (softplus) and G diagonal positive definite, so that q is
-    strictly concave in v, maximized at the preferred flow v*, and q(delta, 0) = 0.
+    For the structured modes the logit is:
+        z = f(x_t) + q(x_t-1, x_t)
+        q = q_prog + q_circ
+        q_prog = E_S(x_t-1) - E_S(x_t),  E_S(x) = 0.5 x^T S x,  S = L L^T >= 0
+        q_circ = x_t-1^T A x_t,          A = B - B^T (antisymmetric)
+
+    q_prog scores whether the error energy is making progress toward the ideal
+    point, q_circ scores the oriented rotation of the error vector across
+    objectives (it vanishes for pure scaling x_t = c * x_t-1 and flips sign
+    under time reversal). No state-conditioned preferred flow is assumed, so
+    the same x can evolve differently in different motions. With S = A = 0 the
+    model reduces exactly to ADD, and the ideal point (0, 0) stays the single
+    universal positive sample.
     """
     def __init__(self, config, env):
         super().__init__(config, env)
@@ -34,8 +42,9 @@ class FlowADDModel(add_model.ADDModel):
     def get_disc_mode(self):
         return self._disc_mode
 
-    def eval_disc(self, disc_obs, disc_flow):
+    def eval_disc(self, disc_obs, disc_obs_prev):
         if (self._disc_mode == DISC_MODE_CONCAT):
+            disc_flow = disc_obs - disc_obs_prev
             disc_in = torch.cat([disc_obs, disc_flow], dim=-1)
             h = self._disc_layers(disc_in)
             logit = self._disc_logits(h)
@@ -43,44 +52,76 @@ class FlowADDModel(add_model.ADDModel):
             h = self._disc_layers(disc_obs)
             f = self._disc_logits(h)
 
-            v_star, _, G = self._eval_flow(disc_obs, h)
-            # q(delta, v) = (G v*)^T v - 0.5 v^T G v, G diagonal
-            # q(delta, 0) = 0 and argmax_v q(delta, v) = v*
-            q = torch.sum(G * v_star * disc_flow, dim=-1, keepdim=True) \
-                - 0.5 * torch.sum(G * torch.square(disc_flow), dim=-1, keepdim=True)
-            logit = f + q
+            q_prog, q_circ = self.eval_flow_scores(disc_obs, disc_obs_prev)
+            logit = f + (q_prog + q_circ).unsqueeze(-1)
         return logit
 
-    def eval_disc_flow(self, disc_obs):
+    def eval_flow_scores(self, disc_obs, disc_obs_prev):
         assert(self._disc_mode != DISC_MODE_CONCAT)
-        h = self._disc_layers(disc_obs)
-        v_star, v_star_tan, G = self._eval_flow(disc_obs, h)
-        return v_star, v_star_tan, G
+
+        if (self._has_potential()):
+            # q_prog = E_S(x_prev) - E_S(x_t) with E_S(x) = 0.5 |L^T x|^2
+            Lx = torch.matmul(disc_obs, self._disc_flow_potential)
+            Lx_prev = torch.matmul(disc_obs_prev, self._disc_flow_potential)
+            q_prog = 0.5 * (torch.sum(torch.square(Lx_prev), dim=-1)
+                            - torch.sum(torch.square(Lx), dim=-1))
+        else:
+            q_prog = torch.zeros(disc_obs.shape[:-1], device=disc_obs.device, dtype=disc_obs.dtype)
+
+        if (self._has_circulation()):
+            # q_circ = x_prev^T A x_t = x_prev^T B x_t - x_t^T B x_prev
+            B = self._disc_flow_circulation
+            q_circ = torch.sum(torch.matmul(disc_obs_prev, B) * disc_obs, dim=-1) \
+                     - torch.sum(torch.matmul(disc_obs, B) * disc_obs_prev, dim=-1)
+        else:
+            q_circ = torch.zeros(disc_obs.shape[:-1], device=disc_obs.device, dtype=disc_obs.dtype)
+
+        return q_prog, q_circ
+
+    def get_flow_matrix_norms(self):
+        assert(self._disc_mode != DISC_MODE_CONCAT)
+
+        if (self._has_potential()):
+            L = self._disc_flow_potential
+            S = torch.matmul(L, L.t())
+            s_norm = torch.norm(S)
+        else:
+            s_norm = torch.zeros([1], device=self._disc_logits.weight.device)
+
+        if (self._has_circulation()):
+            B = self._disc_flow_circulation
+            A = B - B.t()
+            a_norm = torch.norm(A)
+        else:
+            a_norm = torch.zeros([1], device=self._disc_logits.weight.device)
+
+        return s_norm, a_norm
 
     def get_disc_logit_weights(self):
         weights = [torch.flatten(self._disc_logits.weight)]
-        if (self._disc_mode != DISC_MODE_CONCAT):
-            weights.append(torch.flatten(self._disc_flow_alpha.weight))
-            weights.append(torch.flatten(self._disc_flow_metric.weight))
-            if (self._disc_mode == DISC_MODE_FLOW):
-                weights.append(torch.flatten(self._disc_flow_tangent.weight))
+        if (self._has_potential()):
+            weights.append(torch.flatten(self._disc_flow_potential))
+        if (self._has_circulation()):
+            weights.append(torch.flatten(self._disc_flow_circulation))
         return torch.cat(weights)
 
     def get_disc_params(self):
         params = super().get_disc_params()
-        if (self._disc_mode != DISC_MODE_CONCAT):
-            params += list(self._disc_flow_alpha.parameters())
-            params += list(self._disc_flow_metric.parameters())
-            if (self._disc_mode == DISC_MODE_FLOW):
-                params += list(self._disc_flow_tangent.parameters())
+        if (self._has_potential()):
+            params += [self._disc_flow_potential]
+        if (self._has_circulation()):
+            params += [self._disc_flow_circulation]
         return params
+
+    def _has_potential(self):
+        return self._disc_mode in [DISC_MODE_FLOW, DISC_MODE_POTENTIAL]
+
+    def _has_circulation(self):
+        return self._disc_mode in [DISC_MODE_FLOW, DISC_MODE_CIRCULATION]
 
     def _build_disc(self, config, env):
         self._disc_mode = config.get("disc_mode", DISC_MODE_FLOW)
         assert(self._disc_mode in DISC_MODES), "Unsupported disc_mode: {}".format(self._disc_mode)
-
-        self._disc_flow_g_min = config.get("disc_flow_g_min", 1e-3)
-        self._disc_flow_proj_eps = config.get("disc_flow_proj_eps", 1e-6)
 
         init_output_scale = 1.0
         net_name = config["disc_net"]
@@ -97,22 +138,21 @@ class FlowADDModel(add_model.ADDModel):
         if (self._disc_mode != DISC_MODE_CONCAT):
             disc_obs_space = env.get_disc_obs_space()
             diff_dim = int(np.prod(disc_obs_space.shape))
+            flow_init_scale = config.get("disc_flow_init_scale", 1.0)
 
-            # zero init: alpha = softplus(0) > 0 gives an inward radial flow prior,
-            # G = softplus(0) + g_min is well conditioned, u = 0 disables the
-            # tangential flow at init, so training starts close to plain ADD
-            self._disc_flow_alpha = torch.nn.Linear(layers_out_size, 1)
-            torch.nn.init.zeros_(self._disc_flow_alpha.weight)
-            torch.nn.init.zeros_(self._disc_flow_alpha.bias)
+            if (self._has_potential()):
+                # small random init: S = L L^T is quadratic in L, so L = 0 is a
+                # saddle point with zero gradient and a too small init starves
+                # the progress term of gradient signal; with std = scale / d the
+                # initial error energy is E_S(x) ~ scale^2 / 2 for normalized x,
+                # small relative to the f logits but with healthy gradients
+                L0 = torch.randn([diff_dim, diff_dim]) * (flow_init_scale / diff_dim)
+                self._disc_flow_potential = torch.nn.Parameter(L0)
 
-            self._disc_flow_metric = torch.nn.Linear(layers_out_size, diff_dim)
-            torch.nn.init.zeros_(self._disc_flow_metric.weight)
-            torch.nn.init.zeros_(self._disc_flow_metric.bias)
-
-            if (self._disc_mode == DISC_MODE_FLOW):
-                self._disc_flow_tangent = torch.nn.Linear(layers_out_size, diff_dim)
-                torch.nn.init.zeros_(self._disc_flow_tangent.weight)
-                torch.nn.init.zeros_(self._disc_flow_tangent.bias)
+            if (self._has_circulation()):
+                # q_circ is linear in B, so B = 0 has non-zero gradient and the
+                # model starts exactly as ADD (A = 0)
+                self._disc_flow_circulation = torch.nn.Parameter(torch.zeros([diff_dim, diff_dim]))
         return
 
     def _build_disc_input_dict(self, env):
@@ -121,26 +161,3 @@ class FlowADDModel(add_model.ADDModel):
         if (self._disc_mode == DISC_MODE_CONCAT):
             input_dict["disc_flow"] = obs_space
         return input_dict
-
-    def _eval_flow(self, disc_obs, h):
-        # v*(delta) = -alpha(delta) * delta + |delta| * P_perp(delta) u(delta)
-        alpha = torch.nn.functional.softplus(self._disc_flow_alpha(h))
-        G = torch.nn.functional.softplus(self._disc_flow_metric(h)) + self._disc_flow_g_min
-
-        v_star_tan = self._eval_tangential_flow(disc_obs, h)
-        v_star = -alpha * disc_obs + v_star_tan
-        return v_star, v_star_tan, G
-
-    def _eval_tangential_flow(self, disc_obs, h):
-        if (self._disc_mode != DISC_MODE_FLOW):
-            return torch.zeros_like(disc_obs)
-
-        u = self._disc_flow_tangent(h)
-        delta_sq = torch.sum(torch.square(disc_obs), dim=-1, keepdim=True)
-        # P_perp(delta) u = u - delta (delta^T u) / (|delta|^2 + eps)
-        proj = torch.sum(disc_obs * u, dim=-1, keepdim=True) / (delta_sq + self._disc_flow_proj_eps)
-        u_perp = u - proj * disc_obs
-        # eps inside the sqrt keeps the gradient finite at delta = 0, which is
-        # required for the gradient penalty on the ideal point (delta, v) = (0, 0)
-        v_star_tan = torch.sqrt(delta_sq + self._disc_flow_proj_eps) * u_perp
-        return v_star_tan

@@ -8,22 +8,16 @@ import util.torch_util as torch_util
 FLOW_STAT_SAMPLES = 4096
 
 class FlowADDAgent(add_agent.ADDAgent):
-    """ADD agent with a differential-flow discriminator D(delta, v).
+    """ADD agent with a potential-circulation differential-flow discriminator
+    D(x_t-1, x_t).
 
-    delta_t is ADD's tracking-error differential and
-    v_t = norm(delta_t) - norm(delta_t-1) is its per-step flow, computed in the
-    same normalized differential space. Positive samples are the ideal point
-    (delta, v) = (0, 0), negatives are policy samples (delta_t, v_t), and the
-    gradient penalty is applied on the joint input [delta, v].
+    x_t is ADD's tracking-error differential in the normalized differential
+    space. Positive samples are the ideal transition (x_t-1, x_t) = (0, 0),
+    negatives are policy transitions, and the gradient penalty is applied on
+    the joint input [x_t-1, x_t]. The reward stays -log(1 - D).
     """
     def __init__(self, config, env, device):
         super().__init__(config, env, device)
-        return
-
-    def _load_params(self, config):
-        super()._load_params(config)
-        self._disc_flow_scale = config.get("disc_flow_scale", 1.0)
-        self._disc_flow_shuffle = config.get("disc_flow_shuffle", False)
         return
 
     def _build_model(self, config):
@@ -74,12 +68,8 @@ class FlowADDAgent(add_agent.ADDAgent):
 
         norm_obs_diff = self._disc_obs_norm.normalize(obs_diff)
         norm_obs_diff_prev = self._disc_obs_norm.normalize(obs_diff_prev)
-        disc_flow = self._compute_disc_flow(norm_obs_diff, norm_obs_diff_prev)
 
-        if (self._disc_flow_shuffle):
-            disc_flow = self._shuffle_flow(disc_flow)
-
-        disc_r = self._calc_disc_rewards(norm_obs_diff, disc_flow)
+        disc_r = self._calc_disc_rewards(norm_obs_diff, norm_obs_diff_prev)
         disc_reward_std, disc_reward_mean = torch.std_mean(disc_r)
 
         r = self._task_reward_weight * task_r + self._disc_reward_weight * disc_r
@@ -92,13 +82,13 @@ class FlowADDAgent(add_agent.ADDAgent):
             "disc_reward_mean": disc_reward_mean,
             "disc_reward_std": disc_reward_std
         }
-        flow_info = self._compute_flow_stats(norm_obs_diff, disc_flow)
+        flow_info = self._compute_flow_stats(norm_obs_diff, norm_obs_diff_prev)
         info.update(flow_info)
         return info
 
-    def _calc_disc_rewards(self, norm_obs_diff, disc_flow):
+    def _calc_disc_rewards(self, norm_obs_diff, norm_obs_diff_prev):
         with torch.no_grad():
-            disc_inputs = {"disc_obs": norm_obs_diff, "disc_flow": disc_flow}
+            disc_inputs = {"disc_obs": norm_obs_diff, "disc_obs_prev": norm_obs_diff_prev}
             disc_logits = torch_util.eval_minibatch(self._model.eval_disc, disc_inputs, self._disc_eval_batch_size)
             disc_logits = disc_logits.squeeze(-1)
             prob = 1 / (1 + torch.exp(-disc_logits))
@@ -112,13 +102,13 @@ class FlowADDAgent(add_agent.ADDAgent):
         disc_obs_prev = batch["disc_obs_prev"]
         tar_disc_obs_prev = batch["disc_obs_demo_prev"]
 
-        # positive sample is the ideal point (delta, v) = (0, 0)
+        # positive sample is the ideal transition (x_t-1, x_t) = (0, 0)
         pos_diff = self._pos_diff.clone()
         pos_diff = pos_diff.unsqueeze(dim=0)
-        pos_flow = torch.zeros_like(pos_diff)
+        pos_diff_prev = torch.zeros_like(pos_diff)
         pos_diff.requires_grad_(True)
-        pos_flow.requires_grad_(True)
-        disc_pos_logit = self._model.eval_disc(pos_diff, pos_flow)
+        pos_diff_prev.requires_grad_(True)
+        disc_pos_logit = self._model.eval_disc(pos_diff, pos_diff_prev)
         disc_pos_logit = disc_pos_logit.squeeze(-1)
 
         diff_obs = tar_disc_obs - disc_obs
@@ -132,16 +122,9 @@ class FlowADDAgent(add_agent.ADDAgent):
 
         norm_diff_obs = self._disc_obs_norm.normalize(diff_obs)
         norm_diff_obs_prev = self._disc_obs_norm.normalize(diff_obs_prev)
-        flow_obs = self._compute_disc_flow(norm_diff_obs, norm_diff_obs_prev)
-
-        if (self._disc_flow_shuffle):
-            flow_obs = self._shuffle_flow(flow_obs)
-
-        norm_diff_obs = norm_diff_obs.detach()
-        flow_obs = flow_obs.detach()
         norm_diff_obs.requires_grad_(True)
-        flow_obs.requires_grad_(True)
-        disc_neg_logit = self._model.eval_disc(norm_diff_obs, flow_obs)
+        norm_diff_obs_prev.requires_grad_(True)
+        disc_neg_logit = self._model.eval_disc(norm_diff_obs, norm_diff_obs_prev)
         disc_neg_logit = disc_neg_logit.squeeze(-1)
 
         disc_loss_pos = self._disc_loss_pos(disc_pos_logit)
@@ -153,14 +136,14 @@ class FlowADDAgent(add_agent.ADDAgent):
         disc_logit_loss = torch.sum(torch.square(logit_weights))
         disc_loss += self._disc_logit_reg * disc_logit_loss
 
-        # grad penalty on the joint input x = [delta, v]
-        disc_neg_grads = torch.autograd.grad(disc_neg_logit, [norm_diff_obs, flow_obs],
+        # grad penalty on the joint input [x_t-1, x_t]
+        disc_neg_grads = torch.autograd.grad(disc_neg_logit, [norm_diff_obs, norm_diff_obs_prev],
                                              grad_outputs=torch.ones_like(disc_neg_logit),
                                              create_graph=True, retain_graph=True, only_inputs=True)
         disc_neg_grad_squared = torch.sum(torch.square(disc_neg_grads[0]), dim=-1) \
                                 + torch.sum(torch.square(disc_neg_grads[1]), dim=-1)
 
-        disc_pos_grads = torch.autograd.grad(disc_pos_logit, [pos_diff, pos_flow],
+        disc_pos_grads = torch.autograd.grad(disc_pos_logit, [pos_diff, pos_diff_prev],
                                              grad_outputs=torch.ones_like(disc_pos_logit),
                                              create_graph=True, retain_graph=True, only_inputs=True)
         disc_pos_grad_squared = torch.sum(torch.square(disc_pos_grads[0]), dim=-1) \
@@ -184,20 +167,7 @@ class FlowADDAgent(add_agent.ADDAgent):
         }
         return disc_info
 
-    def _compute_disc_flow(self, norm_obs_diff, norm_obs_diff_prev):
-        disc_flow = norm_obs_diff - norm_obs_diff_prev
-        if (self._disc_flow_scale != 1.0):
-            disc_flow = self._disc_flow_scale * disc_flow
-        return disc_flow
-
-    def _shuffle_flow(self, disc_flow):
-        # FlowADD-Shuffle ablation: break the pairing between delta_t and v_t
-        n = disc_flow.shape[0]
-        rand_idx = torch.randperm(n, device=disc_flow.device, dtype=torch.long)
-        disc_flow = disc_flow[rand_idx]
-        return disc_flow
-
-    def _compute_flow_stats(self, norm_obs_diff, disc_flow):
+    def _compute_flow_stats(self, norm_obs_diff, norm_obs_diff_prev):
         if (self._model.get_disc_mode() == flow_add_model.DISC_MODE_CONCAT):
             return dict()
 
@@ -206,27 +176,25 @@ class FlowADDAgent(add_agent.ADDAgent):
             num_samples = min(n, FLOW_STAT_SAMPLES)
             idx = torch.randperm(n, device=self._device, dtype=torch.long)[:num_samples]
             diff = norm_obs_diff[idx]
-            flow = disc_flow[idx]
+            diff_prev = norm_obs_diff_prev[idx]
 
-            v_star, v_star_tan, G = self._model.eval_disc_flow(diff)
+            q_prog, q_circ = self._model.eval_flow_scores(diff, diff_prev)
 
             eps = 1e-8
-            # flow alignment: cos(v_t, v*(delta_t))
-            flow_cos = torch.sum(flow * v_star, dim=-1) \
-                       / (torch.norm(flow, dim=-1) * torch.norm(v_star, dim=-1) + eps)
-            flow_alignment = torch.mean(flow_cos)
+            # mean signed progress: > 0 means the error energy E_S is shrinking
+            prog_mean = torch.mean(q_prog)
+            # fraction of the flow score magnitude carried by the circulation term
+            circ_ratio = torch.mean(torch.abs(q_circ)) \
+                         / (torch.mean(torch.abs(q_prog)) + torch.mean(torch.abs(q_circ)) + eps)
 
-            # tangential contribution ratio R_perp = E|q_tan| / E|q|
-            q_tan = torch.sum(G * v_star_tan * flow, dim=-1)
-            q_total = torch.sum(G * v_star * flow, dim=-1) \
-                      - 0.5 * torch.sum(G * torch.square(flow), dim=-1)
-            tan_ratio = torch.mean(torch.abs(q_tan)) / (torch.mean(torch.abs(q_total)) + eps)
-
-            flow_norm = torch.mean(torch.norm(flow, dim=-1))
+            flow_norm = torch.mean(torch.norm(diff - diff_prev, dim=-1))
+            s_norm, a_norm = self._model.get_flow_matrix_norms()
 
         info = {
-            "disc_flow_alignment": flow_alignment,
-            "disc_flow_tan_ratio": tan_ratio,
-            "disc_flow_norm": flow_norm
+            "disc_flow_prog_mean": prog_mean,
+            "disc_flow_circ_ratio": circ_ratio,
+            "disc_flow_norm": flow_norm,
+            "disc_flow_s_norm": s_norm,
+            "disc_flow_a_norm": a_norm
         }
         return info
