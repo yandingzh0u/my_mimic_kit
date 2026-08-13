@@ -313,7 +313,7 @@ class FakeEnv:
     def get_disc_traj_rot_obs_dim(self):
         return ROT_DIM
 
-def make_model():
+def make_model(fusion="mean", tau=2.0):
     config = {
         "actor_net": "fc_2layers_128units",
         "actor_init_output_scale": 0.01,
@@ -323,6 +323,8 @@ def make_model():
         "disc_state_net": "fc_2layers_128units",
         "disc_motion_net": "fc_2layers_128units",
         "disc_rot_net": "fc_2layers_128units",
+        "disc_fusion": fusion,
+        "disc_fusion_tau": tau,
     }
     torch.manual_seed(0)
     return st_add_model.STADDModel(config, FakeEnv())
@@ -402,3 +404,101 @@ def test_reward_strictly_positive():
     z = torch.linspace(-30.0, 30.0, 101)
     r = 2.0 * torch.nn.functional.softplus(z)
     assert torch.all(r > 0)
+
+# ---------------------------------------------------------------------------
+# ZA-STADD: zero-anchored smooth-Tchebycheff fusion
+# ---------------------------------------------------------------------------
+
+def test_za_tau_inf_equals_mean():
+    """tau -> inf recovers ST-ADD mean fusion exactly (same seed => same
+    branch weights, so the fused logits must match)."""
+    model_mean = make_model("mean")
+    model_za = make_model("za", tau=1e4)
+    x = rand_disc_obs()
+    _, _, _, z_mean = model_mean.eval_disc_branches(x)
+    _, _, _, z_za = model_za.eval_disc_branches(x)
+    # residual O(1/tau) bottleneck term + float32 rounding amplified by tau
+    assert torch.allclose(z_za, z_mean, atol=1e-2)
+
+def test_za_small_tau_is_bottleneck():
+    """tau -> 0 approaches mean(b) - max_i d_i (worst anchored deficit)."""
+    model = make_model("za", tau=1e-4)
+    x = rand_disc_obs()
+    z_s, z_m, z_r, z_f = model.eval_disc_branches(x)
+    b = model.eval_zero_anchor()
+    d = b - torch.cat([z_s, z_m, z_r], dim=-1)
+    expected = torch.mean(b, dim=-1, keepdim=True) - torch.max(d, dim=-1, keepdim=True).values
+    # finite-tau residual is tau*log(3) ~= 1e-4
+    assert torch.allclose(z_f, expected, atol=1e-3)
+
+def test_za_zero_input_equals_anchor_mean():
+    """At the universal ADD ideal point the fused logit equals mean(z(0)) for
+    both fusion modes: the positive sample semantics are unchanged."""
+    for fusion in ("mean", "za"):
+        model = make_model(fusion, tau=1.5)
+        zeros = torch.zeros([1, TOTAL_DIM])
+        z_f = model.eval_disc(zeros)
+        b = model.eval_zero_anchor()
+        assert torch.allclose(z_f, torch.mean(b, dim=-1, keepdim=True), atol=1e-6), fusion
+
+def test_za_additive_bias_invariance():
+    """Adding a constant bias to one branch head leaves the deficits and the
+    bottleneck attention unchanged (the anchor absorbs it); the fused logit
+    shifts by exactly bias/3, same as mean fusion."""
+    model = make_model("za", tau=2.0)
+    x = rand_disc_obs()
+
+    z_s, z_m, z_r, z_f = model.eval_disc_branches(x)
+    b = model.eval_zero_anchor()
+    d = b - torch.cat([z_s, z_m, z_r], dim=-1)
+    w = torch.softmax(d / 2.0, dim=-1)
+
+    bias = 5.0
+    with torch.no_grad():
+        model._disc_state_logits.bias += bias
+
+    z_s2, z_m2, z_r2, z_f2 = model.eval_disc_branches(x)
+    b2 = model.eval_zero_anchor()
+    d2 = b2 - torch.cat([z_s2, z_m2, z_r2], dim=-1)
+    w2 = torch.softmax(d2 / 2.0, dim=-1)
+
+    assert torch.allclose(d2, d, atol=1e-5)
+    assert torch.allclose(w2, w, atol=1e-5)
+    assert torch.allclose(z_f2, z_f + bias / 3.0, atol=1e-5)
+
+def test_za_gradient_weights_are_softmax():
+    """Local sensitivity of the fused logit to branch logit i is
+    w_i = softmax(d/tau)_i (automatic bottleneck attention): a small change
+    in one branch logit moves the fused logit by w_i times that change."""
+    tau = 1.7
+    model = make_model("za", tau=tau)
+    x = rand_disc_obs(n=1)
+
+    z_s, z_m, z_r, z_f = model.eval_disc_branches(x)
+    b = model.eval_zero_anchor()
+    d = b - torch.cat([z_s, z_m, z_r], dim=-1)
+    w = torch.softmax(d / tau, dim=-1)
+
+    # perturb only the rotation segment of the input: only z_r moves, so
+    # dz_fused ~= w_r * dz_rot
+    x2 = x.clone()
+    x2[:, STATE_DIM + MOTION_DIM:] += 1e-3
+    z_s2, z_m2, z_r2, z_f2 = model.eval_disc_branches(x2)
+    assert torch.allclose(z_s2, z_s, atol=0) and torch.allclose(z_m2, z_m, atol=0)
+    dz_rot = (z_r2 - z_r).item()
+    dz_fused = (z_f2 - z_f).item()
+    assert abs(dz_fused - w[0, 2].item() * dz_rot) < 5e-6 + 5e-3 * abs(dz_rot)
+
+def test_za_anchor_detached_in_fusion():
+    """The fused logit backpropagates through the live branch logits but the
+    anchor path is detached; gradients stay finite and reach every branch."""
+    model = make_model("za", tau=2.0)
+    x = rand_disc_obs()
+    x.requires_grad_(True)
+    _, _, _, z_f = model.eval_disc_branches(x)
+    z_f.sum().backward()
+    assert torch.all(torch.isfinite(x.grad))
+    # all three branch encoders receive gradient through the fused logit
+    for mod in (model._disc_state_layers, model._disc_motion_layers, model._disc_rot_layers):
+        grads = [p.grad for p in mod.parameters()]
+        assert any(g is not None and torch.any(g != 0) for g in grads)

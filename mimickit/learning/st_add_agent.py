@@ -101,6 +101,21 @@ class STADDAgent(add_agent.ADDAgent):
         disc_neg_acc, disc_pos_acc = self._compute_disc_acc(neg_fused_logit, pos_fused_logit)
         rot_neg_acc, rot_pos_acc = self._compute_disc_acc(neg_rot_logit, pos_rot_logit)
 
+        # zero-anchored fusion diagnostics: per-branch deficits d = z(0) - z
+        # on the policy batch and the resulting bottleneck attention
+        # w = softmax(d / tau) (uniform 1/3 for mean fusion)
+        with torch.no_grad():
+            anchor = self._model.eval_zero_anchor()
+            z_neg = torch.stack([neg_state_logit, neg_motion_logit, neg_rot_logit], dim=-1)
+            deficit = anchor - z_neg
+            if (self._model.get_fusion_mode() == "za"):
+                fuse_w = torch.softmax(deficit / self._model.get_fusion_tau(), dim=-1)
+            else:
+                fuse_w = torch.full_like(deficit, 1.0 / 3.0)
+            deficit_mean = torch.mean(deficit, dim=0)
+            fuse_w_mean = torch.mean(fuse_w, dim=0)
+            anchor_mean = torch.mean(anchor)
+
         disc_info = {
             "disc_loss": disc_loss,
             "disc_grad_penalty": disc_grad_penalty.detach(),
@@ -116,5 +131,12 @@ class STADDAgent(add_agent.ADDAgent):
             "disc_rot_pos_logit": torch.mean(pos_rot_logit).detach(),
             "disc_rot_neg_acc": rot_neg_acc.detach(),
             "disc_rot_pos_acc": rot_pos_acc.detach(),
+            "disc_anchor": anchor_mean,
+            "disc_d_state": deficit_mean[0],
+            "disc_d_motion": deficit_mean[1],
+            "disc_d_rot": deficit_mean[2],
+            "disc_w_state": fuse_w_mean[0],
+            "disc_w_motion": fuse_w_mean[1],
+            "disc_w_rot": fuse_w_mean[2],
         }
         return disc_info
