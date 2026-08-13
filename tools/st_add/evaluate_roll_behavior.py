@@ -46,7 +46,7 @@ sys.path.insert(0, os.path.join(REPO_DIR, "mimickit"))
 
 import envs.base_env as base_env
 import envs.env_builder as env_builder
-import envs.temporal_add_obs as temporal_add_obs
+import envs.trajectory_add_obs as trajectory_add_obs
 import learning.agent_builder as agent_builder
 import learning.base_agent as base_agent
 import util.mp_util as mp_util
@@ -89,7 +89,7 @@ def build_motion_frames(env, device):
     motion_ids = torch.arange(num_motions, device=device, dtype=torch.long)
 
     _, root_rot0, _, _, _, _ = mlib.calc_motion_frame(motion_ids, torch.zeros(num_motions, device=device))
-    anchor_inv = temporal_add_obs.calc_motion_anchor_quat_inv(root_rot0)
+    anchor_inv = trajectory_add_obs.calc_motion_anchor_quat_inv(root_rot0)
 
     lengths = mlib.get_motion_length(motion_ids)
     num_samples = 200

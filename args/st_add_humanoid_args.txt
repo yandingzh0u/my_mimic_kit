@@ -1,0 +1,5 @@
+--env_config data/envs/st_add_humanoid_roll_cycle_env.yaml
+--agent_config data/agents/st_add_humanoid_agent.yaml
+--engine_config data/engines/isaac_lab_engine.yaml
+--out_dir output/
+--max_samples 300000000

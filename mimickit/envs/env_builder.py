@@ -26,9 +26,9 @@ def build_env(env_file, engine_file, num_envs, device, visualize, record_video=F
     elif (env_name == "add"):
         import envs.add_env as add_env
         env = add_env.ADDEnv(env_config=env_config, engine_config=engine_config, num_envs=num_envs, device=device, visualize=visualize, record_video=record_video)
-    elif (env_name == "tangent_add"):
-        import envs.tangent_add_env as tangent_add_env
-        env = tangent_add_env.TangentADDEnv(env_config=env_config, engine_config=engine_config, num_envs=num_envs, device=device, visualize=visualize, record_video=record_video)
+    elif (env_name == "st_add"):
+        import envs.st_add_env as st_add_env
+        env = st_add_env.STADDEnv(env_config=env_config, engine_config=engine_config, num_envs=num_envs, device=device, visualize=visualize, record_video=record_video)
     elif (env_name == "smp"):
         import envs.smp_env as smp_env
         env = smp_env.SMPEnv(env_config=env_config, engine_config=engine_config, num_envs=num_envs, device=device, visualize=visualize, record_video=record_video)
