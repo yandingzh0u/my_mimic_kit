@@ -1,0 +1,40 @@
+ST-ADD Roll deterministic behavior evaluation
+Date: 2026-08-13
+
+Model: output/stadd_roll_cycle_1k_seed0/model.pt
+Training samples: 131072000
+Evaluation env: data/envs/st_add_humanoid_roll_eval_env.yaml
+Evaluation episodes: 128
+Evaluation episode length: 60 control steps (one 2.0 s Roll cycle)
+
+winding_ratio: mean +0.900, std 0.329, median +0.999
+disp_ratio: mean +1.207, std 0.660, median +1.364
+root_height_rmse: mean 0.075 m, std 0.082 m, median 0.050 m
+upright_rate: 0.383
+shortcut_rate (completed and winding_ratio < 0.5): 0.094
+completed: 128
+failed: 0
+
+Matched 60-step evaluation of original ADD checkpoints:
+
+ADD, 65.5M samples:
+  winding_ratio mean -0.020, median +0.018
+  disp_ratio mean +0.342
+  root_height_rmse mean 0.294 m
+  upright_rate 0.000
+  shortcut_rate 1.000
+
+ADD, 131.2M samples:
+  winding_ratio mean +0.016, median +0.015
+  disp_ratio mean +0.662
+  root_height_rmse mean 0.318 m
+  upright_rate 0.000
+  shortcut_rate 0.992
+
+Interpretation boundary:
+  ST-ADD learned directed Roll behavior at the same approximate sample budget
+  where the long-run ADD checkpoint remained in the non-rolling shortcut.
+  ST-ADD used a 60-step training horizon while the long-run ADD checkpoint
+  used a 300-step horizon, so the current evidence establishes the success of
+  the complete ST-ADD training configuration, not an isolated causal effect
+  of the rotation branch alone.
