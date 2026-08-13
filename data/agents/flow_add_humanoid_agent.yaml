@@ -22,8 +22,7 @@ model:
   disc_flow_potential_group_weights: [0.25, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125]
   disc_flow_potential_group_names: [root_pos, root_rot, joint_rot, body_pos, root_vel, root_ang, dof_vel]
 
-# Calibrated on the no-early-termination Roll track; see
-# flow_add_humanoid_no_et_agent.yaml for the per-term rationale.
+# Calibrated on the Roll track (centered_log_d + potential shaping).
 disc_reward_type: "centered_log_d"
 disc_reward_min: -0.5
 

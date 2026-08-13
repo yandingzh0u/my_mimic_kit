@@ -9,11 +9,11 @@
 
 To train an ADD model, use the following command:
 ```
-python mimickit/run.py --mode train --num_envs 4096 --engine_config data/engines/isaac_gym_engine.yaml --env_config data/envs/add_humanoid_env.yaml --agent_config data/agents/add_humanoid_agent.yaml --visualize false --out_dir output/
+python mimickit/run.py --mode train --num_envs 4096 --engine_config data/engines/isaac_gym_engine.yaml --env_config data/envs/add_humanoid_spinkick_contact_et_env.yaml --agent_config data/agents/add_humanoid_agent.yaml --visualize false --out_dir output/
 ```
 To test an ADD model, run the following command:
 ```
-python mimickit/run.py --mode test --num_envs 4 --engine_config data/engines/isaac_gym_engine.yaml --env_config data/envs/add_humanoid_env.yaml --agent_config data/agents/add_humanoid_agent.yaml --visualize true --model_file data/models/add_humanoid_spinkick_model.pt
+python mimickit/run.py --mode test --num_envs 4 --engine_config data/engines/isaac_gym_engine.yaml --env_config data/envs/add_humanoid_spinkick_contact_et_env.yaml --agent_config data/agents/add_humanoid_agent.yaml --visualize true --model_file data/models/add_humanoid_spinkick_model.pt
 ```
 
 ## Citation

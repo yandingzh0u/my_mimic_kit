@@ -1,7 +1,7 @@
 --num_envs 4096
 
 --engine_config data/engines/isaac_gym_engine.yaml
---env_config data/envs/flow_add_humanoid_env.yaml
+--env_config data/envs/flow_add_humanoid_spinkick_contact_et_env.yaml
 --agent_config data/agents/flow_add_humanoid_agent.yaml
 
 --out_dir output/
