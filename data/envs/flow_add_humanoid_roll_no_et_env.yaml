@@ -6,7 +6,7 @@ camera_mode: "track"
 episode_length: 10.0 # seconds
 global_obs: True
 # canonicalize disc features to the reference motion's current root frame
-# (removes the world-rotation confound from the circulation term)
+# (removes the world-rotation confound from the tangent features)
 disc_ref_heading_frame: False
 root_height_obs: True
 # Match ADD paper eval: omit early-termination heuristics.

@@ -16,7 +16,7 @@ class FlowADDEnv(add_env.ADDEnv):
     and the demo are expressed in a common frame anchored at the reference
     motion's current root (heading + translation). The differential is then
     invariant to a global yaw/translation of the scene, which removes the
-    world-rotation confound from the circulation term while keeping the full
+    world-rotation confound from the tangent features while keeping the full
     relative tracking error (including heading error). Intended as a variant
     of global_obs = True; the feature dimensions are unchanged.
     """

@@ -66,42 +66,23 @@ def calc_group_abs_rewards(group_energy, base_weight, extra_group_weights):
     return group_rewards, torch.sum(group_rewards, dim=-1)
 
 
-def calc_radial_rank_loss(close_score, far_score, contraction, error, margin):
-    """Finite-margin ordering loss for synthetic pairs ``(x, c*x)``.
-
-    This supplies a dense preference inside the negative distribution without
-    declaring a non-zero error to be an ideal positive sample.  Scaling the
-    margin by ``1-c`` makes nearly identical pairs require only a small gap.
-    Scaling it by the normalized error radius makes the target continuously
-    vanish at the ideal error ``x=0``; otherwise the discriminator would be
-    asked to create a finite score difference between two identical points.
-    """
-    dim_scale = math.sqrt(error.shape[-1])
-    radius = torch.clamp(torch.norm(error, dim=-1) / dim_scale, max=1.0).detach()
-    target_gap = margin * (1.0 - contraction.squeeze(-1)) * radius
-    score_gap = close_score - far_score
-    violation = F.relu(target_gap - score_gap)
-    loss = torch.mean(torch.square(violation))
-    acc = torch.mean((score_gap >= target_gap).float())
-    return loss, acc, torch.mean(score_gap)
-
 class FlowADDAgent(add_agent.ADDAgent):
-    """ADD agent with a potential-circulation differential-flow discriminator
-    D(x_t-1, x_t).
+    """ADD agent with a tangent-error flow discriminator D(x_t-1, x_t).
 
     x_t is ADD's tracking-error differential in the normalized differential
-    space. Positive samples are the ideal transition (x_t-1, x_t) = (0, 0),
-    negatives are policy transitions, and the gradient penalty is applied on
-    the joint input [x_t-1, x_t]. The policy reward mapping is configurable;
-    the default remains ADD's ``-log(1-D)`` for backward compatibility.
+    space and the discriminator consumes [x_t, v_t] with v_t = x_t - x_t-1,
+    so the reference tangent supervises the correct motion direction
+    explicitly. Positive samples are the ideal transition (x_t-1, x_t) =
+    (0, 0), negatives are policy transitions, and the gradient penalty is
+    applied on the joint input [x_t-1, x_t]. The policy reward mapping is
+    configurable; the default remains ADD's ``-log(1-D)``.
 
-    The potential branch additionally gets a contraction teacher: synthetic
-    transitions (x, c x) with c in [0, 1) are labeled positive. Without it the
-    negative-only BCE suppresses q_prog on improving policy transitions and the
-    S matrix collapses to zero (observed in training). The static score f is
-    detached in this term and q_circ(x, c x) has exactly zero gradient w.r.t.
-    B, so the teacher only shapes the potential matrix S = L L^T toward
-    "radial contraction of the error is progress" and leaves f and A alone.
+    A fixed, group-balanced tracking-error potential can additionally shape
+    the reward outside the discriminator: a linear progress term
+    E(x_t-1) - discount * E(x_t) plus a non-positive absolute-energy term.
+    Keeping it out of the BCE avoids the label conflict where genuinely
+    improving policy transitions are still negatives and the potential gets
+    suppressed.
     """
     def __init__(self, config, env, device):
         super().__init__(config, env, device)
@@ -109,16 +90,6 @@ class FlowADDAgent(add_agent.ADDAgent):
 
     def _load_params(self, config):
         super()._load_params(config)
-
-        # weight of the contraction-teacher loss for the potential branch;
-        # 0 disables the fix (recovers the collapsing behavior)
-        self._disc_flow_contract_weight = config.get("disc_flow_contract_weight", 0.5)
-
-        # Dense ordering supervision for no-early-termination training.  All
-        # policy samples remain discriminator negatives; this teacher only
-        # says that a radial contraction c*x is preferable to x.
-        self._disc_radial_rank_weight = config.get("disc_radial_rank_weight", 0.0)
-        self._disc_radial_rank_margin = config.get("disc_radial_rank_margin", 0.25)
 
         # Keep the original ADD reward as the default.  No-ET experiments can
         # opt into the non-saturating, concave centered log-D reward.
@@ -128,8 +99,7 @@ class FlowADDAgent(add_agent.ADDAgent):
         self._disc_reward_min = config.get("disc_reward_min", None)
 
         # Fixed P reward outside the discriminator nonlinearity.  Progress and
-        # absolute energy are explicit, separately weighted components; the
-        # model config must opt out of putting P in z.
+        # absolute energy are explicit, separately weighted components.
         self._disc_flow_potential_reward_scale = config.get(
             "disc_flow_potential_reward_scale", 0.0)
         self._disc_flow_potential_fixed_norm = config.get(
@@ -183,18 +153,15 @@ class FlowADDAgent(add_agent.ADDAgent):
         model_config = config["model"]
         self._model = flow_add_model.FlowADDModel(model_config, self._env)
         if (self._use_external_potential_reward):
-            assert(self._model.has_potential())
-            assert(not self._model.is_potential_in_logit()), \
-                "Potential reward shaping requires disc_flow_potential_in_logit: false"
+            assert(self._model.has_fixed_potential()), \
+                "Potential shaping requires disc_flow_potential_group_dims/weights"
+            num_groups = self._model.get_num_potential_groups()
             if (self._disc_flow_potential_group_names is not None):
-                assert(len(self._disc_flow_potential_group_names)
-                       == len(self._model._potential_group_dims))
+                assert(len(self._disc_flow_potential_group_names) == num_groups)
             if (self._disc_flow_potential_abs_group_weights is not None):
-                assert(len(self._disc_flow_potential_abs_group_weights)
-                       == len(self._model._potential_group_dims))
+                assert(len(self._disc_flow_potential_abs_group_weights) == num_groups)
             else:
-                self._disc_flow_potential_abs_group_weights = \
-                    (0.0,) * len(self._model._potential_group_dims)
+                self._disc_flow_potential_abs_group_weights = (0.0,) * num_groups
         return
 
     def _record_data_post_step(self, next_obs, r, done, next_info):
@@ -407,82 +374,9 @@ class FlowADDAgent(add_agent.ADDAgent):
             "disc_pos_logit": disc_pos_logit_mean.detach(),
             "disc_neg_logit": disc_neg_logit_mean.detach()
         }
-
-        total_disc_loss = disc_loss
-
-        if (self._enable_contract_teacher()):
-            contract_loss, contract_acc = self._compute_contract_loss(norm_diff_obs.detach())
-            total_disc_loss = total_disc_loss + self._disc_flow_contract_weight * contract_loss
-            disc_info["disc_contract_loss"] = contract_loss.detach()
-            disc_info["disc_contract_acc"] = contract_acc.detach()
-
-        if (self._enable_radial_rank_teacher()):
-            rank_loss, rank_acc, rank_gap = self._compute_radial_rank_loss(norm_diff_obs.detach())
-            total_disc_loss = total_disc_loss + self._disc_radial_rank_weight * rank_loss
-            disc_info["disc_radial_rank_loss"] = rank_loss.detach()
-            disc_info["disc_radial_rank_acc"] = rank_acc.detach()
-            disc_info["disc_radial_rank_gap"] = rank_gap.detach()
-
-        disc_info["disc_loss"] = total_disc_loss
-
         return disc_info
 
-    def _enable_contract_teacher(self):
-        if (self._disc_flow_contract_weight <= 0):
-            return False
-        if (self._model.get_disc_mode() == flow_add_model.DISC_MODE_CONCAT):
-            return False
-        return self._model.has_potential()
-
-    def _compute_contract_loss(self, x):
-        """Contraction teacher for the potential branch.
-
-        Builds synthetic transitions (x_t-1, x_t) = (x, c x) with c ~ U[0, 1)
-        from the negative batch and labels them positive: shrinking the error
-        radially toward the ideal point is progress, for any motion. The
-        static score is detached so the teacher does not lift f on nonzero
-        errors, and q_circ(x, c x) = 0 with zero B-gradient, so only L learns
-        from this term.
-        """
-        c = torch.rand([x.shape[0], 1], device=x.device, dtype=x.dtype)
-        x_curr = c * x
-
-        f = self._model.eval_static_score(x_curr).squeeze(-1).detach()
-        q_prog, q_circ = self._model.eval_flow_scores(x_curr, x)
-        contract_logit = f + q_prog + q_circ
-
-        loss = self._disc_loss_pos(contract_logit)
-        acc = torch.mean((contract_logit > 0).float())
-        return loss, acc
-
-    def _enable_radial_rank_teacher(self):
-        if (self._disc_radial_rank_weight <= 0):
-            return False
-        return self._model.get_disc_mode() != flow_add_model.DISC_MODE_CONCAT
-
-    def _compute_radial_rank_loss(self, x):
-        """Ranks a contracted error above its source using only static f.
-
-        Unlike the potential contraction teacher, this is a relative ordering
-        constraint: both x and c*x remain policy-side errors.  Flow matrices do
-        not participate, so the teacher cannot prescribe a circulation or
-        artificially set the scale of S.
-        """
-        c = torch.rand([x.shape[0], 1], device=x.device, dtype=x.dtype)
-        x_close = c * x
-
-        far_score = self._model.eval_static_score(x).squeeze(-1)
-        close_score = self._model.eval_static_score(x_close).squeeze(-1)
-        return calc_radial_rank_loss(close_score=close_score,
-                                     far_score=far_score,
-                                     contraction=c,
-                                     error=x,
-                                     margin=self._disc_radial_rank_margin)
-
     def _compute_flow_stats(self, norm_obs_diff, norm_obs_diff_prev):
-        if (self._model.get_disc_mode() == flow_add_model.DISC_MODE_CONCAT):
-            return dict()
-
         with torch.no_grad():
             n = norm_obs_diff.shape[0]
             num_samples = min(n, FLOW_STAT_SAMPLES)
@@ -490,47 +384,7 @@ class FlowADDAgent(add_agent.ADDAgent):
             diff = norm_obs_diff[idx]
             diff_prev = norm_obs_diff_prev[idx]
 
-            f = self._model.eval_static_score(diff).squeeze(-1)
-            q_prog, q_circ = self._model.eval_flow_scores(diff, diff_prev)
             logit = self._model.eval_disc(diff, diff_prev).squeeze(-1)
-
-            external_progress_r = None
-            external_abs_r = None
-            if (self._use_external_potential_reward):
-                potential_diff = self._disc_potential_norm.normalize(
-                    self._disc_obs_norm.unnormalize(diff))
-                potential_diff_prev = self._disc_potential_norm.normalize(
-                    self._disc_obs_norm.unnormalize(diff_prev))
-                energy = self._model.eval_potential_energy(
-                    potential_diff, clip=self._disc_flow_potential_obs_clip)
-                energy_prev = self._model.eval_potential_energy(
-                    potential_diff_prev, clip=self._disc_flow_potential_obs_clip)
-                q_prog = energy_prev - self._disc_flow_potential_discount * energy
-                external_progress_r, _ = calc_fixed_potential_rewards(
-                    energy=energy,
-                    energy_prev=energy_prev,
-                    progress_scale=self._disc_flow_potential_reward_scale,
-                    progress_discount=self._disc_flow_potential_discount,
-                    abs_energy_weight=self._disc_flow_potential_abs_energy_weight)
-                group_energy = self._model.eval_potential_group_energies(
-                    potential_diff, clip=self._disc_flow_potential_obs_clip)
-                _, external_abs_r = calc_group_abs_rewards(
-                    group_energy=group_energy,
-                    base_weight=self._disc_flow_potential_abs_energy_weight,
-                    extra_group_weights=self._disc_flow_potential_abs_group_weights)
-
-            eps = 1e-8
-            # mean signed progress: > 0 means the error energy E_S is shrinking
-            prog_mean = torch.mean(q_prog)
-            # branch magnitudes: how large each term is relative to the others
-            f_abs = torch.mean(torch.abs(f))
-            prog_abs = torch.mean(torch.abs(q_prog))
-            circ_abs = torch.mean(torch.abs(q_circ))
-            # fraction of the flow score magnitude carried by the circulation term
-            circ_ratio = circ_abs / (prog_abs + circ_abs + eps)
-
-            # Actual leave-one-branch-out influence on the configured policy
-            # reward, including its nonlinearity and clipping.
             r_full = calc_flow_disc_reward(logits=logit,
                                            reward_type=self._disc_reward_type,
                                            reward_scale=self._disc_reward_scale,
@@ -544,26 +398,17 @@ class FlowADDAgent(add_agent.ADDAgent):
                                                     reward_scale=self._disc_reward_scale,
                                                     reward_min=None)
                 reward_clip_frac = torch.mean((r_unclipped < self._disc_reward_min).float())
-            if (self._model.is_potential_in_logit()):
-                prog_r_delta = torch.mean(torch.abs(
-                    r_full - calc_flow_disc_reward(logits=logit - q_prog,
-                                                   reward_type=self._disc_reward_type,
-                                                   reward_scale=self._disc_reward_scale,
-                                                   reward_min=self._disc_reward_min)))
-                abs_r_delta = torch.zeros_like(prog_r_delta)
-            elif (self._use_external_potential_reward):
-                prog_r_delta = torch.mean(torch.abs(external_progress_r))
-                abs_r_delta = torch.mean(torch.abs(external_abs_r))
-            else:
-                prog_r_delta = torch.zeros([], device=logit.device)
-                abs_r_delta = torch.zeros_like(prog_r_delta)
-            circ_r_delta = torch.mean(torch.abs(
-                r_full - calc_flow_disc_reward(logits=logit - q_circ,
-                                               reward_type=self._disc_reward_type,
-                                               reward_scale=self._disc_reward_scale,
-                                               reward_min=self._disc_reward_min)))
-            reward_circ_ratio = circ_r_delta / (
-                prog_r_delta + abs_r_delta + circ_r_delta + eps)
+
+            # tangent influence: feeding x_t-1 = x_t zeroes the tangent
+            # channel, so this measures how much the discriminator actually
+            # uses v_t, in logit units and in reward units
+            logit_static = self._model.eval_disc(diff, diff).squeeze(-1)
+            tangent_gap = torch.mean(torch.abs(logit - logit_static))
+            r_static = calc_flow_disc_reward(logits=logit_static,
+                                             reward_type=self._disc_reward_type,
+                                             reward_scale=self._disc_reward_scale,
+                                             reward_min=self._disc_reward_min)
+            tangent_r_gap = torch.mean(torch.abs(r_full - r_static))
 
             # orientation probes: how much the logit changes when the
             # transition is reversed or when x_t-1 is shuffled across the batch
@@ -575,23 +420,13 @@ class FlowADDAgent(add_agent.ADDAgent):
             shuffle_gap = torch.mean(torch.abs(logit - logit_shuf))
 
             flow_norm = torch.mean(torch.norm(diff - diff_prev, dim=-1))
-            s_norm, a_norm = self._model.get_flow_matrix_norms()
 
         info = {
-            "disc_flow_prog_mean": prog_mean,
-            "disc_flow_f_abs": f_abs,
-            "disc_flow_prog_abs": prog_abs,
-            "disc_flow_circ_abs": circ_abs,
-            "disc_flow_circ_ratio": circ_ratio,
-            "disc_flow_prog_r_delta": prog_r_delta,
-            "disc_flow_abs_r_delta": abs_r_delta,
-            "disc_flow_circ_r_delta": circ_r_delta,
-            "disc_flow_r_circ_ratio": reward_circ_ratio,
-            "disc_reward_clip_frac": reward_clip_frac,
+            "disc_flow_norm": flow_norm,
+            "disc_flow_tangent_gap": tangent_gap,
+            "disc_flow_tangent_r_gap": tangent_r_gap,
             "disc_flow_rev_gap": rev_gap,
             "disc_flow_shuffle_gap": shuffle_gap,
-            "disc_flow_norm": flow_norm,
-            "disc_flow_s_norm": s_norm,
-            "disc_flow_a_norm": a_norm
+            "disc_reward_clip_frac": reward_clip_frac
         }
         return info

@@ -7,7 +7,7 @@ episode_length: 10.0 # seconds
 global_obs: True
 # canonicalize disc features to the reference motion's current root frame
 # (heading + translation). Removes the world-rotation confound from the
-# circulation term (e.g. spinning motions) while keeping the full relative
+# tangent features (e.g. spinning motions) while keeping the full relative
 # tracking error, including heading error. Variant of global_obs = True;
 # feature dimensions are unchanged.
 disc_ref_heading_frame: False

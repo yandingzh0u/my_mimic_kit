@@ -9,26 +9,20 @@ model:
   critic_net: "fc_2layers_1024units"
 
   disc_net: "fc_2layers_1024units"
-  disc_mode: "flow"
-  disc_flow_init_scale: 1.0
+  # Tangent-error discriminator (route A): the MLP consumes [x_t, v_t] with
+  # v_t = x_t - x_t-1.  Because x = phi(ref) - phi(sim), the tangent v carries
+  # the reference motion direction explicitly, so wrong-direction motion,
+  # standing still, and lie-down/get-up shortcuts stay separable even where
+  # x_t is momentarily small.  Set false for the strict tangent-off ablation
+  # (identical parameters and graph, tangent channel zeroed).
+  disc_tangent_input: true
   # P is a fixed, group-balanced tracking-error potential used outside the
   # discriminator BCE/nonlinearity.  Layout for the 172-D humanoid ADD error:
   # root pos, root rot, joint rot, root-relative body pos, root vel,
   # root angular vel, dof vel.
-  disc_flow_potential_in_logit: false
   disc_flow_potential_group_dims: [3, 6, 84, 45, 3, 3, 28]
   disc_flow_potential_group_weights: [0.25, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125]
   disc_flow_potential_group_names: [root_pos, root_rot, joint_rot, body_pos, root_vel, root_ang, dof_vel]
-  disc_flow_regularize_matrices: false
-
-# Potential anti-collapse teacher. It only updates L; f and A are isolated.
-disc_flow_contract_weight: 0.0
-
-# With early termination disabled, most initial-policy samples are far from
-# the reference and are all discriminator negatives. Supply a dense relative
-# preference inside that negative distribution without labeling c*x positive.
-disc_radial_rank_weight: 0.0
-disc_radial_rank_margin: 0.25
 
 # The original -log(1-D)=softplus(logit) reward saturates on far negative
 # states and is convex in temporal flow. centered_log_d keeps a strong slope

@@ -5,7 +5,7 @@ so a yaw rotation of the whole scene (e.g. a spinning motion progressing
 around the world z-axis) rotates the error differential even when the
 tracking error is constant in the character's local frame. That world
 rotation shows up as signed area in differential space and confounds the
-circulation term.
+tangent (differential-flow) features.
 
 These functions express both the agent's and the demo's features in a common
 frame anchored at the reference motion's current root (heading-only rotation

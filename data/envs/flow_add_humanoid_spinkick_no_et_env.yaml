@@ -10,9 +10,11 @@ global_obs: True
 # tangent features (e.g. spinning motions) while keeping the full relative
 # tracking error, including heading error. Variant of global_obs = True;
 # feature dimensions are unchanged.
-disc_ref_heading_frame: True
+disc_ref_heading_frame: False
 root_height_obs: True
-pose_termination: True
+# No early-termination: matches ADD-paper-style eval and avoids gaming
+# centered_log_d negative rewards via early fall.
+pose_termination: False
 pose_termination_dist: 1.0 # m
 enable_phase_obs: False
 enable_tar_obs: True
@@ -25,11 +27,9 @@ log_tracking_error: True
 ref_char_offset: [2.0, 0.0, 0.0] # m
 init_pose: [0, 0, 0.882416, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1.5708, 0, 0, 0, -1.5708, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
-enable_early_termination: True
+enable_early_termination: False
 key_bodies: ["head", "right_hand", "left_hand", "right_foot", "left_foot"]
 contact_bodies: ["right_foot", "left_foot"]
-#contact_bodies: ["right_hand", "left_hand", "right_foot", "left_foot"] # cartwheel
-#contact_bodies: [] # roll and crawl
 
 motion_file: "data/motions/humanoid/humanoid_spinkick.pkl"
 

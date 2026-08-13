@@ -11,9 +11,11 @@ model:
   disc_net: "fc_2layers_1024units"
   # Tangent-error discriminator (route A): the MLP consumes [x_t, v_t] with
   # v_t = x_t - x_t-1.  Because x = phi(ref) - phi(sim), the tangent v carries
-  # the reference motion direction explicitly.  Set false for the strict
-  # tangent-off ablation (identical parameters and graph, tangent zeroed).
-  disc_tangent_input: true
+  # the reference motion direction explicitly, so wrong-direction motion,
+  # standing still, and lie-down/get-up shortcuts stay separable even where
+  # x_t is momentarily small.  Set false for the strict tangent-off ablation
+  # (identical parameters and graph, tangent channel zeroed).
+  disc_tangent_input: false
   # P is a fixed, group-balanced tracking-error potential used outside the
   # discriminator BCE/nonlinearity.  Layout for the 172-D humanoid ADD error:
   # root pos, root rot, joint rot, root-relative body pos, root vel,
@@ -22,15 +24,29 @@ model:
   disc_flow_potential_group_weights: [0.25, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125]
   disc_flow_potential_group_names: [root_pos, root_rot, joint_rot, body_pos, root_vel, root_ang, dof_vel]
 
-# Calibrated on the no-early-termination Roll track; see
-# flow_add_humanoid_no_et_agent.yaml for the per-term rationale.
+# The original -log(1-D)=softplus(logit) reward saturates on far negative
+# states and is convex in temporal flow. centered_log_d keeps a strong slope
+# for bad states and is concave, eliminating the Jensen cycle bonus.
 disc_reward_type: "centered_log_d"
 disc_reward_min: -0.5
 
+# Raw linear progress E(x_prev)-E(x_t).  Keeping this outside D prevents
+# negative BCE labels from suppressing genuine progress.  Using shaping
+# discount 1.0 intentionally prefers low intermediate errors under the PPO
+# discount; it is not claimed to be policy-invariant PBRS.
 disc_flow_potential_reward_scale: 0.1
 disc_flow_potential_discount: 1.0
+# Raw progress alone nearly telescopes under PPO's discount and gives almost
+# no pressure after the policy settles at a constant large error.  This fixed,
+# non-positive term supplies persistent tracking pressure without a cycle bonus.
 disc_flow_potential_abs_energy_weight: 0.02
+# Extra persistent pressure only on global root translation.  A 0.06 smoke was
+# too weak, while 0.22 made root reward variance exceed the base and enlarged
+# the time-limit critic pulse. 0.12 is the measured midpoint calibration.
 disc_flow_potential_abs_group_weights: [0.12, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+# Fixed physical-error scale for Phi.  Never update this with the policy data:
+# a moving scale would make Phi non-stationary and could functionally collapse
+# the root recovery signal as the policy drifts farther from the reference.
 disc_flow_potential_fixed_norm: 1.0
 disc_flow_potential_obs_clip: 5.0
 
