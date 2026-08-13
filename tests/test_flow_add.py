@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.join(REPO_ROOT, "mimickit"))
 
 import gymnasium.spaces as spaces
 
+import learning.flow_add_agent as flow_add_agent
 import learning.flow_add_model as flow_add_model
 
 OBS_DIM = 15
@@ -42,7 +43,7 @@ class FakeEnv:
     def get_disc_obs_space(self):
         return spaces.Box(low=-np.inf, high=np.inf, shape=(DISC_OBS_DIM,), dtype=np.float32)
 
-def build_model(disc_mode):
+def build_model(disc_mode, **overrides):
     config = {
         "actor_net": "fc_2layers_128units",
         "actor_init_output_scale": 0.01,
@@ -52,6 +53,7 @@ def build_model(disc_mode):
         "disc_net": "fc_2layers_128units",
         "disc_mode": disc_mode
     }
+    config.update(overrides)
     model = flow_add_model.FlowADDModel(config, FakeEnv())
     return model
 
@@ -135,6 +137,196 @@ def test_potential_identity():
     # and growing the error gives negative progress
     q_grow, _ = model.eval_flow_scores(2.0 * disc_obs_prev, disc_obs_prev)
     assert torch.all(q_grow < 0)
+
+def test_fixed_group_balanced_potential_energy():
+    model = build_model(
+        "flow",
+        disc_flow_potential_in_logit=False,
+        disc_flow_potential_group_dims=[3, DISC_OBS_DIM - 3],
+        disc_flow_potential_group_weights=[0.4, 0.6],
+        disc_flow_regularize_matrices=False)
+
+    gen = torch.Generator().manual_seed(31)
+    x = torch.randn([32, DISC_OBS_DIM], generator=gen)
+    energy = model.eval_potential_energy(x)
+    group_energy = model.eval_potential_group_energies(x)
+    expected = 0.5 * (0.4 * torch.mean(torch.square(x[:, :3]), dim=-1)
+                      + 0.6 * torch.mean(torch.square(x[:, 3:]), dim=-1))
+
+    assert torch.allclose(energy, expected, atol=1e-6)
+    assert group_energy.shape == (32, 2)
+    assert torch.allclose(torch.sum(group_energy, dim=-1), energy, atol=1e-6)
+    assert not model._disc_flow_potential.requires_grad
+
+def test_reward_placed_potential_is_absent_from_disc_logit():
+    model = build_model(
+        "flow",
+        disc_flow_potential_in_logit=False,
+        disc_flow_potential_group_dims=[3, DISC_OBS_DIM - 3],
+        disc_flow_potential_group_weights=[0.4, 0.6],
+        disc_flow_regularize_matrices=False)
+    randomize_flow_matrices(model)
+    disc_obs, disc_obs_prev = rand_inputs(64, seed=32)
+
+    z = model.eval_disc(disc_obs, disc_obs_prev).squeeze(-1)
+    f = model.eval_static_score(disc_obs).squeeze(-1)
+    q_prog, q_circ = model.eval_flow_scores(disc_obs, disc_obs_prev)
+
+    assert torch.mean(torch.abs(q_prog)) > 1e-3
+    assert torch.allclose(z, f + q_circ, atol=1e-5)
+    # Flow matrices are not last-layer logit weights in this mode.  In
+    # particular, the fixed P cannot be shrunk by disc_logit_reg.
+    assert model.get_disc_logit_weights().numel() == 64 + DISC_OBS_DIM * DISC_OBS_DIM
+
+def test_potential_reward_telescopes_exactly():
+    model = build_model(
+        "potential",
+        disc_flow_potential_in_logit=False,
+        disc_flow_potential_group_dims=[3, DISC_OBS_DIM - 3],
+        disc_flow_potential_group_weights=[0.4, 0.6],
+        disc_flow_regularize_matrices=False)
+    gen = torch.Generator().manual_seed(33)
+    path = torch.randn([11, DISC_OBS_DIM], generator=gen)
+    gamma = 0.99
+
+    shaping = model.eval_potential_shaping(path[1:], path[:-1], gamma)
+    discounts = gamma ** torch.arange(shaping.shape[0])
+    discounted_sum = torch.sum(discounts * shaping)
+    expected = (model.eval_potential_energy(path[:1])[0]
+                - gamma ** shaping.shape[0]
+                * model.eval_potential_energy(path[-1:])[0])
+    assert torch.allclose(discounted_sum, expected, atol=1e-5)
+
+def test_potential_reward_has_no_path_dependent_cycle_bonus():
+    model = build_model(
+        "potential",
+        disc_flow_potential_in_logit=False,
+        disc_flow_potential_group_dims=[3, DISC_OBS_DIM - 3],
+        disc_flow_potential_group_weights=[0.4, 0.6])
+    gen = torch.Generator().manual_seed(34)
+    endpoint = torch.randn([DISC_OBS_DIM], generator=gen)
+    path_a = torch.stack([endpoint, torch.randn([DISC_OBS_DIM], generator=gen), endpoint])
+    path_b = torch.stack([endpoint, torch.randn([DISC_OBS_DIM], generator=gen), endpoint])
+    gamma = 0.99
+    discounts = gamma ** torch.arange(2)
+
+    ret_a = torch.sum(discounts * model.eval_potential_shaping(path_a[1:], path_a[:-1], gamma))
+    ret_b = torch.sum(discounts * model.eval_potential_shaping(path_b[1:], path_b[:-1], gamma))
+    assert torch.allclose(ret_a, ret_b, atol=1e-6)
+
+def test_raw_progress_prefers_low_error_over_oscillation():
+    model = build_model(
+        "potential",
+        disc_flow_potential_in_logit=False,
+        disc_flow_potential_group_dims=[3, DISC_OBS_DIM - 3],
+        disc_flow_potential_group_weights=[0.4, 0.6])
+    high = torch.ones([DISC_OBS_DIM])
+    low = 0.2 * high
+    gamma = 0.99
+
+    # All three paths start from the same high error and contain four
+    # transitions: reduce-and-hold, oscillate, or stay high.
+    paths = [
+        torch.stack([high, low, low, low, low]),
+        torch.stack([high, low, high, low, high]),
+        torch.stack([high, high, high, high, high])
+    ]
+    returns = []
+    discounts = gamma ** torch.arange(4)
+    for path in paths:
+        progress = model.eval_potential_shaping(
+            path[1:], path[:-1], discount=1.0, clip=5.0)
+        returns.append(torch.sum(discounts * progress))
+
+    assert returns[0] > returns[1] > returns[2]
+
+def test_fixed_potential_reward_components_are_explicit():
+    energy_prev = torch.tensor([0.2, 0.8, 1.5])
+    energy = torch.tensor([0.1, 0.8, 1.0])
+    progress, absolute = flow_add_agent.calc_fixed_potential_rewards(
+        energy=energy,
+        energy_prev=energy_prev,
+        progress_scale=0.1,
+        progress_discount=1.0,
+        abs_energy_weight=0.02)
+
+    assert torch.allclose(progress, 0.1 * (energy_prev - energy))
+    assert torch.allclose(absolute, -0.02 * energy)
+    assert torch.all(absolute <= 0)
+    # A constant high-error state receives persistent pressure even though its
+    # progress component is exactly zero.
+    assert progress[1] == 0
+    assert absolute[1] < 0
+
+def test_group_absolute_reward_can_target_root_without_scaling_other_groups():
+    group_energy = torch.tensor([
+        [0.3, 0.1, 0.2],
+        [0.5, 0.4, 0.1]
+    ])
+    group_reward, total_reward = flow_add_agent.calc_group_abs_rewards(
+        group_energy=group_energy,
+        base_weight=0.02,
+        extra_group_weights=[0.06, 0.0, 0.0])
+
+    expected = -group_energy * torch.tensor([0.08, 0.02, 0.02])
+    assert torch.allclose(group_reward, expected)
+    assert torch.allclose(total_reward, torch.sum(expected, dim=-1))
+    assert torch.all(group_reward <= 0)
+
+def test_absolute_energy_term_cannot_add_a_positive_cycle_bonus():
+    model = build_model(
+        "potential",
+        disc_flow_potential_in_logit=False,
+        disc_flow_potential_group_dims=[3, DISC_OBS_DIM - 3],
+        disc_flow_potential_group_weights=[0.4, 0.6])
+    high = torch.ones([DISC_OBS_DIM])
+    low = 0.2 * high
+    cycle = torch.stack([high, low, high, low, high])
+    energy = model.eval_potential_energy(cycle[1:], clip=5.0)
+    energy_prev = model.eval_potential_energy(cycle[:-1], clip=5.0)
+    _, absolute = flow_add_agent.calc_fixed_potential_rewards(
+        energy=energy,
+        energy_prev=energy_prev,
+        progress_scale=0.1,
+        progress_discount=1.0,
+        abs_energy_weight=0.02)
+
+    assert torch.sum(absolute) < 0
+    assert torch.all(absolute <= 0)
+
+def test_fixed_potential_reward_is_bounded_after_energy_clip():
+    model = build_model(
+        "potential",
+        disc_flow_potential_in_logit=False,
+        disc_flow_potential_group_dims=[3, DISC_OBS_DIM - 3],
+        disc_flow_potential_group_weights=[0.4, 0.6])
+    huge = torch.full([8, DISC_OBS_DIM], 1e6)
+    energy = model.eval_potential_energy(huge, clip=5.0)
+    _, absolute = flow_add_agent.calc_fixed_potential_rewards(
+        energy=energy,
+        energy_prev=energy,
+        progress_scale=0.1,
+        progress_discount=1.0,
+        abs_energy_weight=0.02)
+
+    # Sum of normalized group weights is one: E_max=0.5*5^2=12.5.
+    assert torch.allclose(energy, torch.full_like(energy, 12.5), atol=1e-5)
+    assert torch.allclose(absolute, torch.full_like(absolute, -0.25), atol=1e-6)
+
+def test_potential_energy_clipping_is_symmetric_and_bounded():
+    model = build_model(
+        "potential",
+        disc_flow_potential_in_logit=False,
+        disc_flow_potential_group_dims=[3, DISC_OBS_DIM - 3],
+        disc_flow_potential_group_weights=[0.4, 0.6])
+    pos = torch.full([4, DISC_OBS_DIM], 100.0)
+    neg = -pos
+    at_clip = torch.full([4, DISC_OBS_DIM], 5.0)
+    e_pos = model.eval_potential_energy(pos, clip=5.0)
+    e_neg = model.eval_potential_energy(neg, clip=5.0)
+    e_clip = model.eval_potential_energy(at_clip, clip=5.0)
+    assert torch.allclose(e_pos, e_neg)
+    assert torch.allclose(e_pos, e_clip)
 
 def test_circulation_ignores_pure_scaling():
     # x_t = c * x_prev has no rotation across objectives, so q_circ = 0
@@ -323,6 +515,97 @@ def test_contract_teacher_gradient_routing():
     q_prog_val, q_circ_val = model.eval_flow_scores(x_curr.detach(), x.detach())
     assert torch.all(q_prog_val >= -1e-5)
     assert torch.all(torch.abs(q_circ_val) < 1e-4)
+
+def test_centered_log_d_reward_is_non_saturating_and_concave():
+    logits = torch.tensor([-4.0, -1.0, 0.0, 1.0, 4.0], requires_grad=True)
+    reward = flow_add_agent.calc_flow_disc_reward(
+        logits, flow_add_agent.DISC_REWARD_CENTERED_LOG_D, reward_scale=2.0)
+
+    assert torch.all(torch.isfinite(reward))
+    assert torch.all(reward[1:] > reward[:-1])
+    assert torch.allclose(reward[2], torch.tensor(0.0), atol=1e-6)
+
+    grad = torch.autograd.grad(torch.sum(reward), logits)[0]
+    # Bad states retain a strong slope instead of the original softplus
+    # reward's vanishing negative-logit slope.
+    assert grad[0] > 1.9
+    assert grad[0] > 20.0 * grad[-1]
+
+    # Concavity removes the Jensen bonus for a zero-sum +/- temporal flow.
+    base = torch.tensor([-3.0, 0.0, 3.0])
+    flow = torch.tensor([0.7, 0.7, 0.7])
+    r_base = flow_add_agent.calc_flow_disc_reward(
+        base, flow_add_agent.DISC_REWARD_CENTERED_LOG_D, reward_scale=2.0)
+    r_plus = flow_add_agent.calc_flow_disc_reward(
+        base + flow, flow_add_agent.DISC_REWARD_CENTERED_LOG_D, reward_scale=2.0)
+    r_minus = flow_add_agent.calc_flow_disc_reward(
+        base - flow, flow_add_agent.DISC_REWARD_CENTERED_LOG_D, reward_scale=2.0)
+    assert torch.all(r_plus + r_minus <= 2.0 * r_base + 1e-6)
+
+def test_original_softplus_reward_is_preserved():
+    logits = torch.linspace(-8.0, 8.0, 33)
+    prob = torch.sigmoid(logits)
+    expected = -2.0 * torch.log(torch.clamp_min(1.0 - prob, 0.0001))
+    actual = flow_add_agent.calc_flow_disc_reward(
+        logits, flow_add_agent.DISC_REWARD_SOFTPLUS, reward_scale=2.0)
+    assert torch.allclose(actual, expected, atol=1e-6)
+
+def test_radial_rank_teacher_only_trains_static_score():
+    model = build_model("flow")
+    randomize_flow_matrices(model)
+
+    gen = torch.Generator().manual_seed(19)
+    x = torch.randn([64, DISC_OBS_DIM], generator=gen)
+    c = torch.rand([64, 1], generator=gen)
+    close_score = model.eval_static_score(c * x).squeeze(-1)
+    far_score = model.eval_static_score(x).squeeze(-1)
+
+    # A deliberately large margin guarantees an active ordering gradient.
+    loss, acc, gap = flow_add_agent.calc_radial_rank_loss(
+        close_score=close_score, far_score=far_score,
+        contraction=c, error=x, margin=10.0)
+    loss.backward()
+
+    static_grad_norm = sum(torch.norm(p.grad) for p in model._disc_layers.parameters()
+                           if p.grad is not None)
+    static_grad_norm += torch.norm(model._disc_logits.weight.grad)
+    assert static_grad_norm > 1e-6
+    assert model._disc_flow_potential.grad is None
+    assert model._disc_flow_circulation.grad is None
+    assert torch.isfinite(loss) and torch.isfinite(acc) and torch.isfinite(gap)
+
+def test_radial_rank_target_vanishes_at_zero_error():
+    close_score = torch.zeros(8, requires_grad=True)
+    far_score = torch.zeros(8, requires_grad=True)
+    contraction = torch.full([8, 1], 0.25)
+    zero_error = torch.zeros([8, DISC_OBS_DIM])
+
+    loss, acc, gap = flow_add_agent.calc_radial_rank_loss(
+        close_score=close_score, far_score=far_score,
+        contraction=contraction, error=zero_error, margin=0.25)
+    loss.backward()
+
+    assert loss == 0
+    assert acc == 1
+    assert gap == 0
+    assert torch.count_nonzero(close_score.grad) == 0
+    assert torch.count_nonzero(far_score.grad) == 0
+
+def test_radial_rank_target_scales_with_error_radius():
+    contraction = torch.full([2, 1], 0.5)
+    error = torch.stack([
+        torch.full([DISC_OBS_DIM], 0.1),
+        torch.full([DISC_OBS_DIM], 0.2)
+    ])
+    close_score = torch.zeros(2)
+    far_score = torch.zeros(2)
+
+    loss, _, _ = flow_add_agent.calc_radial_rank_loss(
+        close_score=close_score, far_score=far_score,
+        contraction=contraction, error=error, margin=1.0)
+    # Per-sample target gaps are 0.05 and 0.10, so the squared-hinge mean is
+    # (0.05^2 + 0.10^2) / 2.
+    assert torch.allclose(loss, torch.tensor(0.00625), atol=1e-7)
 
 def rand_unit_quat(shape, gen):
     import util.torch_util as torch_util

@@ -52,7 +52,15 @@ class FlowADDModel(add_model.ADDModel):
             f = self.eval_static_score(disc_obs)
 
             q_prog, q_circ = self.eval_flow_scores(disc_obs, disc_obs_prev)
-            logit = f + (q_prog + q_circ).unsqueeze(-1)
+            if (self._potential_in_logit):
+                flow_score = q_prog + q_circ
+            else:
+                # In reward-shaping mode the potential is deliberately kept
+                # out of the policy-vs-ideal BCE.  Otherwise every real policy
+                # transition -- including one that reduces error -- is a
+                # negative example and the BCE systematically suppresses P.
+                flow_score = q_circ
+            logit = f + flow_score.unsqueeze(-1)
         return logit
 
     def eval_static_score(self, disc_obs):
@@ -66,11 +74,10 @@ class FlowADDModel(add_model.ADDModel):
         assert(self._disc_mode != DISC_MODE_CONCAT)
 
         if (self.has_potential()):
-            # q_prog = E_S(x_prev) - E_S(x_t) with E_S(x) = 0.5 |L^T x|^2
-            Lx = torch.matmul(disc_obs, self._disc_flow_potential)
-            Lx_prev = torch.matmul(disc_obs_prev, self._disc_flow_potential)
-            q_prog = 0.5 * (torch.sum(torch.square(Lx_prev), dim=-1)
-                            - torch.sum(torch.square(Lx), dim=-1))
+            # q_prog = E_S(x_prev) - E_S(x_t)
+            energy = self.eval_potential_energy(disc_obs)
+            energy_prev = self.eval_potential_energy(disc_obs_prev)
+            q_prog = energy_prev - energy
         else:
             q_prog = torch.zeros(disc_obs.shape[:-1], device=disc_obs.device, dtype=disc_obs.dtype)
 
@@ -83,6 +90,41 @@ class FlowADDModel(add_model.ADDModel):
             q_circ = torch.zeros(disc_obs.shape[:-1], device=disc_obs.device, dtype=disc_obs.dtype)
 
         return q_prog, q_circ
+
+    def eval_potential_energy(self, disc_obs, clip=None):
+        """Evaluates E_S(x) = 0.5 x^T S x for the PSD potential."""
+        assert(self.has_potential())
+        if (clip is not None):
+            disc_obs = torch.clamp(disc_obs, -clip, clip)
+        Lx = torch.matmul(disc_obs, self._disc_flow_potential)
+        return 0.5 * torch.sum(torch.square(Lx), dim=-1)
+
+    def eval_potential_group_energies(self, disc_obs, clip=None):
+        """Returns each semantic group's contribution to the fixed energy."""
+        assert(self._potential_group_dims is not None), \
+            "Group energies require a fixed group-balanced potential"
+        if (clip is not None):
+            disc_obs = torch.clamp(disc_obs, -clip, clip)
+
+        groups = torch.split(disc_obs, self._potential_group_dims, dim=-1)
+        energies = []
+        for group, weight in zip(groups, self._potential_group_weights):
+            energies.append(0.5 * weight * torch.mean(torch.square(group), dim=-1))
+        return torch.stack(energies, dim=-1)
+
+    def eval_potential_shaping(self, disc_obs, disc_obs_prev, discount, clip=None):
+        """Linear energy-progress shaping.
+
+        With discount=1 this is the raw progress E(x_prev)-E(x_curr), which
+        intentionally changes the objective to prefer low intermediate error.
+        With the policy discount it recovers standard potential shaping.
+        """
+        energy = self.eval_potential_energy(disc_obs, clip=clip)
+        energy_prev = self.eval_potential_energy(disc_obs_prev, clip=clip)
+        return energy_prev - discount * energy
+
+    def is_potential_in_logit(self):
+        return self._potential_in_logit
 
     def get_circulation_matrix(self):
         """Returns the antisymmetric circulation matrix A = B - B^T."""
@@ -110,8 +152,12 @@ class FlowADDModel(add_model.ADDModel):
 
     def get_disc_logit_weights(self):
         weights = [torch.flatten(self._disc_logits.weight)]
-        if (self.has_potential()):
+        if (self._regularize_flow_matrices
+                and self.has_potential()
+                and self._disc_flow_potential.requires_grad):
             weights.append(torch.flatten(self._disc_flow_potential))
+        # C still participates in the discriminator and keeps its historical
+        # logit regularization even when a fixed external P is exempt.
         if (self.has_circulation()):
             weights.append(torch.flatten(self._disc_flow_circulation))
         return torch.cat(weights)
@@ -133,6 +179,10 @@ class FlowADDModel(add_model.ADDModel):
     def _build_disc(self, config, env):
         self._disc_mode = config.get("disc_mode", DISC_MODE_FLOW)
         assert(self._disc_mode in DISC_MODES), "Unsupported disc_mode: {}".format(self._disc_mode)
+        self._potential_in_logit = config.get("disc_flow_potential_in_logit", True)
+        self._regularize_flow_matrices = config.get("disc_flow_regularize_matrices", True)
+        self._potential_group_dims = None
+        self._potential_group_weights = None
 
         init_output_scale = 1.0
         net_name = config["disc_net"]
@@ -152,13 +202,39 @@ class FlowADDModel(add_model.ADDModel):
             flow_init_scale = config.get("disc_flow_init_scale", 1.0)
 
             if (self.has_potential()):
-                # small random init: S = L L^T is quadratic in L, so L = 0 is a
-                # saddle point with zero gradient and a too small init starves
-                # the progress term of gradient signal; with std = scale / d the
-                # initial error energy is E_S(x) ~ scale^2 / 2 for normalized x,
-                # small relative to the f logits but with healthy gradients
-                L0 = torch.randn([diff_dim, diff_dim]) * (flow_init_scale / diff_dim)
-                self._disc_flow_potential = torch.nn.Parameter(L0)
+                fixed_group_dims = config.get("disc_flow_potential_group_dims", None)
+                fixed_group_weights = config.get("disc_flow_potential_group_weights", None)
+                if (fixed_group_dims is not None or fixed_group_weights is not None):
+                    assert(fixed_group_dims is not None and fixed_group_weights is not None)
+                    assert(len(fixed_group_dims) == len(fixed_group_weights))
+                    assert(sum(fixed_group_dims) == diff_dim)
+                    assert(all(v > 0 for v in fixed_group_dims))
+                    assert(all(v >= 0 for v in fixed_group_weights))
+                    weight_sum = float(sum(fixed_group_weights))
+                    assert(weight_sum > 0)
+                    self._potential_group_dims = tuple(int(v) for v in fixed_group_dims)
+                    self._potential_group_weights = tuple(
+                        float(v) / weight_sum for v in fixed_group_weights)
+
+                    # Each semantic group contributes its weighted mean-square
+                    # error, so large replicated pose groups cannot drown out
+                    # the three-dimensional global root translation error.
+                    diag_weights = []
+                    for group_dim, group_weight in zip(
+                            self._potential_group_dims, self._potential_group_weights):
+                        per_coord_weight = group_weight / group_dim
+                        diag_weights += [per_coord_weight] * group_dim
+                    diag_weights = torch.tensor(diag_weights, dtype=torch.float32)
+                    L0 = torch.diag(torch.sqrt(diag_weights))
+                    self._disc_flow_potential = torch.nn.Parameter(L0, requires_grad=False)
+                else:
+                    # small random init: S = L L^T is quadratic in L, so L = 0 is a
+                    # saddle point with zero gradient and a too small init starves
+                    # the progress term of gradient signal; with std = scale / d the
+                    # initial error energy is E_S(x) ~ scale^2 / 2 for normalized x,
+                    # small relative to the f logits but with healthy gradients
+                    L0 = torch.randn([diff_dim, diff_dim]) * (flow_init_scale / diff_dim)
+                    self._disc_flow_potential = torch.nn.Parameter(L0)
 
             if (self.has_circulation()):
                 # q_circ is linear in B, so B = 0 has non-zero gradient and the
