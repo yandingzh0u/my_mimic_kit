@@ -32,9 +32,9 @@ def build_agent(agent_file, env, device):
     elif (agent_name == "ADD"):
         import learning.add_agent as add_agent
         agent = add_agent.ADDAgent(config=agent_config, env=env, device=device)
-    elif (agent_name == "FlowADD"):
-        import learning.flow_add_agent as flow_add_agent
-        agent = flow_add_agent.FlowADDAgent(config=agent_config, env=env, device=device)
+    elif (agent_name == "TangentADD"):
+        import learning.tangent_add_agent as tangent_add_agent
+        agent = tangent_add_agent.TangentADDAgent(config=agent_config, env=env, device=device)
     elif (agent_name == "LCP"):
         import learning.lcp_agent as lcp_agent
         agent = lcp_agent.LCPAgent(config=agent_config, env=env, device=device)
