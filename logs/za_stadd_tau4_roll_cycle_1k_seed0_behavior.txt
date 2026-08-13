@@ -1,0 +1,38 @@
+ZA-STADD (tau=4) Roll deterministic behavior evaluation
+Date: 2026-08-14
+
+Model: output/za_stadd_tau4_roll_cycle_1k_seed0/model.pt
+Fusion: za (zero-anchored smooth-Tchebycheff), disc_fusion_tau = 4.0
+Training samples: 65536000
+Evaluation env: data/envs/st_add_humanoid_roll_eval_env.yaml
+Evaluation episodes: 256 (300 control steps, 10 s), rand_seed 7
+
+winding_ratio: mean +0.852, std 0.269, median +0.962
+disp_ratio: mean +1.355, std 0.248, median +1.434
+root_height_rmse: mean 0.126 m, std 0.101 m, median 0.069 m
+upright_rate: 0.281
+shortcut_rate (completed and winding_ratio < 0.5): 0.098
+completed: 256
+failed: 0
+
+Same-protocol baseline (ST-ADD mean fusion, 131M samples, same eval seed):
+  winding_ratio mean +0.924, median +0.980
+  shortcut_rate 0.074
+  root_height_rmse mean 0.077 m
+  upright_rate 0.336
+
+Training-side fusion diagnostics at iteration 999:
+  anchored deficits d = (5.97 state, 5.70 motion, 2.32 rot)
+  bottleneck weights w = softmax(d/tau) = (0.43, 0.40, 0.175)
+
+Interpretation:
+  Close to the mean-fusion baseline but slightly worse on every metric.
+  Together with the tau=1 run the ordering is monotone
+  (mean > tau=4 > tau=1): the more aggressive the raw-deficit bottleneck, the
+  worse the behavior, because the rotation deficit scale is chronically about
+  half of state/motion (branch logit-range mismatch), so bottleneck attention
+  systematically de-weights winding. Structural checks all passed (tau -> inf
+  reproduces mean fusion; w = softmax(d/tau) behaves as derived; zero anchor
+  cancels additive bias). Conclusion: ZA fusion needs scale-normalized
+  deficits (EMA RMS) before the bottleneck can identify the true failing
+  branch.
