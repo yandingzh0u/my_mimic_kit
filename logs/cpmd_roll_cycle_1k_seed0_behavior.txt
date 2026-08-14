@@ -1,0 +1,52 @@
+CPMD (context-preserving motion differentials) Roll behavior evaluation
+Date: 2026-08-14
+
+Model: output/cpmd_roll_cycle_1k_seed0/model.pt
+Differential: [state 172 | motion summary m 34 | context interactions c 561] = 767
+  m_t = rho m_{t-1} + xi_t,  rho = 0.96923 (1.0667 s memory @ 30 Hz)
+  c_t = {1/2 m_i m_j}_{i<j}, formed per side, differenced afterwards
+Training: stock ADD, one discriminator, one zero-vs-policy BCE, one softplus
+  reward, one PPO, one 1000-iteration run. Both blocks enter the same
+  discriminator on every step; there is no staging and no second network.
+Training samples: 131072000 (4096 envs, seed 0, 1000 iterations, 0.68 h)
+Training env: data/envs/cpmd_humanoid_roll_cycle_env.yaml
+Evaluation env: data/envs/cpmd_humanoid_roll_eval_env.yaml
+Evaluation episodes: 256 (300 control steps, 10 s), eval seed 7
+
+winding_ratio: mean +0.933, std 0.209, median +0.975
+disp_ratio: mean +1.126, std 0.235, median +1.178
+root_height_rmse: mean 0.072 m, std 0.076 m, median 0.052 m
+root_height_rmse on non-shortcut episodes: mean 0.054 m
+upright_rate: 0.414
+shortcut_rate (winding_ratio < 0.5): 0.055 (14/256)
+completed by time limit: 256 (no failures)
+
+Training-side diagnostics at iteration 999:
+  positive / negative logits: +1.6333 / -2.3097
+  discriminator reward mean / std: 0.3705 / 0.3366
+  gradient penalty: 0.0518
+  normalized summary / interaction RMS: 0.6099 / 0.8965
+  interaction effective support: 0.6395
+  Root_Pos_Err 0.3005, Root_Rot_Err 0.2537, Body_Pos_Err 0.0907
+  Root_Ang_Vel_Err 0.9492, Dof_Vel_Err 1.0921
+  throughput: 53766 samples/s
+
+Discriminator geometry probe (64 envs, 120 steps, seed 0):
+  logit mean at alpha 0 / 1: +1.6335 / -1.4081 (smooth, no saturated shell)
+  reward mean at alpha 0 / 1: 3.62374 / 0.64259
+  gradient energy share: state 0.249, summary 0.036, interactions 0.715
+
+This run is the first under the unified CPMD naming and the single-buffer
+discriminator data path (only the differential is stored, not both endpoints).
+It reproduces the earlier symmetric-lift run it replaced -- winding +0.930 vs
++0.933, shortcut 15/256 vs 14/256, gradient share 0.252/0.036/0.712 vs
+0.249/0.036/0.715 -- which is what the bit-identity of the buffer change
+predicts. The older run's directory was removed once this evaluation passed;
+its logs remain in git history at bb6d856^.
+
+What the numbers do and do not support. Under one seed this shows the full
+CPMD representation learns a directed Roll where the state-only differential
+does not. It does not isolate a capacity-independent cause: the earlier
+same-width control established that path-order information is unnecessary, but
+no experiment here separates the pairwise interactions from a generic
+quadratic expansion of the same width.

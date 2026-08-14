@@ -169,7 +169,10 @@ class Logger:
         for key in self.log_headers:
             entry = self.log_current_row[key]
             if (isinstance(entry.val, numbers.Number)):
-                template += "{:<25}"
+                # the trailing space is what keeps the file parseable: a key or
+                # value at or past the column width would otherwise run into the
+                # next field with no separator at all
+                template += "{:<24} "
         return template
 
     def _mp_aggregate(self):
