@@ -1,0 +1,38 @@
+LieSig-STADD level 1 only (failed ablation) Roll behavior evaluation
+Date: 2026-08-14
+
+Model: output/liesig_l1_roll_cycle_1k_seed0/model.pt
+Differential: [state 172 | m 34] = 206
+Level-2 block: none, so the discriminator sees only the level-1 error
+  m_ref - m_sim and nothing about the absolute motion it occurred in
+Training: stock ADD, one discriminator, one BCE, one softplus reward
+Training samples: 131072000 (4096 envs, seed 0, 1000 iterations)
+Training env: data/envs/liesig_st_add_l1_humanoid_roll_cycle_env.yaml
+Evaluation env: data/envs/liesig_st_add_l1_humanoid_roll_eval_env.yaml
+Evaluation episodes: 256 (300 control steps, 10 s), eval seed 7
+
+winding_ratio: mean +0.03540, std 0.06978, median -0.00524
+disp_ratio: mean +1.08512, std 0.02358
+root_height_rmse: mean 0.06136 m, std 0.02350 m, median 0.05716 m
+upright_rate: 0.305
+shortcut_rate (winding_ratio < 0.5): 1.000 (256/256)
+completed by time limit: 256 (no failures)
+
+Training-side diagnostics at iteration 999:
+  positive / negative logits: +1.2817 / -1.7157
+  discriminator reward mean / std: 0.5384 / 0.4411
+  gradient penalty: 0.0531
+  normalized level-1 RMS: 1.0533
+  Root_Pos_Err 0.2478, Root_Rot_Err 0.4746, Body_Pos_Err 0.1489
+  Root_Ang_Vel_Err 1.5218, Dof_Vel_Err 1.2434
+  throughput: 55159 samples/s
+
+Discriminator geometry probe (64 envs, 120 steps, seed 0):
+  gradient energy share: state 0.672, level1 0.328
+
+Outcome: the level-1 block is not numerically dead -- its normalized RMS is
+1.05, it takes a third of the discriminator's gradient energy, and the logit
+ray is smooth. The policy simply learns a very good non-rolling shortcut:
+root position and height track well while the root angular velocity error
+stays at 1.52 and the winding stays at zero. This is what motivated the
+level-2 lift. See logs/liesig_second_order_ablation.txt.

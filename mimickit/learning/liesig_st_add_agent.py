@@ -14,8 +14,8 @@ class LieSigSTADDAgent(add_agent.ADDAgent):
     The only addition is instrumentation of the new differential blocks
     [state | level-1 | level-2], so a failure can be attributed to the
     representation rather than guessed at: block RMS before and after the
-    scale-only normalizer, the effective support of the area block, and how
-    much of the normalizer sits on its floor.
+    scale-only normalizer, the effective support of the level-2 block, and
+    how much of the normalizer sits on its floor.
     """
 
     def __init__(self, config, env, device):
@@ -59,14 +59,14 @@ class LieSigSTADDAgent(add_agent.ADDAgent):
         }
 
         if (self._area_dim > 0):
-            area = diff_obs[..., s + d:]
-            area_rms = rms(area)
-            info["disc_level2_rms"] = area_rms
+            level2 = diff_obs[..., s + d:]
+            level2_rms = rms(level2)
+            info["disc_level2_rms"] = level2_rms
             info["disc_level2_rms_norm"] = rms(norm_diff_obs[..., s + d:])
             # effective support: entries above 10% of the block RMS. Near zero
-            # means the area block is carried by a handful of coordinates.
-            thresh = 0.1 * torch.clamp_min(area_rms, 1e-8)
-            info["disc_area_nonzero_frac"] = torch.mean((torch.abs(area) > thresh).float())
+            # means the level-2 block rides on a handful of coordinates.
+            thresh = 0.1 * torch.clamp_min(level2_rms, 1e-8)
+            info["disc_level2_nonzero_frac"] = torch.mean((torch.abs(level2) > thresh).float())
 
         # how much of the scale-only normalizer sits on its floor: those
         # coordinates are effectively unnormalized

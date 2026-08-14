@@ -3,12 +3,12 @@ env_name: "liesig_st_add"
 char_file: "data/assets/humanoid/humanoid.xml"
 camera_mode: "track"
 
-# EVALUATION env for the Level-1 ablation (order 1, differential dim
-# 172 + 34 = 206). Same 10 s / 300 control step protocol as the Level-2
-# evaluation env; a Level-2 checkpoint cannot be loaded here and will fail
-# loudly on the differential dimension, which is intended.
+# EVALUATION env for the FAILED level-1 ablation (order 1, differential dim
+# 172 + 34 = 206). Same 10 s / 300 control step protocol as the other envs; an
+# order-2 checkpoint cannot be loaded here and will fail loudly on the
+# differential dimension, which is intended.
 liesig_order: 1
-# memory time of the discounted signature: 32 control steps @30 Hz, matching
+# memory time of the discounted lift: 32 control steps @30 Hz, matching
 # the longest window of the frozen ST-ADD v1 baseline. Stored in seconds so
 # rho = exp(-dt / tau) keeps its meaning if the control rate changes.
 liesig_memory_seconds: 1.0666666667

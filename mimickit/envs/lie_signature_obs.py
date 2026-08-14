@@ -1,4 +1,4 @@
-"""Fixed-anchor developed increments and discounted signatures (LieSig-STADD).
+"""Fixed-anchor developed increments and discounted trajectory lifting (LieSig-STADD).
 
 One representation, one operator. The character path is turned into a stream
 of fixed-anchor developed increments
@@ -14,36 +14,59 @@ log of the relative joint rotations (hinge joints project onto their axis,
 spherical joints use the full exp map). Increments are path increments, not
 velocities: nothing is divided by the physics timestep.
 
-The increments are summarized causally by a discounted level-2 signature
+The increments are summarized causally by a discounted level-1 sum
 
     m_t = rho m_{t-1} + xi_t
-    A_t = rho^2 A_{t-1} + (rho/2) (m_{t-1} xi_t^T - xi_t m_{t-1}^T)
 
 with rho = exp(-dt / tau_mem) fixed by a physical memory time, so the meaning
-of the operator does not change with control frequency. A_t is exactly
-antisymmetric by construction, so only its strict upper triangle is stored:
+of the operator does not change with control frequency, and then lifted to
+level 2 by one of two blocks read off the strict upper triangle i < j:
 
-    Phi^(1)_t = m_t                                  in R^D,       D = 6 + dof
-    Phi^(2)_t = [m_t, vech_upper(A_t)]               in R^(D + D(D-1)/2)
+    S_t = 1/2 m_t m_t^T                                    second_order "sym"
+    A_t = rho^2 A_{t-1} + (rho/2)(m_{t-1} xi_t^T - xi_t m_{t-1}^T)     "area"
 
-Why this catches shortcuts. m alone is a discounted endpoint: a path that
-returns to the same place has small m regardless of how it got there. The
-antisymmetric part A is a discounted Levy area, i.e. the signed area swept by
-pairs of coordinates, which is exactly the leading order-independent
-descriptor of *how* the path moved. A vanishes for any path confined to a
-single direction in tangent space and flips sign when the path is traversed
-in the opposite order, so "lie flat and translate" and "roll" are separated
-even when they share endpoints.
+    Phi^(1)_t = m_t                               in R^D,       D = 6 + dof
+    Phi^(2)_t = [m_t, vech_upper(S_t or A_t)]     in R^(D + D(D-1)/2)
 
-Two independent signatures are streamed, one for the simulated character and
-one for the reference. The differential is taken *after* the operator,
-Phi^ref - Phi^sim, never before: the signature is nonlinear, so
-A(ref) - A(sim) is not A(ref - sim).
+Both blocks have the same width and cost the discriminator the same
+parameters. S carries no recursive state of its own, being a pointwise
+function of m; A is exactly antisymmetric by construction.
+
+Why level 2 works, and why it is not about path order. The two sides are
+lifted independently and the ADD differential is taken *after* the lift,
+Phi^ref - Phi^sim, never before. For the symmetric block that differential is
+exactly
+
+    Delta_S = 1/4 (Delta_m Sigma_m^T + Sigma_m Delta_m^T),
+    Delta_m = m^ref - m^sim,        Sigma_m = m^ref + m^sim
+
+i.e. the level-1 error modulated by the common-mode motion of the two sides.
+A level-1 discriminator only ever sees Delta_m, so the same tracking error
+looks the same whether it happens in the middle of a vigorous roll or while
+lying almost still; after the per-side quadratic lift it does not. Delta_S is
+not a function of Delta_m, so this is information regained rather than level 1
+re-encoded: plain ADD subtracts first and discards the absolute motion
+context, lifting per side and subtracting afterwards brings it back.
+
+A is a discounted Levy area and is the only block that carries traversal
+order: it flips sign when the path is walked backwards, S does not. That was
+the original hypothesis for why level 2 fixes Roll, and the experiments
+falsified it. With everything else identical (same 767-wide differential,
+same 1.31M discriminator parameters, seed 0, 1000 iterations) the order-blind
+S rolls at least as well as A -- winding 0.930 vs 0.889, shortcut 5.9% vs
+10.5%, and the same ~70% share of the discriminator's gradient energy --
+while level 1 alone never rolls at all (100% shortcut). Path-order
+information is therefore not necessary; the per-side quadratic lift is what
+matters. A is kept behind second_order = "area" so that ablation stays
+reproducible.
 
 Cold start only: on reset both sides are zeroed and their previous root/joint
 states are set to the reference reset state, so the first increment is
 produced by the first physics step of the new episode and no state can leak
 across episodes.
+
+Two independent operators are streamed, one for the simulated character and
+one for the reference.
 """
 
 import math
@@ -79,6 +102,13 @@ def calc_root_increment(root_pos, prev_root_pos, root_rot, prev_root_rot, anchor
     dw = torch_util.quat_rotate(anchor_inv, torch_util.quat_to_exp_map(dq))
     return dp, dw
 
+# level-2 block variants on the same strict upper triangle: the symmetric
+# quadratic lift (the method) and the antisymmetric Levy area (completed
+# ablation, kept only so it stays reproducible)
+SECOND_ORDER_SYM = "sym"
+SECOND_ORDER_AREA = "area"
+SECOND_ORDER_MODES = [SECOND_ORDER_SYM, SECOND_ORDER_AREA]
+
 def calc_area_dim(tangent_dim):
     return tangent_dim * (tangent_dim - 1) // 2
 
@@ -92,28 +122,37 @@ def unpack_area(packed, tangent_dim):
     return area
 
 class LieSigHistory():
-    """Causal discounted signature of one side (sim or ref) of the path.
+    """Causal discounted lift of one side (sim or ref) of the path.
 
-    Holds only the recursive state (m, A, previous pose), never a window of
-    past frames: the whole history is summarized by the recursion above.
+    Holds only the recursive state (m, the previous pose, and A for the area
+    ablation), never a window of past frames: the whole history is summarized
+    by the recursion above.
     """
 
-    def __init__(self, num_envs, kin_char_model, order, rho, device):
+    def __init__(self, num_envs, kin_char_model, order, rho, device,
+                 second_order=SECOND_ORDER_SYM):
         assert order in [1, 2]
         assert 0.0 < rho <= 1.0
+        assert second_order in SECOND_ORDER_MODES
 
         self._kin_char_model = kin_char_model
         self._order = int(order)
         self._rho = float(rho)
+        self._second_order = second_order
         self._device = device
 
         self._dof_dim = kin_char_model.get_dof_size()
         self._tangent_dim = 6 + self._dof_dim
         self._area_dim = calc_area_dim(self._tangent_dim) if (self._order == 2) else 0
 
+        # the symmetric block is a pointwise function of m, so only the area
+        # ablation needs recursive level-2 state
+        self._stream_area = (self._area_dim > 0) and (self._second_order == SECOND_ORDER_AREA)
+
         dtype = torch.float32
         self._m = torch.zeros([num_envs, self._tangent_dim], dtype=dtype, device=device)
-        self._area = torch.zeros([num_envs, self._area_dim], dtype=dtype, device=device)
+        area_state = self._area_dim if self._stream_area else 0
+        self._area = torch.zeros([num_envs, area_state], dtype=dtype, device=device)
 
         idx = torch.triu_indices(self._tangent_dim, self._tangent_dim, offset=1, device=device)
         self._wedge_i = idx[0]
@@ -134,6 +173,9 @@ class LieSigHistory():
     def get_order(self):
         return self._order
 
+    def get_second_order(self):
+        return self._second_order
+
     def get_memory_decay(self):
         return self._rho
 
@@ -150,11 +192,11 @@ class LieSigHistory():
         return self._push_count
 
     def reset(self, env_ids, root_pos, root_rot, joint_rot):
-        """Cold start: zero the signature and anchor the previous pose to the
+        """Cold start: zero the lift and anchor the previous pose to the
         reset state, so the first increment comes from the first step of the
         new episode."""
         self._m[env_ids] = 0.0
-        if (self._area_dim > 0):
+        if (self._stream_area):
             self._area[env_ids] = 0.0
         self._prev_root_pos[env_ids] = root_pos
         self._prev_root_rot[env_ids] = root_rot
@@ -173,7 +215,7 @@ class LieSigHistory():
         xi = self.calc_increment(root_pos, root_rot, joint_rot, anchor_inv)
 
         # A_t uses the OLD m_{t-1}; update the area before advancing m
-        if (self._area_dim > 0):
+        if (self._stream_area):
             prev_m = self._m
             wedge = (prev_m[:, self._wedge_i] * xi[:, self._wedge_j]
                      - xi[:, self._wedge_i] * prev_m[:, self._wedge_j])
@@ -187,8 +229,19 @@ class LieSigHistory():
         self._push_count += 1
         return
 
+    def calc_sym_block(self):
+        """Level-2 symmetric lift: the strict upper triangle of 1/2 m m^T.
+        Stateless per side; what the discriminator receives is its difference,
+        which is the level-1 error modulated by the two sides' common-mode
+        motion."""
+        m = self._m
+        return 0.5 * m[:, self._wedge_i] * m[:, self._wedge_j]
+
     def extract(self):
-        """Phi_t: [m] at order 1, [m, vech_upper(A)] at order 2."""
+        """Phi_t: [m] at order 1, and at order 2 [m, vech_upper(1/2 m m^T)]
+        or, for the area ablation, [m, vech_upper(A)]."""
         if (self._order == 1):
             return self._m
-        return torch.cat([self._m, self._area], dim=-1)
+        if (self._stream_area):
+            return torch.cat([self._m, self._area], dim=-1)
+        return torch.cat([self._m, self.calc_sym_block()], dim=-1)

@@ -19,6 +19,16 @@ operator math
   - reversing the traversal order leaves m unchanged and flips A's sign
   - rho = 1 reproduces the ordinary finite-sequence level-2 (Levy) area
 
+level-2 lift: symmetric (method) vs Levy area (completed ablation)
+  - sym is the default; both blocks have the same width and the same index set
+  - the symmetric block equals 1/2 m_i m_j and carries no recursive state
+  - its differential is exactly 1/4 (dm sm^T + sm dm^T), i.e. the level-1
+    error modulated by the two sides' common-mode motion
+  - that differential is not a function of dm, so the lift adds real
+    information rather than re-encoding level 1
+  - reversing the traversal order flips A and leaves the symmetric block fixed
+  - perfect tracking still gives an exactly zero differential
+
 geometry
   - a full 2*pi root roll does not fold back to zero (per-step logs)
   - quaternion hemisphere flips (q vs -q) change nothing
@@ -80,9 +90,13 @@ def kin_model():
     model.load(CHAR_FILE)
     return model
 
-def make_hist(kin_model, num_envs=1, order=2, rho=RHO):
+SYM = lie_signature_obs.SECOND_ORDER_SYM
+AREA = lie_signature_obs.SECOND_ORDER_AREA
+
+def make_hist(kin_model, num_envs=1, order=2, rho=RHO, second_order=SYM):
     return lie_signature_obs.LieSigHistory(num_envs=num_envs, kin_char_model=kin_model,
-                                           order=order, rho=rho, device=DEVICE)
+                                           order=order, rho=rho, device=DEVICE,
+                                           second_order=second_order)
 
 def identity_quat(n=1, num_joints=None):
     shape = [n, 4] if (num_joints is None) else [n, num_joints, 4]
@@ -144,7 +158,7 @@ def test_packed_area_matches_full_matrix(kin_model):
     for _ in range(steps):
         pos.append(pos[-1] + torch.randn([1, 3]) * 0.2)
 
-    hist = make_hist(kin_model, order=2)
+    hist = make_hist(kin_model, order=2, second_order=AREA)
     push_pos_path(hist, kin_model, pos)
 
     D = TANGENT_DIM
@@ -167,7 +181,7 @@ def test_area_is_antisymmetric(kin_model):
     for _ in range(steps):
         pos.append(pos[-1] + torch.randn([1, 3]) * 0.3)
 
-    hist = make_hist(kin_model, order=2)
+    hist = make_hist(kin_model, order=2, second_order=AREA)
     push_pos_path(hist, kin_model, pos)
 
     full = lie_signature_obs.unpack_area(hist.extract()[:, TANGENT_DIM:], TANGENT_DIM)[0]
@@ -184,7 +198,7 @@ def test_single_axis_path_has_zero_area(kin_model):
         step[0, 0] = 0.1 * (k + 1)
         pos.append(pos[-1] + step)
 
-    hist = make_hist(kin_model, order=2)
+    hist = make_hist(kin_model, order=2, second_order=AREA)
     push_pos_path(hist, kin_model, pos)
 
     area = hist.extract()[:, TANGENT_DIM:]
@@ -195,10 +209,10 @@ def test_order_reversal_flips_area_but_not_m(kin_model):
     e_x = torch.tensor([[1.0, 0.0, 0.0]])
     e_y = torch.tensor([[0.0, 1.0, 0.0]])
 
-    fwd = make_hist(kin_model, order=2, rho=1.0)
+    fwd = make_hist(kin_model, order=2, rho=1.0, second_order=AREA)
     push_pos_path(fwd, kin_model, [torch.zeros([1, 3]), e_x, e_x + e_y])
 
-    rev = make_hist(kin_model, order=2, rho=1.0)
+    rev = make_hist(kin_model, order=2, rho=1.0, second_order=AREA)
     push_pos_path(rev, kin_model, [torch.zeros([1, 3]), e_y, e_x + e_y])
 
     phi_f, phi_r = fwd.extract(), rev.extract()
@@ -218,7 +232,7 @@ def test_rho_one_recovers_plain_levy_area(kin_model):
     for _ in range(steps):
         pos.append(pos[-1] + torch.randn([1, 3]) * 0.25)
 
-    hist = make_hist(kin_model, order=2, rho=1.0)
+    hist = make_hist(kin_model, order=2, rho=1.0, second_order=AREA)
     push_pos_path(hist, kin_model, pos)
 
     D = TANGENT_DIM
@@ -238,6 +252,148 @@ def test_rho_one_recovers_plain_levy_area(kin_model):
 
     full = lie_signature_obs.unpack_area(hist.extract()[:, TANGENT_DIM:], D)[0]
     assert torch.allclose(full, levy, atol=1e-5)
+
+# ---------------------------------------------------------------------------
+# level-2 lift: symmetric (method) vs Levy area (completed ablation)
+# ---------------------------------------------------------------------------
+
+def random_walk(steps, seed, scale=0.2):
+    torch.manual_seed(seed)
+    return [torch.randn([1, 3]) * scale for _ in range(steps)]
+
+def stream_increments(kin_model, increments, second_order=SYM, rho=RHO):
+    pos = [torch.zeros([1, 3])]
+    for step in increments:
+        pos.append(pos[-1] + step)
+    hist = make_hist(kin_model, order=2, rho=rho, second_order=second_order)
+    push_pos_path(hist, kin_model, pos)
+    return hist.extract()
+
+def test_sym_is_the_default_second_order(kin_model):
+    """The symmetric lift is the method, so it is what a config gets without
+    asking. The area ablation must opt in explicitly."""
+    assert make_hist(kin_model, order=2).get_second_order() == SYM
+    with pytest.raises(AssertionError):
+        make_hist(kin_model, order=2, second_order="levy")
+
+def test_both_level2_blocks_have_the_same_width(kin_model):
+    """The two arms differ in nothing but the block's symmetry: same
+    differential width, hence the same discriminator parameter count."""
+    area = make_hist(kin_model, order=2, second_order=AREA)
+    sym = make_hist(kin_model, order=2, second_order=SYM)
+
+    assert sym.get_area_dim() == area.get_area_dim() == AREA_DIM
+    assert sym.get_obs_dim() == area.get_obs_dim()
+    assert STATE_DIM + sym.get_obs_dim() == L2_TOTAL == 767
+
+def test_sym_block_equals_half_outer_product_of_m(kin_model):
+    """Per side the block is exactly vech_upper(1/2 m m^T), so it needs no
+    recursive state at all."""
+    hist_out = stream_increments(kin_model, random_walk(9, seed=11))
+    m = hist_out[0, :TANGENT_DIM]
+    block = hist_out[0, TANGENT_DIM:]
+
+    idx = torch.triu_indices(TANGENT_DIM, TANGENT_DIM, offset=1)
+    expected = 0.5 * torch.outer(m, m)[idx[0], idx[1]]
+    assert torch.allclose(block, expected, atol=1e-6)
+    assert torch.max(torch.abs(block)).item() > 1e-4
+
+def test_sym_differential_is_the_common_mode_modulation(kin_model):
+    """The identity the method rests on:
+
+        Delta_S = 1/4 (dm sm^T + sm dm^T),  dm = m_ref - m_sim, sm = m_ref + m_sim
+
+    so what reaches the discriminator is the level-1 error scaled by how much
+    absolute motion the two sides are doing."""
+    base = random_walk(11, seed=14)
+    extra = random_walk(11, seed=15, scale=0.05)
+
+    sim = stream_increments(kin_model, base)
+    ref = stream_increments(kin_model, [a + b for a, b in zip(base, extra)])
+
+    dm = ref[:, :TANGENT_DIM] - sim[:, :TANGENT_DIM]
+    sm = ref[:, :TANGENT_DIM] + sim[:, :TANGENT_DIM]
+    i, j = torch.triu_indices(TANGENT_DIM, TANGENT_DIM, offset=1)
+
+    delta_s = ref[:, TANGENT_DIM:] - sim[:, TANGENT_DIM:]
+    expected = 0.25 * (dm[:, i] * sm[:, j] + sm[:, i] * dm[:, j])
+    assert torch.allclose(delta_s, expected, atol=1e-5)
+
+def test_sym_differential_is_not_a_function_of_the_level1_differential(kin_model):
+    """The lift is per side and the subtraction happens after it, so the same
+    level-1 error under different absolute motion produces a different level-2
+    differential. This is the information a level-1 discriminator cannot have."""
+    extra = random_walk(11, seed=16, scale=0.05)
+
+    def differential(base_seed):
+        base = random_walk(11, seed=base_seed)
+        sim = stream_increments(kin_model, base)
+        ref = stream_increments(kin_model, [a + b for a, b in zip(base, extra)])
+        return ref - sim
+
+    d_slow = differential(17)
+    d_fast = differential(18)
+
+    assert torch.allclose(d_slow[:, :TANGENT_DIM], d_fast[:, :TANGENT_DIM], atol=1e-6)
+    assert torch.max(torch.abs(d_slow[:, TANGENT_DIM:] - d_fast[:, TANGENT_DIM:])).item() > 1e-3
+
+def test_sym_block_ignores_the_order_the_area_sees(kin_model):
+    """e_x then e_y versus e_y then e_x share level 1 and flip the area's
+    sign; the symmetric block cannot tell them apart. Both roll equally well
+    in training, which is why the path-order explanation was retracted."""
+    e_x = torch.tensor([[1.0, 0.0, 0.0]])
+    e_y = torch.tensor([[0.0, 1.0, 0.0]])
+    paths = ([torch.zeros([1, 3]), e_x, e_x + e_y],
+             [torch.zeros([1, 3]), e_y, e_x + e_y])
+
+    def run(second_order):
+        out = []
+        for path in paths:
+            hist = make_hist(kin_model, order=2, rho=1.0, second_order=second_order)
+            push_pos_path(hist, kin_model, path)
+            out.append(hist.extract())
+        return out
+
+    area_f, area_r = run(AREA)
+    sym_f, sym_r = run(SYM)
+
+    assert torch.allclose(area_f[:, TANGENT_DIM:], -area_r[:, TANGENT_DIM:], atol=1e-6)
+    assert torch.max(torch.abs(area_f[:, TANGENT_DIM:])).item() > 0.1
+    assert torch.allclose(sym_f, sym_r, atol=0.0)
+
+def test_sym_keeps_the_zero_differential(kin_model):
+    """The ADD ideal point survives the lift: a quadratic block cannot invent
+    a reward gradient where the two sides agree."""
+    torch.manual_seed(12)
+    n = 3
+    num_joints = kin_model.get_num_joints() - 1
+
+    sim = make_hist(kin_model, num_envs=n, order=2, second_order=SYM)
+    ref = make_hist(kin_model, num_envs=n, order=2, second_order=SYM)
+
+    root_pos, root_rot, joint_rot = rest_state(kin_model, n)
+    sim.reset(torch.arange(n), root_pos, root_rot, joint_rot)
+    ref.reset(torch.arange(n), root_pos, root_rot, joint_rot)
+    assert torch.max(torch.abs(ref.extract() - sim.extract())).item() == 0.0
+
+    anchor_inv = identity_quat(n)
+    for _ in range(12):
+        root_pos = root_pos + torch.randn([n, 3]) * 0.05
+        root_rot = torch_util.quat_mul(axis_quat([0.0, 1.0, 0.0], 0.2, n), root_rot)
+        joint_rot = torch_util.quat_normalize(joint_rot + torch.randn([n, num_joints, 4]) * 0.02)
+
+        sim.push(root_pos, root_rot, joint_rot, anchor_inv)
+        ref.push(root_pos, root_rot, joint_rot, anchor_inv)
+        assert torch.max(torch.abs(ref.extract() - sim.extract())).item() == 0.0
+
+def test_both_arms_share_level1_exactly(kin_model):
+    """Only the level-2 block changes between the two arms: same increments,
+    same discount, bit-identical level 1."""
+    increments = random_walk(10, seed=13, scale=0.15)
+    area = stream_increments(kin_model, increments, second_order=AREA)
+    sym = stream_increments(kin_model, increments, second_order=SYM)
+
+    assert torch.allclose(area[:, :TANGENT_DIM], sym[:, :TANGENT_DIM], atol=0.0)
 
 # ---------------------------------------------------------------------------
 # geometry
@@ -385,7 +541,7 @@ def test_reset_does_not_inherit_previous_episode(kin_model):
     of the new episode is measured from the reset pose (not from the last
     pose of the previous episode)."""
     n = 1
-    hist = make_hist(kin_model, order=2)
+    hist = make_hist(kin_model, order=2, second_order=AREA)
 
     far = [torch.zeros([n, 3]), torch.tensor([[5.0, 0.0, 0.0]]), torch.tensor([[5.0, 5.0, 0.0]])]
     push_pos_path(hist, kin_model, far)
@@ -487,7 +643,7 @@ def test_diagnostics_are_pure_measurement():
                 "disc_neg_acc", "disc_pos_logit", "disc_neg_logit"}
     assert add_keys.isdisjoint(info.keys())
     for key in ["disc_state_rms", "disc_level1_rms", "disc_level2_rms",
-                "disc_area_nonzero_frac", "disc_norm_min_scale_frac"]:
+                "disc_level2_nonzero_frac", "disc_norm_min_scale_frac"]:
         assert key in info
         assert torch.isfinite(info[key]).all()
 

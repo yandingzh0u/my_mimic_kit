@@ -3,18 +3,15 @@ env_name: "liesig_st_add"
 char_file: "data/assets/humanoid/humanoid.xml"
 camera_mode: "track"
 
-# LieSig-STADD Level-2 (final method): the discriminator differential is the
-# ADD state differential plus the discounted level-2 signature of the
-# fixed-anchor developed increments, i.e. [m, vech_upper(A)]. The area block A
-# is what separates "rolled" from "translated with the same endpoints".
-# Differential dim: 172 (state) + 34 (level 1) + 561 (level 2) = 767.
-#
-# EVALUATION env for Level-2: 10 s (300 control steps, ~5 roll cycles) per
-# episode to expose tail collapse (rolls once, then degrades). Identical
-# observation/differential structure to the 2 s training env; only the
-# horizon differs.
+# EVALUATION env for the COMPLETED Levy-area ablation ([m, vech_upper(A)]):
+# 10 s (300 control steps, ~5 roll cycles) per episode to expose tail collapse
+# (rolls once, then degrades). Identical observation/differential structure to
+# the 2 s training env; only the horizon differs. The final method is evaluated
+# with liesig_st_add_sym_humanoid_roll_eval_env.yaml under the same protocol.
 liesig_order: 2
-# memory time of the discounted signature: 32 control steps @30 Hz, matching
+# pinned: the default is "sym", this ablation is the antisymmetric block
+liesig_second_order: "area"
+# memory time of the discounted lift: 32 control steps @30 Hz, matching
 # the longest window of the frozen ST-ADD v1 baseline. Stored in seconds so
 # rho = exp(-dt / tau) keeps its meaning if the control rate changes.
 liesig_memory_seconds: 1.0666666667

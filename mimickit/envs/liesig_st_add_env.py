@@ -4,15 +4,17 @@ import envs.add_env as add_env
 import envs.lie_signature_obs as lie_signature_obs
 
 class LieSigSTADDEnv(add_env.ADDEnv):
-    """ADD with a discounted path-signature differential.
+    """ADD with a lifted trajectory differential.
 
     The discriminator differential becomes
 
         Delta_t = [ o^ref_t - o^sim_t ,  Phi^ref_t - Phi^sim_t ]
 
     where o is the unchanged ADD state observation and Phi is the causal
-    discounted signature of the fixed-anchor developed increments (order 1:
-    the discounted increment sum; order 2: plus the discounted Levy area).
+    discounted lift of the fixed-anchor developed increments: order 1 is the
+    discounted increment sum m, order 2 adds the symmetric quadratic block
+    1/2 m m^T (or, under liesig_second_order: "area", the discounted Levy
+    area, kept only as a completed ablation).
 
     Both sides stream through identical operators: the simulated character
     from the engine, the reference from the env's _ref_* buffers, which are
@@ -29,6 +31,12 @@ class LieSigSTADDEnv(add_env.ADDEnv):
 
         self._liesig_memory_seconds = float(env_config.get("liesig_memory_seconds", 32.0 / 30.0))
         assert self._liesig_memory_seconds > 0.0
+
+        # "sym" is the method; "area" is the same-width Levy-area ablation,
+        # which the experiments showed to be unnecessary
+        self._liesig_second_order = env_config.get("liesig_second_order",
+                                                   lie_signature_obs.SECOND_ORDER_SYM)
+        assert self._liesig_second_order in lie_signature_obs.SECOND_ORDER_MODES
 
         # cold start only: warm starting would change what a level-2 feature
         # numerically means, so it is not allowed to silently mix in
@@ -51,6 +59,9 @@ class LieSigSTADDEnv(add_env.ADDEnv):
 
     def get_liesig_order(self):
         return self._liesig_order
+
+    def get_liesig_second_order(self):
+        return self._sim_liesig.get_second_order()
 
     def get_liesig_memory_decay(self):
         return self._sim_liesig.get_memory_decay()
@@ -80,12 +91,14 @@ class LieSigSTADDEnv(add_env.ADDEnv):
                                                            kin_char_model=self._kin_char_model,
                                                            order=self._liesig_order,
                                                            rho=rho,
-                                                           device=self._device)
+                                                           device=self._device,
+                                                           second_order=self._liesig_second_order)
         self._ref_liesig = lie_signature_obs.LieSigHistory(num_envs=num_envs,
                                                            kin_char_model=self._kin_char_model,
                                                            order=self._liesig_order,
                                                            rho=rho,
-                                                           device=self._device)
+                                                           device=self._device,
+                                                           second_order=self._liesig_second_order)
 
         # sizes _disc_obs_buf via get_disc_obs_space -> _compute_disc_obs_demo
         super()._build_disc_obs_buffers()
