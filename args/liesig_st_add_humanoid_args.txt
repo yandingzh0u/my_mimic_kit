@@ -1,0 +1,5 @@
+--env_config data/envs/liesig_st_add_l2_humanoid_roll_cycle_env.yaml
+--agent_config data/agents/liesig_st_add_humanoid_agent.yaml
+--engine_config data/engines/isaac_lab_engine.yaml
+--out_dir output/liesig_st_add/
+--max_samples 131072000

@@ -35,6 +35,9 @@ def build_agent(agent_file, env, device):
     elif (agent_name == "STADD"):
         import learning.st_add_agent as st_add_agent
         agent = st_add_agent.STADDAgent(config=agent_config, env=env, device=device)
+    elif (agent_name == "LIESIG_STADD"):
+        import learning.liesig_st_add_agent as liesig_st_add_agent
+        agent = liesig_st_add_agent.LieSigSTADDAgent(config=agent_config, env=env, device=device)
     elif (agent_name == "LCP"):
         import learning.lcp_agent as lcp_agent
         agent = lcp_agent.LCPAgent(config=agent_config, env=env, device=device)
