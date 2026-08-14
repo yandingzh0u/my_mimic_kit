@@ -40,9 +40,12 @@ This run is the first under the unified CPMD naming and the single-buffer
 discriminator data path (only the differential is stored, not both endpoints).
 It reproduces the earlier symmetric-lift run it replaced -- winding +0.930 vs
 +0.933, shortcut 15/256 vs 14/256, gradient share 0.252/0.036/0.712 vs
-0.249/0.036/0.715 -- which is what the bit-identity of the buffer change
-predicts. The older run's directory was removed once this evaluation passed;
-its logs remain in git history at bb6d856^.
+0.249/0.036/0.715. The buffer change is bit-identical by construction, but the
+two runs are not the same trajectory: the obs space is no longer sized by
+sampling a demo frame, so seed 0 draws a different RNG stream. The agreement is
+therefore a reproduction across that stream, not an identity. The older run's
+directory was removed once this evaluation passed; its logs remain in git
+history at bb6d856^.
 
 What the numbers do and do not support. Under one seed this shows the full
 CPMD representation learns a directed Roll where the state-only differential
@@ -50,3 +53,10 @@ does not. It does not isolate a capacity-independent cause: the earlier
 same-width control established that path-order information is unnecessary, but
 no experiment here separates the pairwise interactions from a generic
 quadratic expansion of the same width.
+
+Log format note. util/logger.py padded each column to a fixed width with no
+separator, so this run's header line ran three of the longer diagnostic names
+together and any whitespace parser silently mis-aligned every column after
+Disc_Interaction_Rms. The logger now always emits a separator, and this run's
+header was rewritten with the correct names and order. No value was touched;
+the alignment can be checked against the per-iteration console blocks.
