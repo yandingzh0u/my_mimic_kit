@@ -1,0 +1,4 @@
+method,source,episodes,winding_mean,winding_std,winding_median,disp_mean,height_rmse_mean_m,height_rmse_median_m,upright_rate,shortcut_count,shortcut_rate,full_horizon_count
+ADD,/home/y/.local/share/Trash/files/add_roll_contact_et_1k_seed0/roll_behavior.npz,128,-0.00746342,0.03576881,-0.00550045,0.22070984,0.34265277,0.34379940,0.00000000,128,1.00000000,128
+First-order,/home/y/my_mimic_mixgrpo/MimicKit/output/liesig_l1_roll_cycle_1k_seed0/roll_behavior.npz,256,0.03540468,0.06977633,-0.00524478,1.08512182,0.06135802,0.05716071,0.30468750,256,1.00000000,256
+CPMD,/home/y/my_mimic_mixgrpo/MimicKit/output/liesig_placebo_roll_cycle_1k_seed0/roll_behavior.npz,256,0.93006788,0.21873229,0.97625023,1.14254743,0.08232417,0.05882649,0.30468750,15,0.05859375,256
