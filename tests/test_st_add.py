@@ -313,7 +313,7 @@ class FakeEnv:
     def get_disc_traj_rot_obs_dim(self):
         return ROT_DIM
 
-def make_model(fusion="mean", tau=2.0, head="independent"):
+def make_model(fusion="mean", tau=2.0):
     config = {
         "actor_net": "fc_2layers_128units",
         "actor_init_output_scale": 0.01,
@@ -325,26 +325,6 @@ def make_model(fusion="mean", tau=2.0, head="independent"):
         "disc_rot_net": "fc_2layers_128units",
         "disc_fusion": fusion,
         "disc_fusion_tau": tau,
-        "disc_head": head,
-        "disc_head_dim": 32,
-    }
-    torch.manual_seed(0)
-    return st_add_model.STADDModel(config, FakeEnv())
-
-def make_hetero_model(head):
-    """Model with the real heterogeneous encoder widths (1024/512/128) to
-    expose the branch logit scale problem."""
-    config = {
-        "actor_net": "fc_2layers_128units",
-        "actor_init_output_scale": 0.01,
-        "actor_std_type": "FIXED",
-        "action_std": 0.05,
-        "critic_net": "fc_2layers_128units",
-        "disc_state_net": "fc_2layers_1024units",
-        "disc_motion_net": "fc_2layers_512units",
-        "disc_rot_net": "fc_2layers_128units",
-        "disc_head": head,
-        "disc_head_dim": 128,
     }
     torch.manual_seed(0)
     return st_add_model.STADDModel(config, FakeEnv())
@@ -508,90 +488,6 @@ def test_za_gradient_weights_are_softmax():
     dz_rot = (z_r2 - z_r).item()
     dz_fused = (z_f2 - z_f).item()
     assert abs(dz_fused - w[0, 2].item() * dz_rot) < 5e-6 + 5e-3 * abs(dz_rot)
-
-# ---------------------------------------------------------------------------
-# ST-ADD v2: shared normalized head (single-ruler logits)
-# ---------------------------------------------------------------------------
-
-def test_shared_head_scale_identifiability():
-    """With independent heads, heterogeneous encoder widths (1024/512/128)
-    produce branch logits on visibly different scales at init. The shared
-    normalized head puts every branch feature on the same sphere
-    (||u_i|| = sqrt(k) exactly, parameter-free LayerNorm), so the achievable
-    logit range |z - b| <= ||w||*sqrt(k) is identical across branches: one
-    ruler. Across-sample dispersion also gets closer at init."""
-    x = rand_disc_obs(n=4096)
-
-    model_ind = make_hetero_model("independent")
-    with torch.no_grad():
-        z_s, z_m, z_r = model_ind._eval_branch_logits(x)
-    stds_ind = torch.tensor([z_s.std(), z_m.std(), z_r.std()])
-    ratio_ind = (stds_ind.max() / stds_ind.min()).item()
-    assert ratio_ind > 1.5, ratio_ind
-
-    model_shared = make_hetero_model("shared")
-    k = model_shared._disc_shared_logits.weight.shape[-1]
-    state_obs, motion_obs, rot_obs = model_shared._split_disc_obs(x)
-    with torch.no_grad():
-        for obs, enc, proj in (
-                (state_obs, model_shared._disc_state_layers, model_shared._disc_state_proj),
-                (motion_obs, model_shared._disc_motion_layers, model_shared._disc_motion_proj),
-                (rot_obs, model_shared._disc_rot_layers, model_shared._disc_rot_proj)):
-            u = model_shared._disc_head_norm(proj(enc(obs)))
-            norms = torch.linalg.norm(u, dim=-1) / (k ** 0.5)
-            assert torch.all(torch.abs(norms - 1.0) < 1e-2), norms
-
-        z_s, z_m, z_r = model_shared._eval_branch_logits(x)
-    stds_shared = torch.tensor([z_s.std(), z_m.std(), z_r.std()])
-    ratio_shared = (stds_shared.max() / stds_shared.min()).item()
-    assert ratio_shared < ratio_ind, (ratio_shared, ratio_ind)
-
-def test_shared_head_is_single_ruler():
-    """All three branches are scored by literally the same weight vector, and
-    the logit regularization only sees that one head."""
-    model = make_model(head="shared")
-    w = model.get_disc_logit_weights()
-    assert w.numel() == model._disc_shared_logits.weight.numel()
-    assert torch.equal(w, torch.flatten(model._disc_shared_logits.weight))
-
-def test_shared_head_gradients_reach_all_encoders():
-    """The fused logit trains all three encoders, projections, and the shared
-    head."""
-    model = make_model(head="shared")
-    x = rand_disc_obs()
-    _, _, _, z_f = model.eval_disc_branches(x)
-    z_f.sum().backward()
-    mods = (model._disc_state_layers, model._disc_motion_layers, model._disc_rot_layers,
-            model._disc_state_proj, model._disc_motion_proj, model._disc_rot_proj,
-            model._disc_shared_logits)
-    for mod in mods:
-        grads = [p.grad for p in mod.parameters()]
-        assert any(g is not None and torch.any(g != 0) for g in grads)
-
-def test_shared_head_disc_params_complete():
-    """get_disc_params covers every discriminator parameter exactly once in
-    shared mode (encoders + projections + shared head)."""
-    model = make_model(head="shared")
-    params = model.get_disc_params()
-    ids = [id(p) for p in params]
-    assert len(ids) == len(set(ids))
-    expected = (list(model._disc_state_layers.parameters())
-                + list(model._disc_motion_layers.parameters())
-                + list(model._disc_rot_layers.parameters())
-                + list(model._disc_state_proj.parameters())
-                + list(model._disc_motion_proj.parameters())
-                + list(model._disc_rot_proj.parameters())
-                + list(model._disc_shared_logits.parameters()))
-    assert set(ids) == set(id(p) for p in expected)
-
-def test_shared_head_fusion_and_anchor_still_work():
-    """Zero-anchor and mean fusion semantics are unchanged under the shared
-    head: eval_disc(0) == mean of the branch anchors."""
-    model = make_model(head="shared")
-    zeros = torch.zeros([1, TOTAL_DIM])
-    z_f = model.eval_disc(zeros)
-    b = model.eval_zero_anchor()
-    assert torch.allclose(z_f, torch.mean(b, dim=-1, keepdim=True), atol=1e-6)
 
 def test_za_anchor_detached_in_fusion():
     """The fused logit backpropagates through the live branch logits but the
