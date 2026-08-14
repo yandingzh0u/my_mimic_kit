@@ -363,7 +363,10 @@ class BaseAgent(torch.nn.Module):
         test_eps = test_info["num_eps"]
         test_eps = mp_util.reduce_sum(test_eps)
 
-        self._logger.log("Test_Return", test_return, collection="0_Main")
+        # the raw environment return, which is not what every agent optimizes:
+        # adversarial agents get their reward from the discriminator, and with
+        # task_reward_weight 0 this stays at whatever the env itself pays out
+        self._logger.log("Raw_Env_Test_Return", test_return, collection="0_Main")
         self._logger.log("Test_Episode_Length", test_ep_len, collection="0_Main", quiet=True)
         self._logger.log("Test_Episodes", test_eps, collection="1_Info", quiet=True)
 
@@ -372,7 +375,7 @@ class BaseAgent(torch.nn.Module):
         train_eps = train_info.pop("num_eps")
         train_eps = mp_util.reduce_sum(train_eps)
 
-        self._logger.log("Train_Return", train_return, collection="0_Main")
+        self._logger.log("Raw_Env_Return", train_return, collection="0_Main")
         self._logger.log("Train_Episode_Length", train_ep_len, collection="0_Main", quiet=True)
         self._logger.log("Train_Episodes", train_eps, collection="1_Info", quiet=True)
 

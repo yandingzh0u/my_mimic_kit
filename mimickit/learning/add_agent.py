@@ -35,20 +35,20 @@ class ADDAgent(amp_agent.AMPAgent):
     def _record_data_post_step(self, next_obs, r, done, next_info):
         super(amp_agent.AMPAgent, self)._record_data_post_step(next_obs, r, done, next_info)
 
-        disc_obs = next_info["disc_obs"]
-        disc_obs_demo = next_info["disc_obs_demo"]
-        self._exp_buffer.record("disc_obs_demo", disc_obs_demo)
-        self._exp_buffer.record("disc_obs", disc_obs)
+        # every consumer starts by subtracting these two, so the difference is
+        # formed once here and the endpoints are not stored: same arithmetic on
+        # the same values, half the discriminator data in memory
+        disc_diff = next_info["disc_obs_demo"] - next_info["disc_obs"]
+        self._exp_buffer.record("disc_diff", disc_diff)
         return
     
     def _record_disc_demo_data(self):
         return
     
     def _store_disc_replay_data(self):
-        disc_obs = self._exp_buffer.get_data_flat("disc_obs")
-        disc_obs_demo = self._exp_buffer.get_data_flat("disc_obs_demo")
+        disc_diff = self._exp_buffer.get_data_flat("disc_diff")
 
-        n = disc_obs.shape[0]
+        n = disc_diff.shape[0]
         rand_idx = torch.randperm(n, device=self._device, dtype=torch.long)
         
         if (self._disc_buffer.is_full()):
@@ -57,21 +57,14 @@ class ADDAgent(amp_agent.AMPAgent):
             num_samples = n
         
         idx = rand_idx[:num_samples]
-        replay_disc_obs = disc_obs[idx]
-        replay_disc_obs_demo = disc_obs_demo[idx]
-        disc_data = {
-            "disc_obs": replay_disc_obs.unsqueeze(1),
-            "disc_obs_demo": replay_disc_obs_demo.unsqueeze(1)
-        }
+        disc_data = {"disc_diff": disc_diff[idx].unsqueeze(1)}
         self._disc_buffer.push(disc_data)
         return
 
     def _compute_rewards(self):
         task_r = self._exp_buffer.get_data_flat("reward")
-        disc_obs = self._exp_buffer.get_data_flat("disc_obs")
-        disc_obs_demo = self._exp_buffer.get_data_flat("disc_obs_demo")
 
-        obs_diff = disc_obs_demo - disc_obs
+        obs_diff = self._exp_buffer.get_data_flat("disc_diff")
         norm_obs_diff = self._disc_obs_norm.normalize(obs_diff)
         disc_r = self._calc_disc_rewards(norm_obs_diff)
         disc_reward_std, disc_reward_mean = torch.std_mean(disc_r)
@@ -89,22 +82,16 @@ class ADDAgent(amp_agent.AMPAgent):
         return info
     
     def _compute_disc_loss(self, batch):
-        disc_obs = batch["disc_obs"]
-        tar_disc_obs = batch["disc_obs_demo"]
-
         pos_diff = self._pos_diff.clone()
         pos_diff = pos_diff.unsqueeze(dim=0)
         pos_diff.requires_grad_(True)
         disc_pos_logit = self._model.eval_disc(pos_diff)
         disc_pos_logit = disc_pos_logit.squeeze(-1)
         
-        diff_obs = tar_disc_obs - disc_obs
+        diff_obs = batch["disc_diff"]
         
         replay_data = self._disc_buffer.sample(diff_obs.shape[0])
-        replay_disc_obs = replay_data["disc_obs"]
-        replay_tar_disc_obs = replay_data["disc_obs_demo"]
-        replay_diff = replay_tar_disc_obs - replay_disc_obs
-        diff_obs = torch.cat([diff_obs, replay_diff], dim=0)
+        diff_obs = torch.cat([diff_obs, replay_data["disc_diff"]], dim=0)
 
         norm_diff_obs = self._disc_obs_norm.normalize(diff_obs)
         norm_diff_obs.requires_grad_(True)

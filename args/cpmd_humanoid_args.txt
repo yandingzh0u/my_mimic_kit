@@ -1,0 +1,5 @@
+--env_config data/envs/cpmd_humanoid_roll_cycle_env.yaml
+--agent_config data/agents/cpmd_humanoid_agent.yaml
+--engine_config data/engines/isaac_lab_engine.yaml
+--out_dir output/cpmd/
+--max_samples 131072000

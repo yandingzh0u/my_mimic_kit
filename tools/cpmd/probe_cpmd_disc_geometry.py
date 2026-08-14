@@ -1,10 +1,10 @@
-"""Offline probe of the LieSig discriminator's geometry along the ray to zero.
+"""Offline probe of the CPMD discriminator's geometry along the ray to zero.
 
-The shared-head ST-ADD v2 failure was invisible in the loss and obvious in the
-geometry: the discriminator won so hard that the policy region sat on a flat,
-saturated shell and softplus(z) delivered almost no reward gradient. This tool
-makes that failure mode directly observable for any ADD-style checkpoint,
-without training anything.
+A discriminator can win so hard that the policy region sits on a flat,
+saturated shell where softplus(z) delivers almost no reward gradient. That
+failure is invisible in the loss and obvious in the geometry, so this tool
+makes it directly observable for any ADD-style checkpoint, without training
+anything.
 
 It rolls out the policy, collects real differentials Delta, and scans
 
@@ -21,16 +21,16 @@ Reported per alpha:
   d logit / d alpha       finite-difference slope along the ray
   |grad_Delta D|          gradient magnitude at that point (reward signal)
 
-Also reports the per-block share of |grad_Delta D| (state / level 1 / level 2)
-at alpha = 1, i.e. which part of the differential the discriminator actually
-uses on policy data.
+Also reports the per-block share of |grad_Delta D| (state / summary /
+interactions) at alpha = 1, i.e. which part of the differential the
+discriminator actually uses on policy data.
 
 Example:
-    python tools/liesig_st_add/probe_liesig_disc_geometry.py \
-        --env_config output/liesig_l2_roll/env_config.yaml \
-        --engine_config output/liesig_l2_roll/engine_config.yaml \
-        --agent_config output/liesig_l2_roll/agent_config.yaml \
-        --model_file output/liesig_l2_roll/model.pt \
+    python tools/cpmd/probe_cpmd_disc_geometry.py \
+        --env_config output/cpmd_roll_cycle_1k_seed0/env_config.yaml \
+        --engine_config output/cpmd_roll_cycle_1k_seed0/engine_config.yaml \
+        --agent_config output/cpmd_roll_cycle_1k_seed0/agent_config.yaml \
+        --model_file output/cpmd_roll_cycle_1k_seed0/model.pt \
         --num_envs 64 --steps 120
 """
 
@@ -51,7 +51,7 @@ import util.mp_util as mp_util
 import util.util as util
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="LieSig discriminator geometry probe")
+    parser = argparse.ArgumentParser(description="CPMD discriminator geometry probe")
     parser.add_argument("--env_config", type=str, required=True)
     parser.add_argument("--engine_config", type=str, required=True)
     parser.add_argument("--agent_config", type=str, required=True)
@@ -124,12 +124,13 @@ def block_shares(agent, env, diffs):
     energy = torch.mean(torch.square(grad), dim=0)
 
     s = env.get_disc_state_obs_dim()
-    d = env.get_liesig_tangent_dim()
-    a = env.get_liesig_area_dim()
+    d = env.get_cpmd_summary_dim()
 
-    blocks = {"state": energy[:s].sum(), "level1": energy[s:s + d].sum()}
-    if (a > 0):
-        blocks["level2"] = energy[s + d:].sum()
+    blocks = {
+        "state": energy[:s].sum(),
+        "summary": energy[s:s + d].sum(),
+        "interactions": energy[s + d:].sum(),
+    }
 
     total = sum(float(v.item()) for v in blocks.values())
     total = max(total, 1e-12)

@@ -1,10 +1,10 @@
-agent_name: "LIESIG_STADD"
+agent_name: "CPMD"
 
-# LieSig-STADD agent: item-for-item the official ADD humanoid agent, with
-# only the agent name changed. The whole method lives in the differential
-# (see data/envs/liesig_st_add_*), so the training side must stay stock ADD:
-# one discriminator net, one zero-vs-policy BCE, one softplus reward, no
-# branch weights, no auxiliary losses, no extra reward terms.
+# CPMD agent: item-for-item the official ADD humanoid agent, with only the agent
+# name changed. The whole method lives in the differential (see
+# data/envs/cpmd_*), so the training side must stay stock ADD: one discriminator
+# net, one zero-vs-policy BCE, one softplus reward, no branch weights, no
+# auxiliary losses, no extra reward terms.
 model:
   actor_net: "fc_2layers_1024units"
   actor_init_output_scale: 0.01

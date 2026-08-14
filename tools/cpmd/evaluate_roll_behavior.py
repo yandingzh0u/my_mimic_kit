@@ -1,7 +1,7 @@
-"""Behavior-level evaluation for Roll (ADD vs TangentADD, stage 1).
+"""Behavior-level evaluation for Roll.
 
-Rolls out a trained policy in TEST mode and reports the decisive stage-1
-metrics, which target behavior rather than average tracking error:
+Rolls out a trained policy in TEST mode and reports the decisive metrics, which
+target behavior rather than average tracking error:
 
   winding_ratio     directed root rotation about the motion's dominant
                     rotation axis, integrated over the episode, divided by
@@ -22,16 +22,17 @@ metrics, which target behavior rather than average tracking error:
                     stand-and-wait, ...).
 
 All directional quantities are expressed in the per-episode fixed motion yaw
-anchor frame (reference root heading at motion time 0), exactly as in the
-TangentADD tangent branch. Works with both `add` and `tangent_add` envs.
+anchor frame (reference root heading at motion time 0), the same anchor the
+CPMD increments use. The metrics only read root states, so this works for any
+ADD-style env.
 
 Example:
-    python tools/flow_add/evaluate_roll_behavior.py \
-        --env_config output/tangentadd_roll/env_config.yaml \
-        --engine_config output/tangentadd_roll/engine_config.yaml \
-        --agent_config output/tangentadd_roll/agent_config.yaml \
-        --model_file output/tangentadd_roll/model.pt \
-        --num_envs 64 --episodes 256 --out output/tangentadd_roll/roll_behavior.npz
+    python tools/cpmd/evaluate_roll_behavior.py \
+        --env_config data/envs/cpmd_humanoid_roll_eval_env.yaml \
+        --engine_config output/cpmd_roll_cycle_1k_seed0/engine_config.yaml \
+        --agent_config output/cpmd_roll_cycle_1k_seed0/agent_config.yaml \
+        --model_file output/cpmd_roll_cycle_1k_seed0/model.pt \
+        --num_envs 64 --episodes 256 --out output/cpmd_roll_cycle_1k_seed0/roll_behavior.npz
 """
 
 import argparse
@@ -46,7 +47,7 @@ sys.path.insert(0, os.path.join(REPO_DIR, "mimickit"))
 
 import envs.base_env as base_env
 import envs.env_builder as env_builder
-import envs.trajectory_add_obs as trajectory_add_obs
+import envs.cpmd_obs as cpmd_obs
 import learning.agent_builder as agent_builder
 import learning.base_agent as base_agent
 import util.mp_util as mp_util
@@ -89,7 +90,7 @@ def build_motion_frames(env, device):
     motion_ids = torch.arange(num_motions, device=device, dtype=torch.long)
 
     _, root_rot0, _, _, _, _ = mlib.calc_motion_frame(motion_ids, torch.zeros(num_motions, device=device))
-    anchor_inv = trajectory_add_obs.calc_motion_anchor_quat_inv(root_rot0)
+    anchor_inv = cpmd_obs.calc_motion_anchor_quat_inv(root_rot0)
 
     lengths = mlib.get_motion_length(motion_ids)
     num_samples = 200

@@ -1,27 +1,31 @@
-env_name: "liesig_st_add"
+env_name: "cpmd"
 
 char_file: "data/assets/humanoid/humanoid.xml"
 camera_mode: "track"
 
-# FAILED ABLATION: level 1 only. The differential is the ADD state differential
-# plus ONLY the discounted increment sum m, without any level-2 lift, so the
-# discriminator sees the tracking error m_ref - m_sim and nothing about the
-# absolute motion it happened in. Differential dim: 172 + 34 = 206.
-# Outcome (seed 0, 1000 iterations): tracking looks fine but the policy never
-# rolls -- winding 0.035, 100% shortcut -- which is what motivated the level-2
-# lift. Kept so the ablation stays reproducible.
-# second_order does not apply at order 1: there is no level-2 block.
+# CPMD (context-preserving motion differentials). The discriminator differential
+# is the ADD state differential plus two blocks computed per side and differenced
+# afterwards: the causal motion summary m (34) and its pairwise context
+# interactions c = {1/2 m_i m_j}_{i<j} (561). Differential dim: 172 + 34 + 561.
+#
+# Because the interactions are formed per side, the block that reaches the
+# discriminator is 1/4 (dm sm^T + sm dm^T)|_{i<j} with dm = m_ref - m_sim and
+# sm = m_ref + m_sim: the tracking error multiplied by the common-mode motion of
+# the two sides. A differential of raw errors cannot express that, and that is
+# what removes the Roll shortcut.
+#
+# There is one training run and one discriminator: both blocks enter it on every
+# step, together with the state differential. Training is stock ADD: one
+# zero-vs-policy BCE, one softplus reward, no branches, no fusion, no auxiliary
+# losses.
 #
 # Cycle training: one roll cycle (~2 s = 60 control steps) per episode with
 # random phase resets, no pose ET, natural time-based resets.
-# Frozen seed-0 run: output/liesig_l1_roll_cycle_1k_seed0.
-liesig_order: 1
-# memory time of the discounted lift: 32 control steps @30 Hz, matching
-# the longest window of the frozen ST-ADD v1 baseline. Stored in seconds so
+#
+# memory time of the summary: 32 control steps @30 Hz. Stored in seconds so
 # rho = exp(-dt / tau) keeps its meaning if the control rate changes.
-liesig_memory_seconds: 1.0666666667
-liesig_reset_mode: "zero"
-liesig_schema_version: 1
+cpmd_memory_seconds: 1.0666666667
+cpmd_schema_version: 1
 
 episode_length: 2.0 # seconds
 global_obs: True

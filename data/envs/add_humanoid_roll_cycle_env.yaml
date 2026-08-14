@@ -3,9 +3,9 @@ env_name: "add"
 char_file: "data/assets/humanoid/humanoid.xml"
 camera_mode: "track"
 
-# ADD baseline matched to the ST-ADD cycle-training protocol: one roll cycle
+# ADD baseline matched to the CPMD cycle-training protocol: one roll cycle
 # (~2 s = 60 control steps) per episode with random phase resets, no pose ET,
-# natural time-based resets. Identical to st_add_humanoid_roll_cycle_env.yaml
+# natural time-based resets. Identical to cpmd_humanoid_roll_cycle_env.yaml
 # except for the env (discriminator differential) type.
 episode_length: 2.0 # seconds
 global_obs: True
