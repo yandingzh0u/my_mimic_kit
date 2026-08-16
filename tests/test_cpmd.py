@@ -476,6 +476,35 @@ def test_replay_buffer_keeps_the_pairs_intact():
     cross = demo[0, 0] - obs[0, 1]
     assert not is_a_true_pair(cross.unsqueeze(0)).item()
 
+def test_first_replay_push_caps_a_rollout_larger_than_capacity():
+    """8192 envs x 32 steps exceeds the stock 200k replay capacity.
+
+    The first push must select a capacity-sized subset rather than asserting;
+    every stored row must still be a genuine paired differential.
+    """
+    steps, num_envs, capacity = 4, 16, 32
+    obs, demo = make_disc_data(steps, num_envs, seed=23)
+
+    agent = ReplayStub()
+    agent._device = DEVICE
+    agent._disc_replay_samples = 8
+    agent._exp_buffer = experience_buffer.ExperienceBuffer(steps, num_envs, DEVICE)
+    agent._disc_buffer = experience_buffer.ExperienceBuffer(capacity, 1, DEVICE)
+
+    for k in range(steps):
+        agent._exp_buffer.record("disc_diff", demo[k] - obs[k])
+        agent._exp_buffer.inc()
+
+    torch.manual_seed(24)
+    agent._store_disc_replay_data()
+    assert agent._disc_buffer.get_sample_count() == capacity
+    assert agent._disc_buffer.is_full()
+
+    truth = (demo - obs).reshape(-1, TOTAL_DIM)
+    replay = agent._disc_buffer.sample(capacity)["disc_diff"].squeeze(1)
+    matches = torch.eq(replay.unsqueeze(1), truth.unsqueeze(0)).all(dim=-1).any(dim=-1)
+    assert torch.all(matches)
+
 def test_agent_does_not_change_add_training():
     """The method is a differential, not a new training rule: the reward path
     and the model builder are inherited untouched."""
@@ -497,6 +526,11 @@ def test_diagnostics_are_pure_measurement():
     agent._state_dim = STATE_DIM
     agent._summary_dim = SUMMARY_DIM
     agent._interaction_dim = INTERACTION_DIM
+    agent._dof_dim = 28
+    agent._state_vel_dim = 34
+    agent._memory_seconds = 32.0 / 30.0
+    agent._mean_motion_length = 2.0
+    agent._memory_to_motion_ratio = agent._memory_seconds / agent._mean_motion_length
     agent._disc_obs_norm = diff_normalizer.DiffNormalizer([TOTAL_DIM], device=DEVICE)
 
     torch.manual_seed(7)
@@ -506,13 +540,47 @@ def test_diagnostics_are_pure_measurement():
                 "disc_neg_acc", "disc_pos_logit", "disc_neg_logit"}
     assert add_keys.isdisjoint(info.keys())
     for key in ["disc_state_rms", "disc_summary_rms", "disc_interaction_rms",
-                "disc_interaction_nonzero_frac", "disc_norm_min_scale_frac"]:
+                "disc_interaction_nonzero_frac", "disc_norm_min_scale_frac",
+                "disc_state_energy_frac", "disc_summary_energy_frac",
+                "disc_interaction_energy_frac", "cpmd_memory_to_motion_ratio"]:
         assert key in info
         assert torch.isfinite(info[key]).all()
+
+    energy_sum = (info["disc_state_energy_frac"]
+                  + info["disc_summary_energy_frac"]
+                  + info["disc_interaction_energy_frac"])
+    assert torch.allclose(energy_sum, torch.tensor(1.0))
 
     zero_info = agent._compute_disc_diagnostics(torch.zeros([8, TOTAL_DIM]))
     assert zero_info["disc_state_rms"].item() == 0.0
     assert zero_info["disc_interaction_rms"].item() == 0.0
+
+
+def test_gradient_diagnostics_partition_existing_add_gradient():
+    class GradStub:
+        _compute_disc_input_diagnostics = cpmd_agent.CPMDAgent._compute_disc_input_diagnostics
+
+    agent = GradStub()
+    agent._state_dim = STATE_DIM
+    agent._summary_dim = SUMMARY_DIM
+    agent._interaction_dim = INTERACTION_DIM
+    agent._dof_dim = 28
+    agent._state_vel_dim = 34
+    agent._disc_reward_scale = 2.0
+
+    torch.manual_seed(25)
+    grad = torch.randn([16, TOTAL_DIM])
+    logits = torch.linspace(-7.0, 1.0, 16)
+    info = agent._compute_disc_input_diagnostics(
+        torch.randn([16, TOTAL_DIM]), grad, logits)
+
+    frac_sum = (info["disc_grad_state_frac"]
+                + info["disc_grad_summary_frac"]
+                + info["disc_grad_interaction_frac"])
+    assert torch.allclose(frac_sum, torch.tensor(1.0))
+    assert 0.0 <= info["disc_grad_dof_vel_frac"] <= info["disc_grad_state_frac"]
+    assert 0.0 <= info["disc_neg_logit_lt_m5_frac"] <= 1.0
+    assert torch.isfinite(info["disc_reward_logit_slope_mean"])
 
 def test_demo_api_fails_loudly():
     """The reference blocks depend on episode age, so there is no honest way

@@ -1,0 +1,84 @@
+CPMD seed-0 experiment summary
+Date: 2026-08-16
+
+This file indexes the formal runs retained for the current development cycle.
+All values below are single-training-seed observations, not estimates of
+training-seed variance.
+
+Matched Jog diagnostic (8192 environments, 2000 iterations)
+------------------------------------------------------------
+ADD, output/add_jog_matched_2k_seed0/log.txt
+  Samples: 524288000
+  Root_Pos_Err: 0.055844
+  Root_Rot_Err: 0.045041
+  Body_Pos_Err: 0.025205
+  Body_Rot_Err: 0.090355
+  Dof_Vel_Err: 0.562767
+  Root_Vel_Err: 0.221876
+  Root_Ang_Vel_Err: 0.415246
+  Throughput: 69360 samples/s
+
+CPMD, output/cpmd_jog_2k_seed0/log.txt
+  Samples: 524288000
+  Root_Pos_Err: 0.089791
+  Root_Rot_Err: 0.056409
+  Body_Pos_Err: 0.032114
+  Body_Rot_Err: 0.112515
+  Dof_Vel_Err: 0.796886
+  Root_Vel_Err: 0.319983
+  Root_Ang_Vel_Err: 0.660899
+  Throughput: 59666 samples/s
+
+The local matched seed-0 Jog result favors ADD on every listed tracking
+metric. This comparison does not establish multi-seed significance.
+
+Additional CPMD Table-I diagnostics (8192 environments, 2000 iterations)
+----------------------------------------------------------------------------
+Run, output/cpmd_run_2k_seed0/log.txt
+  Root_Pos_Err: 0.045589
+  Root_Rot_Err: 0.069564
+  Body_Pos_Err: 0.031674
+  Body_Rot_Err: 0.102579
+  Dof_Vel_Err: 0.960940
+  Root_Vel_Err: 0.235363
+  Root_Ang_Vel_Err: 0.611561
+  Throughput: 62245 samples/s
+
+Sideflip, output/cpmd_sideflip_2k_seed0/log.txt
+  First non-finite training record: iteration 1100
+  Last finite checkpoint reported here: iteration 1000
+  Root_Pos_Err: 0.437697
+  Root_Rot_Err: 0.321088
+  Body_Pos_Err: 0.116208
+  Body_Rot_Err: 0.410929
+  Dof_Vel_Err: 1.130082
+  Root_Vel_Err: 0.531343
+  Root_Ang_Vel_Err: 1.024662
+  Throughput: 59355 samples/s
+
+Established CPMD Roll (4096 environments, 1000 iterations)
+-----------------------------------------------------------
+Training log: logs/cpmd_roll_cycle_1k_seed0_log.txt
+Behavior report: logs/cpmd_roll_cycle_1k_seed0_behavior.txt
+  Evaluation: 256 episodes, 300 control steps, evaluation seed 7
+  Mean directed winding: 0.933
+  Median directed winding: 0.975
+  Shortcut rate (winding < 0.5): 5.5% (14/256)
+  Root height RMSE: 0.072 m
+  Completed by time limit: 256/256
+
+Bounded residual-context candidate (4096 environments, 1000 iterations)
+----------------------------------------------------------------------------
+Training log: output/cpmd_residual_roll_cycle_1k_seed0/log.txt
+Behavior data: output/cpmd_residual_roll_cycle_1k_seed0/roll_behavior.npz
+  Evaluation: 256 episodes, 300 control steps
+  Mean directed winding: 0.047
+  Median directed winding: 0.035
+  Shortcut rate (winding < 0.5): 100% (256/256)
+  Displacement ratio: 0.911
+  Root height RMSE: 0.173 m
+  Upright rate: 0.180
+  Completed by time limit: 256/256
+
+The residual-context candidate is a documented negative result and does not
+replace the established 767-dimensional CPMD method.

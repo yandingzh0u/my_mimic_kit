@@ -1,0 +1,100 @@
+suite_name: cpmd_humanoid_table1_seed0
+base_env_config: data/envs/cpmd_humanoid_table1_base_env.yaml
+engine_config: data/engines/isaac_lab_engine.yaml
+agent_config: data/agents/cpmd_humanoid_agent.yaml
+
+rand_seed: 0
+num_envs: 8192
+iterations: 2000
+steps_per_iter: 32
+save_int_models: true
+
+# AMASS DanceDB and LaFAN1 are intentionally excluded: their datasets are not
+# present locally.  Reported lengths are metadata from ADD Table I; local
+# lengths are computed and recorded by the suite runner rather than assumed.
+skills:
+  - name: run
+    display_name: Run
+    reported_length_s: 0.80
+    motion_file: data/motions/humanoid/humanoid_run.pkl
+    contact_bodies: [right_foot, left_foot]
+
+  - name: jog
+    display_name: Jog
+    reported_length_s: 0.83
+    motion_file: data/motions/humanoid/humanoid_jog.pkl
+    contact_bodies: [right_foot, left_foot]
+
+  - name: sideflip
+    display_name: Sideflip
+    reported_length_s: 2.44
+    motion_file: data/motions/humanoid/humanoid_sideflip.pkl
+    contact_bodies: [right_foot, left_foot]
+
+  - name: crawl
+    display_name: Crawl
+    reported_length_s: 2.93
+    motion_file: data/motions/humanoid/humanoid_crawl.pkl
+    contact_bodies: []
+
+  - name: roll
+    display_name: Roll
+    reported_length_s: 2.00
+    motion_file: data/motions/humanoid/humanoid_roll.pkl
+    contact_bodies: []
+
+  - name: double_kong
+    display_name: Double Kong
+    reported_length_s: 5.17
+    motion_file: data/motions/humanoid/humanoid_double_kong.pkl
+    contact_bodies: [right_hand, left_hand, right_foot, left_foot]
+    objects:
+      - pos: [-8.0, 0.2, 0.3]
+        file: data/assets/objects/vault_box.xml
+      - pos: [-9.6, 0.2, 0.3]
+        file: data/assets/objects/vault_box.xml
+
+  - name: getup_facedown
+    display_name: Getup Facedown
+    reported_length_s: 3.03
+    motion_file: data/motions/humanoid/humanoid_getup_facedown.pkl
+    contact_bodies: []
+
+  - name: spinkick
+    display_name: Spinkick
+    reported_length_s: 1.28
+    motion_file: data/motions/humanoid/humanoid_spinkick.pkl
+    contact_bodies: [right_foot, left_foot]
+
+  - name: cartwheel
+    display_name: Cartwheel
+    reported_length_s: 2.71
+    motion_file: data/motions/humanoid/humanoid_cartwheel.pkl
+    contact_bodies: [right_hand, left_hand, right_foot, left_foot]
+
+  - name: backflip
+    display_name: Backflip
+    reported_length_s: 1.75
+    motion_file: data/motions/humanoid/humanoid_backflip.pkl
+    contact_bodies: [right_foot, left_foot]
+
+  - name: climb
+    display_name: Climb
+    reported_length_s: 9.97
+    motion_file: data/motions/humanoid/humanoid_climbing_up_down.pkl
+    contact_bodies: [right_hand, left_hand, right_foot, left_foot]
+    objects:
+      - pos: [-5.46, 0.1, 1.0]
+        file: data/assets/objects/climbing_box.xml
+
+  - name: dance_a
+    display_name: Dance A
+    reported_length_s: 1.62
+    motion_file: data/motions/humanoid/humanoid_dance_a.pkl
+    contact_bodies: [right_foot, left_foot]
+
+  - name: walk
+    display_name: Walk
+    reported_length_s: 0.96
+    motion_file: data/motions/humanoid/humanoid_walk.pkl
+    contact_bodies: [right_foot, left_foot]

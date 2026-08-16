@@ -4,6 +4,7 @@ import torch
 
 import envs.add_env as add_env
 import envs.cpmd_obs as cpmd_obs
+import envs.static_objects_env as static_objects_env
 import util.torch_util as torch_util
 
 class CPMDEnv(add_env.ADDEnv):
@@ -55,6 +56,15 @@ class CPMDEnv(add_env.ADDEnv):
     def get_cpmd_memory_decay(self):
         return self._sim_cpmd.get_memory_decay()
 
+    def get_cpmd_memory_seconds(self):
+        return self._cpmd_memory_seconds
+
+    def get_cpmd_mean_motion_length(self):
+        return float(torch.mean(self._motion_lib.get_motion_lengths()).item())
+
+    def get_cpmd_dof_dim(self):
+        return self._kin_char_model.get_dof_size()
+
     def get_disc_state_obs_dim(self):
         assert self._disc_state_obs_dim is not None
         return self._disc_state_obs_dim
@@ -67,6 +77,21 @@ class CPMDEnv(add_env.ADDEnv):
 
     def get_cpmd_push_counts(self):
         return self._sim_cpmd.get_push_count(), self._ref_cpmd.get_push_count()
+
+    def _build_env(self, env_id, env_config):
+        """Build the character and optional fixed task geometry.
+
+        Most motion clips only need the ground plane.  The ADD benchmark's
+        Double Kong and Climb clips, however, are defined relative to fixed
+        boxes.  Reusing StaticObjectsEnv's object builder keeps those two
+        tasks on the same CPMD observation and learning path as every other
+        skill; the objects only change the simulated scene.
+        """
+        super()._build_env(env_id, env_config)
+        if len(env_config.get("objects", [])) > 0:
+            static_objects_env.StaticObjectsEnv._build_static_object(
+                self, env_id, env_config)
+        return
 
     def get_disc_obs_space(self):
         """Shape is derived from the block widths, not by sampling a demo.

@@ -54,7 +54,12 @@ class ADDAgent(amp_agent.AMPAgent):
         if (self._disc_buffer.is_full()):
             num_samples = min(n, self._disc_replay_samples)
         else:
-            num_samples = n
+            # A rollout can be larger than the replay capacity when the number
+            # of parallel environments is increased (e.g. 8192 * 32 steps).
+            # Fill the empty replay with a random subset instead of asking the
+            # ring buffer to accept more rows than it owns.  For the original
+            # 4096-env protocol n < capacity, so this preserves its behavior.
+            num_samples = min(n, self._disc_buffer.get_capacity())
         
         idx = rand_idx[:num_samples]
         disc_data = {"disc_diff": disc_diff[idx].unsqueeze(1)}
@@ -119,6 +124,15 @@ class ADDAgent(amp_agent.AMPAgent):
         disc_pos_grad = disc_pos_grad[0]
         disc_pos_grad_squared = torch.sum(torch.square(disc_pos_grad), dim=-1)
 
+        # Subclasses may inspect the already-computed discriminator input
+        # gradient for diagnostics.  The default is empty, so ADD's loss and
+        # update graph are unchanged.  Diagnostic tensors must be detached by
+        # the override and are never added to the loss.
+        extra_disc_info = self._compute_disc_input_diagnostics(
+            norm_diff_obs=norm_diff_obs,
+            disc_neg_grad=disc_neg_grad,
+            disc_neg_logit=disc_neg_logit)
+
         disc_grad_penalty = 0.5 * (torch.mean(disc_neg_grad_squared) + torch.mean(disc_pos_grad_squared))
         disc_loss += self._disc_grad_penalty * disc_grad_penalty
         
@@ -135,4 +149,10 @@ class ADDAgent(amp_agent.AMPAgent):
             "disc_pos_logit": disc_pos_logit_mean.detach(),
             "disc_neg_logit": disc_neg_logit_mean.detach()
         }
+        disc_info.update(extra_disc_info)
         return disc_info
+
+    def _compute_disc_input_diagnostics(self, norm_diff_obs, disc_neg_grad,
+                                        disc_neg_logit):
+        """Optional read-only diagnostics on ADD's existing input gradient."""
+        return {}

@@ -26,6 +26,11 @@ class CPMDAgent(add_agent.ADDAgent):
         self._state_dim = env.get_disc_state_obs_dim()
         self._summary_dim = env.get_cpmd_summary_dim()
         self._interaction_dim = env.get_cpmd_interaction_dim()
+        self._dof_dim = env.get_cpmd_dof_dim()
+        self._state_vel_dim = 6 + self._dof_dim
+        self._memory_seconds = env.get_cpmd_memory_seconds()
+        self._mean_motion_length = env.get_cpmd_mean_motion_length()
+        self._memory_to_motion_ratio = self._memory_seconds / self._mean_motion_length
 
         total_dim = env.get_disc_obs_space().shape[0]
         assert self._state_dim + self._summary_dim + self._interaction_dim == total_dim
@@ -33,6 +38,9 @@ class CPMDAgent(add_agent.ADDAgent):
         Logger.print("CPMD differential: state {} + summary {} + interactions {} = {} (rho {:.5f})".format(
             self._state_dim, self._summary_dim, self._interaction_dim, total_dim,
             env.get_cpmd_memory_decay()))
+        Logger.print("CPMD memory: {:.5f}s / mean motion {:.5f}s = {:.5f} cycles".format(
+            self._memory_seconds, self._mean_motion_length,
+            self._memory_to_motion_ratio))
         return
 
     def _compute_disc_loss(self, batch):
@@ -55,6 +63,15 @@ class CPMDAgent(add_agent.ADDAgent):
         interactions = diff_obs[..., s + d:]
         interactions_rms = rms(interactions)
 
+        norm_state = norm_diff_obs[..., :s]
+        norm_summary = norm_diff_obs[..., s:s + d]
+        norm_interactions = norm_diff_obs[..., s + d:]
+        state_energy = torch.sum(torch.square(norm_state))
+        summary_energy = torch.sum(torch.square(norm_summary))
+        interaction_energy = torch.sum(torch.square(norm_interactions))
+        total_energy = torch.clamp_min(
+            state_energy + summary_energy + interaction_energy, 1e-12)
+
         info = {
             "disc_state_rms": rms(diff_obs[..., :s]),
             "disc_state_rms_norm": rms(norm_diff_obs[..., :s]),
@@ -62,6 +79,15 @@ class CPMDAgent(add_agent.ADDAgent):
             "disc_summary_rms_norm": rms(norm_diff_obs[..., s:s + d]),
             "disc_interaction_rms": interactions_rms,
             "disc_interaction_rms_norm": rms(norm_diff_obs[..., s + d:]),
+            "disc_state_energy_frac": state_energy / total_energy,
+            "disc_summary_energy_frac": summary_energy / total_energy,
+            "disc_interaction_energy_frac": interaction_energy / total_energy,
+            "disc_state_abs_max_norm": torch.max(torch.abs(norm_state)),
+            "disc_summary_abs_max_norm": torch.max(torch.abs(norm_summary)),
+            "disc_interaction_abs_max_norm": torch.max(torch.abs(norm_interactions)),
+            "cpmd_memory_seconds": torch.tensor(self._memory_seconds, device=diff_obs.device),
+            "cpmd_motion_length_mean": torch.tensor(self._mean_motion_length, device=diff_obs.device),
+            "cpmd_memory_to_motion_ratio": torch.tensor(self._memory_to_motion_ratio, device=diff_obs.device),
         }
 
         # effective support: entries above 10% of the block RMS. Near zero
@@ -76,3 +102,43 @@ class CPMDAgent(add_agent.ADDAgent):
         info["disc_norm_min_scale_frac"] = torch.mean((abs_mean <= min_diff).float())
 
         return info
+
+    def _compute_disc_input_diagnostics(self, norm_diff_obs, disc_neg_grad,
+                                        disc_neg_logit):
+        """Attribute ADD's existing input gradient to CPMD's three blocks.
+
+        This reuses ``disc_neg_grad`` already required by the gradient penalty;
+        it performs no extra forward/backward pass and cannot change the loss.
+        Fractions sum to one (up to floating-point error).  Velocity fractions
+        identify the original ADD instantaneous velocity coordinates inside
+        the 172-D state block.
+        """
+        with torch.no_grad():
+            s = self._state_dim
+            d = self._summary_dim
+
+            grad_sq = torch.square(disc_neg_grad.detach())
+            state_grad = torch.sum(grad_sq[..., :s])
+            summary_grad = torch.sum(grad_sq[..., s:s + d])
+            interaction_grad = torch.sum(grad_sq[..., s + d:])
+            total_grad = torch.clamp_min(
+                state_grad + summary_grad + interaction_grad, 1e-12)
+
+            state_vel_start = s - self._state_vel_dim
+            dof_vel_start = s - self._dof_dim
+            state_vel_grad = torch.sum(grad_sq[..., state_vel_start:s])
+            dof_vel_grad = torch.sum(grad_sq[..., dof_vel_start:s])
+
+            logits = disc_neg_logit.detach()
+            # Before the numerical reward cap, dr/dz = scale * sigmoid(z).
+            reward_slope = self._disc_reward_scale * torch.sigmoid(logits)
+
+            return {
+                "disc_grad_state_frac": state_grad / total_grad,
+                "disc_grad_summary_frac": summary_grad / total_grad,
+                "disc_grad_interaction_frac": interaction_grad / total_grad,
+                "disc_grad_state_vel_frac": state_vel_grad / total_grad,
+                "disc_grad_dof_vel_frac": dof_vel_grad / total_grad,
+                "disc_reward_logit_slope_mean": torch.mean(reward_slope),
+                "disc_neg_logit_lt_m5_frac": torch.mean((logits < -5.0).float()),
+            }
