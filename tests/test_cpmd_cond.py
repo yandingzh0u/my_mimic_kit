@@ -1,4 +1,4 @@
-"""Focused tests for the context-paired CPMD route."""
+"""Focused tests for isolated ADD plus the paired context veto."""
 
 import os
 import sys
@@ -22,14 +22,12 @@ import learning.cpmd_cond_model as cpmd_cond_model
 import learning.diff_normalizer as diff_normalizer
 import learning.experience_buffer as experience_buffer
 import learning.mp_optimizer as mp_optimizer
-import util.torch_util as torch_util
 
 
 DEVICE = "cpu"
 STATE_DIM = 172
 MOTION_DIM = 34
-ERROR_DIM = STATE_DIM + MOTION_DIM
-COND_DIM = ERROR_DIM + MOTION_DIM
+CONTEXT_INPUT_DIM = 2 * MOTION_DIM
 CHAR_FILE = os.path.join(
     REPO_ROOT, "data/assets/humanoid/humanoid.xml")
 MOTION_FILE = os.path.join(
@@ -74,6 +72,7 @@ def model_config():
         "action_std": 0.05,
         "critic_net": "fc_2layers_128units",
         "disc_net": "fc_2layers_128units",
+        "context_net": "fc_2layers_128units",
     }
 
 
@@ -84,67 +83,121 @@ def identity_quat(n=1, joints=None):
     return value
 
 
-def test_conditional_model_is_exact_add_at_initialization():
+def clone_params(params):
+    return [p.detach().clone() for p in params]
+
+
+def params_equal(params, snapshot):
+    return all(torch.equal(p.detach(), old)
+               for p, old in zip(params, snapshot))
+
+
+def test_add_branch_is_exact_stock_add_and_parameter_disjoint():
     env = FakeEnv()
     torch.manual_seed(7)
     base = add_model.ADDModel(model_config(), env)
     torch.manual_seed(7)
-    cond = cpmd_cond_model.CPMDConditionalModel(model_config(), env)
+    model = cpmd_cond_model.CPMDConditionalModel(model_config(), env)
 
     state = torch.randn([32, STATE_DIM])
-    assert torch.equal(base.eval_disc(state), cond.eval_disc(state))
-    assert torch.count_nonzero(cond.get_added_input_weights()).item() == 0
-    assert cond.get_error_dim() == ERROR_DIM
-    assert cond.get_conditional_dim() == COND_DIM
+    assert torch.equal(base.eval_disc(state), model.eval_disc(state))
+    for base_param, model_param in zip(
+            base.get_disc_params(), model.get_disc_params()):
+        assert torch.equal(base_param, model_param)
+
+    base_ids = {id(p) for p in model.get_disc_params()}
+    context_ids = {id(p) for p in model.get_context_params()}
+    assert base_ids.isdisjoint(context_ids)
+    assert model.get_context_input_dim() == CONTEXT_INPUT_DIM
 
 
-def test_first_paired_update_reaches_added_columns():
-    torch.manual_seed(8)
-    model = cpmd_cond_model.CPMDConditionalModel(model_config(), FakeEnv())
-    neg_error = torch.randn([64, ERROR_DIM])
-    pos_error = torch.zeros_like(neg_error)
+def test_context_veto_is_exactly_inactive_at_initialization():
+    model = cpmd_cond_model.CPMDConditionalModel(
+        model_config(), FakeEnv())
+    hist = torch.randn([64, MOTION_DIM])
     context = torch.randn([64, MOTION_DIM])
-    pos = model.eval_cond(pos_error, context).squeeze(-1)
-    neg = model.eval_cond(neg_error, context).squeeze(-1)
+    pos = model.eval_context(torch.zeros_like(hist), context)
+    neg = model.eval_context(hist, context)
+    assert torch.equal(pos, torch.zeros_like(pos))
+    assert torch.equal(neg, torch.zeros_like(neg))
+
+    add_reward = torch.rand([64]) * 4.0
+    reward, veto, ratio = (
+        cpmd_cond_agent.CPMDConditionalAgent._apply_context_veto(
+            add_reward, pos.squeeze(-1), neg.squeeze(-1)))
+    assert torch.equal(reward, add_reward)
+    assert torch.count_nonzero(veto).item() == 0
+    assert torch.equal(ratio, torch.ones_like(ratio))
+
+
+def test_first_context_update_has_signal_and_does_not_change_add():
+    torch.manual_seed(8)
+    model = cpmd_cond_model.CPMDConditionalModel(
+        model_config(), FakeEnv())
+    base_before = clone_params(model.get_disc_params())
+    context_before = clone_params(model.get_context_params())
+
+    hist = torch.randn([128, MOTION_DIM])
+    context = torch.randn([128, MOTION_DIM])
+    pos = model.eval_context(torch.zeros_like(hist), context).squeeze(-1)
+    neg = model.eval_context(hist, context).squeeze(-1)
     loss = 0.5 * (
         torch.nn.functional.softplus(-pos).mean()
         + torch.nn.functional.softplus(neg).mean())
+    optimizer = torch.optim.SGD(model.get_context_params(), lr=1e-2)
+    optimizer.zero_grad()
     loss.backward()
-
-    first_grad = model._disc_layers[0].weight.grad
-    assert first_grad is not None
+    assert model._context_logits.weight.grad is not None
     assert torch.linalg.vector_norm(
-        first_grad[:, STATE_DIM:ERROR_DIM]).item() > 0.0
-    assert torch.linalg.vector_norm(
-        first_grad[:, ERROR_DIM:]).item() > 0.0
+        model._context_logits.weight.grad).item() > 0.0
+    optimizer.step()
+
+    assert params_equal(model.get_disc_params(), base_before)
+    assert not params_equal(model.get_context_params(), context_before)
 
 
-def test_positive_and_negative_rows_share_context_exactly():
-    class IdentityNorm:
-        @staticmethod
-        def normalize(value):
-            return value
+def test_add_update_does_not_change_context():
+    torch.manual_seed(9)
+    model = cpmd_cond_model.CPMDConditionalModel(
+        model_config(), FakeEnv())
+    context_before = clone_params(model.get_context_params())
+    base_before = clone_params(model.get_disc_params())
 
-    class Stub:
-        _normalize_conditional_inputs = (
-            cpmd_cond_agent.CPMDConditionalAgent.
-            _normalize_conditional_inputs)
-        _build_paired_rows = (
-            cpmd_cond_agent.CPMDConditionalAgent._build_paired_rows)
+    neg = model.eval_disc(torch.randn([128, STATE_DIM])).squeeze(-1)
+    pos = model.eval_disc(torch.zeros([1, STATE_DIM])).squeeze(-1)
+    loss = 0.5 * (
+        torch.nn.functional.softplus(-pos).mean()
+        + torch.nn.functional.softplus(neg).mean())
+    optimizer = torch.optim.SGD(model.get_disc_params(), lr=1e-2)
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
 
-    stub = Stub()
-    stub._disc_obs_norm = IdentityNorm()
-    stub._hist_error_norm = IdentityNorm()
-    stub._ref_context_norm = IdentityNorm()
-    state = torch.randn([13, STATE_DIM])
-    hist = torch.randn([13, MOTION_DIM])
-    context = torch.randn([13, MOTION_DIM])
-    pos, neg, paired_context = stub._build_paired_rows(
-        state, hist, context)
+    assert not params_equal(model.get_disc_params(), base_before)
+    assert params_equal(model.get_context_params(), context_before)
 
-    assert torch.equal(pos, torch.zeros_like(pos))
-    assert torch.equal(neg, torch.cat([state, hist], dim=-1))
-    assert paired_context.data_ptr() == context.data_ptr()
+
+def test_veto_reward_bounds_and_zero_history_identity():
+    add_reward = torch.rand([256]) * 8.0
+    pos_logit = torch.randn([256])
+    neg_logit = torch.randn([256])
+    reward, veto, ratio = (
+        cpmd_cond_agent.CPMDConditionalAgent._apply_context_veto(
+            add_reward, pos_logit, neg_logit))
+    assert torch.all(veto >= 0.0)
+    assert torch.all(veto <= 1.0)
+    assert torch.all(reward <= add_reward + 1e-7)
+    assert torch.all(reward >= 0.5 * add_reward - 1e-7)
+    assert torch.all(ratio <= 1.0)
+    assert torch.all(ratio >= 0.5)
+
+    same = torch.randn([256])
+    exact, exact_veto, exact_ratio = (
+        cpmd_cond_agent.CPMDConditionalAgent._apply_context_veto(
+            add_reward, same, same))
+    assert torch.equal(exact, add_reward)
+    assert torch.count_nonzero(exact_veto).item() == 0
+    assert torch.equal(exact_ratio, torch.ones_like(exact_ratio))
 
 
 def test_scale_normalizers_preserve_zero():
@@ -235,9 +288,6 @@ def test_phase_context_obeys_recurrence_for_arbitrary_phase(kin_model):
         pose0[0], pose0[1], pose0[4], anchor)
     residual = nxt - (rho * prev + increment)
     assert torch.sqrt(torch.mean(torch.square(residual))).item() < 5e-3
-
-    # WRAP lookup is periodic even when the clip length is not assumed to be
-    # an integer number of control steps.
     assert torch.allclose(
         table.lookup(torch.tensor([0]), torch.tensor([0.0])),
         table.lookup(torch.tensor([0]), length.reshape(1)),
@@ -245,16 +295,20 @@ def test_phase_context_obeys_recurrence_for_arbitrary_phase(kin_model):
     )
 
 
-def test_replay_triplets_remain_row_aligned():
+def test_base_and_context_replays_are_separate_and_context_rows_align():
     class Stub:
+        _num_replay_rows = staticmethod(
+            cpmd_cond_agent.CPMDConditionalAgent._num_replay_rows)
         _store_disc_replay_data = (
             cpmd_cond_agent.CPMDConditionalAgent._store_disc_replay_data)
 
     stub = Stub()
     stub._device = DEVICE
     stub._disc_replay_samples = 1000
+    stub._context_replay_samples = 1000
     stub._exp_buffer = experience_buffer.ExperienceBuffer(8, 4, DEVICE)
     stub._disc_buffer = experience_buffer.ExperienceBuffer(32, 1, DEVICE)
+    stub._context_buffer = experience_buffer.ExperienceBuffer(32, 1, DEVICE)
     for step in range(8):
         row = torch.arange(4, dtype=torch.float32) + 4 * step
         stub._exp_buffer.record("disc_diff", row[:, None])
@@ -262,11 +316,15 @@ def test_replay_triplets_remain_row_aligned():
         stub._exp_buffer.record("cpmd_ref_context", (100 * row)[:, None])
         stub._exp_buffer.inc()
     stub._store_disc_replay_data()
-    replay = stub._disc_buffer.sample(32)
+
+    assert set(stub._disc_buffer._buffers) == {"disc_diff"}
+    assert set(stub._context_buffer._buffers) == {
+        "cpmd_error_memory", "cpmd_ref_context"}
+    replay = stub._context_buffer.sample(32)
     assert torch.equal(
-        replay["cpmd_error_memory"], 10 * replay["disc_diff"])
-    assert torch.equal(
-        replay["cpmd_ref_context"], 100 * replay["disc_diff"])
+        replay["cpmd_ref_context"],
+        10 * replay["cpmd_error_memory"],
+    )
 
 
 def test_mp_optimizer_gradient_accumulation_matches_full_batch():
@@ -289,7 +347,18 @@ def test_mp_optimizer_gradient_accumulation_matches_full_batch():
     assert torch.allclose(full.weight, split.weight, atol=1e-7)
 
 
-def test_conditional_train_and_eval_configs_match():
+def test_schema_one_checkpoint_is_rejected():
+    model = cpmd_cond_model.CPMDConditionalModel(
+        model_config(), FakeEnv())
+    state = model.state_dict()
+    state["_cpmd_cond_schema"] = torch.tensor(1, dtype=torch.int64)
+    target = cpmd_cond_model.CPMDConditionalModel(
+        model_config(), FakeEnv())
+    with pytest.raises(RuntimeError, match="checkpoint schema 1"):
+        target.load_state_dict(state)
+
+
+def test_veto_train_and_eval_configs_match_and_outputs_are_new():
     with open(os.path.join(
             REPO_ROOT, "data/agents/cpmd_cond_humanoid_agent.yaml")) as file:
         agent = yaml.safe_load(file)
@@ -301,12 +370,22 @@ def test_conditional_train_and_eval_configs_match():
             REPO_ROOT,
             "data/envs/cpmd_cond_humanoid_roll_eval_env.yaml")) as file:
         eval_env = yaml.safe_load(file)
+    with open(os.path.join(
+            REPO_ROOT, "args/cpmd_cond_humanoid_jog_args.txt")) as file:
+        jog_args = file.read()
+    with open(os.path.join(
+            REPO_ROOT, "args/cpmd_cond_humanoid_args.txt")) as file:
+        roll_args = file.read()
 
     assert agent["agent_name"] == "CPMD_COND"
-    assert agent["disc_pair_microbatch_size"] == 4096
-    assert train_env["env_name"] == "cpmd_cond"
+    assert agent["context_pair_microbatch_size"] == 4096
+    assert "disc_pair_microbatch_size" not in agent
+    assert train_env["cpmd_schema_version"] == 2
+    assert eval_env["cpmd_schema_version"] == 2
     assert train_env["episode_length"] == 2.0
     assert eval_env["episode_length"] == 10.0
     for key in train_env:
         if key != "episode_length":
             assert train_env[key] == eval_env[key]
+    assert "output/cpmd_veto_jog_1k_seed0" in jog_args
+    assert "output/cpmd_veto_roll_cycle_1k_seed0" in roll_args

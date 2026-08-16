@@ -1,83 +1,75 @@
-"""Conditional discriminator initialized exactly from the ADD discriminator."""
+"""Isolated ADD tracker with a paired temporal-context critic."""
 
+import gymnasium.spaces as spaces
+import numpy as np
 import torch
 
 import learning.add_model as add_model
+import learning.nets.net_builder as net_builder
+import util.torch_util as torch_util
 
 
 class CPMDConditionalModel(add_model.ADDModel):
-    """Score a paired error and reference context with one discriminator.
+    """Keep the stock ADD discriminator and add a disjoint context critic.
 
-    The stock ADD discriminator is built first.  Its first layer is then
-    widened by the error-memory and context dimensions.  Existing columns and
-    every downstream parameter are copied unchanged; new columns are exactly
-    zero.  Consequently the initial conditional discriminator is numerically
-    identical to ADD for every input.
+    The inherited ``_disc_layers`` and ``_disc_logits`` are the complete
+    172-D ADD branch.  The context critic only sees the motion-error memory
+    and phase-matched reference context.  Its output head starts at zero, so
+    the initial context veto is exactly inactive without changing ADD.
     """
 
-    SCHEMA_VERSION = 1
+    SCHEMA_VERSION = 2
 
     def _build_nets(self, config, env):
         super()._build_nets(config, env)
-        self._expand_disc_input(env)
+        self._build_context_critic(config, env)
         return
 
-    def _expand_disc_input(self, env):
-        self._disc_state_dim = int(env.get_disc_state_obs_dim())
+    def _build_context_critic(self, config, env):
         self._error_memory_dim = int(env.get_cpmd_error_dim())
         self._context_dim = int(env.get_cpmd_context_dim())
-        self._error_dim = self._disc_state_dim + self._error_memory_dim
-        self._conditional_dim = self._error_dim + self._context_dim
+        self._context_input_dim = self._error_memory_dim + self._context_dim
 
-        first = self._disc_layers[0]
-        assert isinstance(first, torch.nn.Linear)
-        assert first.in_features == self._disc_state_dim
-
-        expanded = torch.nn.Linear(
-            self._conditional_dim,
-            first.out_features,
-            bias=first.bias is not None,
-            device=first.weight.device,
-            dtype=first.weight.dtype,
+        input_space = spaces.Box(
+            low=-np.inf,
+            high=np.inf,
+            shape=[self._context_input_dim],
+            dtype=np.float32,
         )
-        with torch.no_grad():
-            expanded.weight.zero_()
-            expanded.weight[:, :self._disc_state_dim].copy_(first.weight)
-            if first.bias is not None:
-                expanded.bias.copy_(first.bias)
-        self._disc_layers[0] = expanded
+        net_name = config.get("context_net", config["disc_net"])
+        self._context_layers, _ = net_builder.build_net(
+            net_name,
+            {"context_obs": input_space},
+            activation=self._activation,
+        )
+        output_dim = torch_util.calc_layers_out_size(self._context_layers)
+        self._context_logits = torch.nn.Linear(output_dim, 1)
+        torch.nn.init.zeros_(self._context_logits.weight)
+        torch.nn.init.zeros_(self._context_logits.bias)
+
         self.register_buffer(
             "_cpmd_cond_schema",
             torch.tensor(self.SCHEMA_VERSION, dtype=torch.int64),
         )
+
+        base_ids = {id(p) for p in self.get_disc_params()}
+        context_ids = {id(p) for p in self.get_context_params()}
+        assert base_ids.isdisjoint(context_ids)
         return
 
-    def eval_cond(self, error_obs, ref_context):
-        assert error_obs.shape[-1] == self._error_dim
+    def eval_context(self, error_memory, ref_context):
+        assert error_memory.shape[-1] == self._error_memory_dim
         assert ref_context.shape[-1] == self._context_dim
-        disc_input = torch.cat([error_obs, ref_context], dim=-1)
-        hidden = self._disc_layers(disc_input)
-        return self._disc_logits(hidden)
+        context_input = torch.cat([error_memory, ref_context], dim=-1)
+        hidden = self._context_layers(context_input)
+        return self._context_logits(hidden)
 
-    def eval_disc(self, disc_obs):
-        """Evaluate the ADD specialization with zero added coordinates."""
-        assert disc_obs.shape[-1] == self._disc_state_dim
-        shape = list(disc_obs.shape[:-1])
-        error_memory = torch.zeros(
-            shape + [self._error_memory_dim],
-            dtype=disc_obs.dtype,
-            device=disc_obs.device,
-        )
-        context = torch.zeros(
-            shape + [self._context_dim],
-            dtype=disc_obs.dtype,
-            device=disc_obs.device,
-        )
-        return self.eval_cond(
-            torch.cat([disc_obs, error_memory], dim=-1), context)
+    def get_context_params(self):
+        return (list(self._context_layers.parameters())
+                + list(self._context_logits.parameters()))
 
-    def get_disc_state_dim(self):
-        return self._disc_state_dim
+    def get_context_logit_weights(self):
+        return torch.flatten(self._context_logits.weight)
 
     def get_error_memory_dim(self):
         return self._error_memory_dim
@@ -85,19 +77,25 @@ class CPMDConditionalModel(add_model.ADDModel):
     def get_context_dim(self):
         return self._context_dim
 
-    def get_error_dim(self):
-        return self._error_dim
+    def get_context_input_dim(self):
+        return self._context_input_dim
 
-    def get_conditional_dim(self):
-        return self._conditional_dim
-
-    def get_added_input_weights(self):
-        return self._disc_layers[0].weight[:, self._disc_state_dim:]
-
-    def get_error_memory_input_weights(self):
-        start = self._disc_state_dim
-        end = start + self._error_memory_dim
-        return self._disc_layers[0].weight[:, start:end]
-
-    def get_context_input_weights(self):
-        return self._disc_layers[0].weight[:, self._error_dim:]
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata,
+                              strict, missing_keys, unexpected_keys,
+                              error_msgs):
+        schema_key = prefix + "_cpmd_cond_schema"
+        if schema_key in state_dict:
+            schema = int(state_dict[schema_key].item())
+            if schema != self.SCHEMA_VERSION:
+                error_msgs.append(
+                    "CPMD conditional checkpoint schema {} is incompatible "
+                    "with schema {}".format(schema, self.SCHEMA_VERSION))
+        super()._load_from_state_dict(
+            state_dict,
+            prefix,
+            local_metadata,
+            strict,
+            missing_keys,
+            unexpected_keys,
+            error_msgs,
+        )

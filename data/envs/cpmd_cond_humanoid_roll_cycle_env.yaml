@@ -4,7 +4,7 @@ char_file: "data/assets/humanoid/humanoid.xml"
 camera_mode: "track"
 
 cpmd_memory_seconds: 1.0666666667
-cpmd_schema_version: 1
+cpmd_schema_version: 2
 cpmd_context_grid_size: 4096
 cpmd_context_tail_tolerance: 1e-6
 
