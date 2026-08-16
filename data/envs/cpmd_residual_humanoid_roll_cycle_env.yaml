@@ -3,10 +3,9 @@ env_name: "cpmd_residual"
 char_file: "data/assets/humanoid/humanoid.xml"
 camera_mode: "track"
 
-# Episode-local discounted motion-mismatch memory. The schema is intentionally
-# distinct from the established 767-D CPMD representation and its checkpoints.
+# Episode-local difference/common-motion memories for bilinear CPMD.
 cpmd_memory_seconds: 1.0666666667
-cpmd_schema_version: 2
+cpmd_schema_version: 3
 
 episode_length: 2.0
 global_obs: true

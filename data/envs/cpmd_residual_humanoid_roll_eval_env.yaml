@@ -4,7 +4,7 @@ char_file: "data/assets/humanoid/humanoid.xml"
 camera_mode: "track"
 
 cpmd_memory_seconds: 1.0666666667
-cpmd_schema_version: 2
+cpmd_schema_version: 3
 
 # Ten seconds exposes whether the policy repeats the two-second roll cycle.
 episode_length: 10.0
