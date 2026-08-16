@@ -1,11 +1,12 @@
-env_name: "cpmd_residual"
+env_name: "cpmd_cond"
 
 char_file: "data/assets/humanoid/humanoid.xml"
 camera_mode: "track"
 
-# Episode-local difference/common-motion memories for bilinear CPMD.
 cpmd_memory_seconds: 1.0666666667
-cpmd_schema_version: 3
+cpmd_schema_version: 1
+cpmd_context_grid_size: 4096
+cpmd_context_tail_tolerance: 1e-6
 
 episode_length: 2.0
 global_obs: true
@@ -23,15 +24,12 @@ log_tracking_error: true
 ref_char_offset: [2.0, 0.0, 0.0]
 init_pose: [0, 0, 0.882416, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1.5708, 0, 0, 0, -1.5708, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
-# Roll requires whole-body ground contact. Pose-error termination is disabled;
-# the time horizon remains the natural one-cycle reset condition.
 enable_early_termination: true
 key_bodies: ["head", "right_hand", "left_hand", "right_foot", "left_foot"]
 contact_bodies: []
 
 motion_file: "data/motions/humanoid/humanoid_roll.pkl"
 
-# Inherited environment fields; adversarial agents use the discriminator reward.
 reward_pose_w: 0.5
 reward_vel_w: 0.1
 reward_root_pose_w: 0.15

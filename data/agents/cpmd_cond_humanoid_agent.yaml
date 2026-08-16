@@ -1,13 +1,10 @@
-agent_name: "CPMD_RESIDUAL"
+agent_name: "CPMD_COND"
 
-# The actor, critic, and 172-D base discriminator match ADD. The contextual
-# path is a zero-initialized linear plus symmetric bilinear correction.
 model:
   actor_net: "fc_2layers_1024units"
   actor_init_output_scale: 0.01
   actor_std_type: "FIXED"
   action_std: 0.05
-
   critic_net: "fc_2layers_1024units"
   disc_net: "fc_2layers_1024units"
 
@@ -24,15 +21,6 @@ disc_optimizer:
   learning_rate: 2.5e-4
   weight_decay: 0.0001
 
-# Kept separate so the contextual loss cannot update the ADD discriminator.
-# The correction acts directly on the logit, so its step size is one tenth of
-# the deep discriminator optimizer; full-scale smoke otherwise moved the
-# correction by O(1) within two iterations.
-context_optimizer:
-  type: "SGD"
-  learning_rate: 2.5e-5
-  weight_decay: 0.0001
-
 discount: 0.99
 steps_per_iter: 32
 iters_per_output: 100
@@ -46,6 +34,8 @@ critic_epochs: 2
 critic_batch_size: 2
 disc_epochs: 2
 disc_batch_size: 2
+disc_pair_microbatch_size: 4096
+disc_eval_batch_size: 16384
 
 td_lambda: 0.95
 ppo_clip_ratio: 0.2

@@ -18,9 +18,23 @@ class MPOptimizer():
         return
     
     def step(self, loss):
+        self.zero_grad()
+        self.backward(loss)
+        self.apply_step()
+        return
+
+    def zero_grad(self):
+        """Clear accumulated gradients before one logical optimizer step."""
         self._optimizer.zero_grad()
+        return
+
+    def backward(self, loss):
+        """Accumulate a (possibly micro-batched) loss gradient."""
         loss.backward()
-        
+        return
+
+    def apply_step(self):
+        """Aggregate, clip, and apply gradients accumulated by ``backward``."""
         if (mp_util.enable_mp()):
             self._aggregate_mp_grads()
 
