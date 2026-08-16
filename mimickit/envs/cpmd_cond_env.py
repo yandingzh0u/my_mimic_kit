@@ -15,7 +15,7 @@ import envs.static_objects_env as static_objects_env
 class CPMDConditionalEnv(add_env.ADDEnv):
     """ADD plus paired error memory and phase-consistent reference context."""
 
-    SCHEMA_VERSION = 2
+    SCHEMA_VERSION = 1
 
     def __init__(self, env_config, engine_config, num_envs, device, visualize,
                  record_video=False):
@@ -66,23 +66,6 @@ class CPMDConditionalEnv(add_env.ADDEnv):
 
     def get_disc_state_obs_dim(self):
         return self.get_disc_obs_space().shape[0]
-
-    def get_disc_feature_group_dims(self):
-        """Return the per-frame ADD feature layout used for diagnostics."""
-        num_bodies = self._kin_char_model.get_num_joints()
-        dof_dim = self._kin_char_model.get_dof_size()
-        return {
-            "root_pos": 3,
-            "root_rot": 6,
-            "joint_rot": 6 * (num_bodies - 1),
-            "body_pos": 3 * num_bodies,
-            "root_vel": 3,
-            "root_ang_vel": 3,
-            "dof_vel": dof_dim,
-        }
-
-    def get_num_disc_obs_steps(self):
-        return self._num_disc_obs_steps
 
     def get_cpmd_context_grid_size(self):
         return self._phase_context.get_grid_size()

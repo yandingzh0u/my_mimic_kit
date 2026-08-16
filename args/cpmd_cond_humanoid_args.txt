@@ -3,7 +3,7 @@
 --env_config data/envs/cpmd_cond_humanoid_roll_cycle_env.yaml
 --agent_config data/agents/cpmd_cond_humanoid_agent.yaml
 --visualize false
---out_dir output/cpmd_veto_roll_cycle_1k_seed0
+--out_dir output/cpmd_cond_roll_cycle_1k_seed0
 --rand_seed 0
 --max_samples 131072000
 --num_envs 4096
