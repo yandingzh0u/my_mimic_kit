@@ -1,0 +1,31 @@
+Context-Paired CPMD Roll behavior evaluation
+============================================
+
+Method commit: 4fd076a850337b781ba769ca87a1d0aacc018da1
+Training output: output/cpmd_cond_roll_cycle_1k_seed0
+Motion: data/motions/humanoid/humanoid_roll.pkl
+Training seed: 0
+Training budget: 4096 envs x 32 steps x 1000 iterations = 131,072,000 samples
+Evaluation seed: 7
+Evaluation protocol: 64 parallel envs, 256 episodes, 300 steps / 10 s per episode
+Shortcut threshold: winding_ratio < 0.5
+
+episodes: 256 (completed: 256, failed: 0)
+winding_ratio: mean +0.944, std 0.114, median +0.982
+disp_ratio: mean +1.235, std 0.069, median +1.248
+height_rmse: mean 0.063 m, std 0.036 m, median 0.053 m
+upright_rate: 0.301
+shortcut_rate: 0.012 (3 / 256)
+mean_ep_len: 300.0
+
+Notes
+-----
+- The policy passes the pre-registered Roll development gate
+  (mean winding >= 0.80 and shortcut rate <= 10%).
+- Upright rate is measured only at the final random phase of each 10 s
+  episode. The reference Roll itself satisfies the same upright threshold
+  for approximately 42.4% of uniformly sampled phases, so this value is not
+  a landing-success rate.
+- The raw per-episode arrays are stored locally in
+  output/cpmd_cond_roll_cycle_1k_seed0/roll_behavior.npz and are intentionally
+  not committed.
