@@ -1,0 +1,88 @@
+Context-Paired CPMD Jog seed-0 summary
+======================================
+
+Method commit: 4fd076a850337b781ba769ca87a1d0aacc018da1
+Motion: data/motions/humanoid/humanoid_jog.pkl
+Environment: 4096 Isaac Lab environments, 30 Hz control, 10 s episodes
+Termination: pose termination disabled; non-foot ground contact terminates
+
+Runs
+----
+Stage 1:
+  output/cpmd_cond_jog_1k_seed0
+  4096 x 32 x 1000 = 131,072,000 samples
+
+Warm-start stage:
+  output/cpmd_cond_jog_warmstart_1k_seed0
+  initialized from the Stage-1 model and trained for another 131,072,000
+  samples. The model and normalizers were loaded, but optimizer state,
+  replay, iteration number, and sample count were reset. This is therefore
+  not an optimizer-exact continuation.
+
+Final 4096-episode tracking metrics
+-----------------------------------
+Metric                         Stage 1       Warm start      ADD final
+Root position error             0.842264       0.707844       0.055844
+Root rotation error             0.050227       0.035542       0.045041
+Body position error             0.028915       0.021811       0.025205
+Body rotation error             0.098015       0.074667       0.090355
+DoF velocity error              0.628179       0.589957       0.562767
+Root velocity error             0.267826       0.249988       0.221876
+Root angular velocity error     0.487260       0.471009       0.415246
+Mean episode length           300.000000     295.122803     300.000000
+
+The local ADD final model used 524,288,000 samples. The two Conditional CPMD
+stages exposed the policy to 262,144,000 samples in total, with an optimizer
+reset between stages.
+
+ADD Table-I-style position metric
+---------------------------------
+For this 15-body humanoid, the tracked position metric is reconstructed as
+Body_Pos_Err + Root_Pos_Err / 15:
+
+  Conditional CPMD warm start: approximately 0.0690 m
+  ADD final:                   approximately 0.0289 m
+
+Diagnosis
+---------
+The conditional representation improves local pose tracking: final root
+rotation, body position, and body rotation errors are lower than the fully
+trained local ADD baseline. However, the policy has a persistent forward-speed
+mismatch. A small velocity bias accumulates over the 10 s evaluation window,
+leaving 0.708 m root-position error. Extra training reduced this error only
+from 0.842 m to 0.708 m and did not remove it. Mean episode length also fell
+from 300 to 295.1 steps, indicating some non-foot-contact terminations.
+
+The discriminator remained numerically healthy: no NaN/Inf occurred, the
+final reward was 0.375, the context contribution was +0.0745, history-gradient
+share was 3.80%, and the added-column weight norm was 2.37. The failure is not
+an optimization collapse; it is a reward-geometry mismatch in which local
+pose/context accuracy is favored over long-horizon translational speed.
+
+Files to inspect
+----------------
+logs/cpmd_cond_jog_1k_seed0_log.txt
+  Stage-1 learning curve and first 131M-sample result.
+
+logs/cpmd_cond_jog_warmstart_1k_seed0_log.txt
+  Warm-start learning curve showing continued local-pose improvement and the
+  root-position plateau.
+
+logs/add_jog_matched_2k_seed0_log.txt
+  Local ADD reference run used for the numerical comparison.
+
+data/envs/cpmd_cond_humanoid_jog_env.yaml
+  Jog motion, 10 s horizon, allowed contacts, and CPMD context configuration.
+
+mimickit/envs/cpmd_cond_obs.py
+  Discounted motion-error memory and phase-steady reference context.
+
+mimickit/envs/cpmd_cond_env.py
+  Construction and synchronization of paired error/context observations.
+
+mimickit/learning/cpmd_cond_model.py
+  The single 240-D conditional discriminator.
+
+mimickit/learning/cpmd_cond_agent.py
+  Paired positive/negative objective, normalization, replay, reward, and
+  diagnostic logging.
