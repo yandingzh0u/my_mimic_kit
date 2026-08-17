@@ -1,5 +1,11 @@
+--mode train
 --env_config data/envs/cpmd_humanoid_roll_cycle_env.yaml
 --agent_config data/agents/cpmd_humanoid_agent.yaml
 --engine_config data/engines/isaac_lab_engine.yaml
---out_dir output/cpmd/
+--visualize false
+--out_dir output/cpmd_metric_roll_cycle_1k_seed0
+--rand_seed 0
 --max_samples 131072000
+--num_envs 4096
+--save_int_models true
+--logger txt

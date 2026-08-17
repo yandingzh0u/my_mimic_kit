@@ -175,6 +175,7 @@ def prepare(manifest: dict, skills: list[dict]) -> tuple[Path, dict[str, Path]]:
         REPO_DIR / "mimickit/envs/cpmd_obs.py",
         REPO_DIR / "mimickit/learning/add_agent.py",
         REPO_DIR / "mimickit/learning/cpmd_agent.py",
+        REPO_DIR / "mimickit/learning/cpmd_model.py",
         REPO_DIR / "data/agents/cpmd_humanoid_agent.yaml",
         repo_path(manifest["base_env_config"]),
         Path(__file__).resolve(),

@@ -21,9 +21,9 @@ Reported per alpha:
   d logit / d alpha       finite-difference slope along the ray
   |grad_Delta D|          gradient magnitude at that point (reward signal)
 
-Also reports the per-block share of |grad_Delta D| (state / summary /
-interactions) at alpha = 1, i.e. which part of the differential the
-discriminator actually uses on policy data.
+Also reports how much the learned metric allocation changes across reference
+contexts.  The current CPMD differential is the original 172-D ADD state
+differential; there are no history or interaction blocks.
 
 Example:
     python tools/cpmd/probe_cpmd_disc_geometry.py \
@@ -76,19 +76,22 @@ def build(args):
     agent.set_mode(base_agent.AgentMode.TEST)
     return env, agent
 
-def collect_diffs(env, agent, steps):
-    """Normalized differentials Delta from a policy rollout."""
+def collect_inputs(env, agent, steps):
+    """Normalized differentials and matched contexts from a rollout."""
     obs, info = env.reset()
     diffs = []
+    contexts = []
     with torch.no_grad():
         for _ in range(steps):
             action, _ = agent._decide_action(obs, info)
             obs, r, done, info = env.step(action)
             diff = info["disc_obs_demo"] - info["disc_obs"]
             diffs.append(agent._disc_obs_norm.normalize(diff).clone())
-    return torch.cat(diffs, dim=0)
+            contexts.append(
+                agent._context_norm.normalize(info["cpmd_context"]).clone())
+    return torch.cat(diffs, dim=0), torch.cat(contexts, dim=0)
 
-def scan(agent, diffs, num_alphas):
+def scan(agent, diffs, contexts, num_alphas):
     model = agent._model
     scale = agent._disc_reward_scale
     alphas = np.linspace(0.0, 1.0, num_alphas)
@@ -96,7 +99,7 @@ def scan(agent, diffs, num_alphas):
     rows = []
     for alpha in alphas:
         x = (float(alpha) * diffs).detach().requires_grad_(True)
-        logit = model.eval_disc(x).squeeze(-1)
+        logit = model.eval_disc(x, contexts).squeeze(-1)
         grad = torch.autograd.grad(logit.sum(), x)[0]
 
         reward = scale * torch.nn.functional.softplus(logit.detach())
@@ -116,33 +119,29 @@ def scan(agent, diffs, num_alphas):
             row["dlogit_dalpha"] = (rows[i]["logit_mean"] - rows[i - 1]["logit_mean"]) / d_alpha
     return rows
 
-def block_shares(agent, env, diffs):
-    """Share of |grad_Delta D| carried by each differential block at alpha=1."""
+def metric_summary(agent, diffs, contexts):
+    """Summarize the trace-one allocation at the policy differential."""
     x = diffs.detach().requires_grad_(True)
-    logit = agent._model.eval_disc(x).squeeze(-1)
+    terms = agent._model.eval_metric_terms(x, contexts)
+    logit = terms["logit"].squeeze(-1)
     grad = torch.autograd.grad(logit.sum(), x)[0]
-    energy = torch.mean(torch.square(grad), dim=0)
-
-    s = env.get_disc_state_obs_dim()
-    d = env.get_cpmd_summary_dim()
-
-    blocks = {
-        "state": energy[:s].sum(),
-        "summary": energy[s:s + d].sum(),
-        "interactions": energy[s + d:].sum(),
+    diag = terms["metric_diag"].detach()
+    return {
+        "trace_mean": float(terms["trace"].mean().item()),
+        "diag_min": float(diag.mean(dim=0).min().item()),
+        "diag_max": float(diag.mean(dim=0).max().item()),
+        "diag_context_std": float(
+            diag.std(dim=0, unbiased=False).mean().item()),
+        "grad_norm": float(torch.linalg.vector_norm(grad, dim=-1).mean().item()),
     }
-
-    total = sum(float(v.item()) for v in blocks.values())
-    total = max(total, 1e-12)
-    return {k: float(v.item()) / total for k, v in blocks.items()}
 
 def main():
     args = parse_args()
     env, agent = build(args)
 
-    diffs = collect_diffs(env, agent, args.steps)
-    rows = scan(agent, diffs, args.num_alphas)
-    shares = block_shares(agent, env, diffs)
+    diffs, contexts = collect_inputs(env, agent, args.steps)
+    rows = scan(agent, diffs, contexts, args.num_alphas)
+    summary = metric_summary(agent, diffs, contexts)
 
     print("=" * 78)
     print("samples: {}   differential dim: {}".format(diffs.shape[0], diffs.shape[1]))
@@ -153,8 +152,8 @@ def main():
             row["alpha"], row["logit_mean"], row["logit_std"], row["reward_mean"],
             row["dlogit_dalpha"], row["grad_norm"]))
     print("-" * 78)
-    print("gradient energy share at alpha=1: " +
-          "  ".join("{} {:.3f}".format(k, v) for k, v in shares.items()))
+    print("metric at alpha=1: " +
+          "  ".join("{} {:.5f}".format(k, v) for k, v in summary.items()))
     print("=" * 78)
 
     if (args.out != ""):
@@ -165,7 +164,7 @@ def main():
                  logit_std=np.array([r["logit_std"] for r in rows]),
                  reward_mean=np.array([r["reward_mean"] for r in rows]),
                  grad_norm=np.array([r["grad_norm"] for r in rows]),
-                 **{"share_" + k: np.array(v) for k, v in shares.items()})
+                 **{"metric_" + k: np.array(v) for k, v in summary.items()})
         print("wrote", args.out)
     return
 

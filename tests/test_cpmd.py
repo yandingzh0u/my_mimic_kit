@@ -1,620 +1,95 @@
-"""Unit tests for CPMD (context-preserving motion differentials).
+"""Unit tests for CPMD schema 2's fixed-budget contextual metric.
 
-Everything here runs on the real humanoid kinematic model (28 dof, hinge +
-spherical + fixed joints) on CPU, without a simulator, so the operator is
-tested with the exact widths the training run uses:
-
-    summary dim D     = 3 (root pos) + 3 (root rot) + 28 (dof) = 34
-    interaction dim   = D (D - 1) / 2 = 561
-    differential      = 172 (ADD state) + 34 + 561 = 767
-
-Both blocks are produced every step for both sides and enter the same
-discriminator together; there is no staging and no second network.
-
-Coverage:
-
-operator math
-  - m matches the explicit exponentially weighted increment sum
-  - the interaction block equals 1/2 m_i m_j and carries no recursive state
-  - its differential is exactly 1/4 (dm sm^T + sm dm^T), i.e. the tracking
-    error modulated by the two sides' common-mode motion
-  - that differential is not a function of dm, so the interactions are not a
-    re-encoding of the summary error
-  - rho is pinned to a physical memory time
-
-geometry
-  - a full 2*pi root roll does not fold back to zero (per-step logs)
-  - quaternion hemisphere flips (q vs -q) change nothing
-  - a global yaw + translation of the whole scene changes nothing
-
-streaming / lifecycle
-  - perfect tracking gives an exactly zero differential for the whole episode
-  - a partial reset touches only its own envs
-  - a reset does not inherit the previous episode's summary
-  - each side accumulates exactly one increment per push
-
-training-side invariants
-  - the differential dim is 767 and the scale-only normalizer maps 0 to 0
-  - storing only the differential is bit-identical to keeping both endpoints
-    and subtracting later, and the replay buffer keeps the pairs intact
-  - the agent does not override the ADD loss or the ADD reward
-  - the diagnostics are pure measurement and cannot shadow the loss
-  - fetch_disc_obs_demo fails loudly instead of returning [state, zeros]
-  - a checkpoint round-trips within a config and fails loudly across widths
+These tests exercise the structured discriminator directly on CPU. The policy
+continues to receive only its ordinary robot observation; synchronized
+reference features are used solely as intrinsic context for the reward-side
+metric.
 """
 
+from pathlib import Path
 import os
 import sys
 
+import gymnasium.spaces as spaces
 import numpy as np
 import pytest
 import torch
+import yaml
 
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(REPO_ROOT, "mimickit"))
 
-import gymnasium.spaces as spaces
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, os.fspath(ROOT / "mimickit"))
 
-import anim.mjcf_char_model as mjcf_char_model
-import envs.amp_env as amp_env
 import envs.cpmd_env as cpmd_env
 import envs.cpmd_obs as cpmd_obs
-import learning.add_agent as add_agent
+import envs.env_builder as env_builder
 import learning.add_model as add_model
-import learning.amp_agent as amp_agent
+import learning.agent_builder as agent_builder
 import learning.cpmd_agent as cpmd_agent
-import learning.diff_normalizer as diff_normalizer
+import learning.cpmd_model as cpmd_model
 import learning.experience_buffer as experience_buffer
 import util.torch_util as torch_util
 
+
 DEVICE = "cpu"
-CHAR_FILE = os.path.join(REPO_ROOT, "data/assets/humanoid/humanoid.xml")
+DELTA_DIM = 172
+CONTEXT_DIM = 172
+SCHEMA_VERSION = 2
 
-# ADD state differential dim for the humanoid roll config (verified against a
-# live env in the Isaac smoke run)
-STATE_DIM = 172
-SUMMARY_DIM = 34
-INTERACTION_DIM = 561
-TOTAL_DIM = STATE_DIM + SUMMARY_DIM + INTERACTION_DIM
-
-RHO = 0.96923
-
-@pytest.fixture(scope="module")
-def kin_model():
-    model = mjcf_char_model.MJCFCharModel(DEVICE)
-    model.load(CHAR_FILE)
-    return model
-
-def make_hist(kin_model, num_envs=1, rho=RHO):
-    return cpmd_obs.CPMDHistory(num_envs=num_envs, kin_char_model=kin_model,
-                                rho=rho, device=DEVICE)
-
-def identity_quat(n=1, num_joints=None):
-    shape = [n, 4] if (num_joints is None) else [n, num_joints, 4]
-    q = torch.zeros(shape)
-    q[..., 3] = 1.0
-    return q
-
-def axis_quat(axis, angle, n=1):
-    axis = torch.tensor([axis], dtype=torch.float32).repeat(n, 1)
-    return torch_util.axis_angle_to_quat(axis, torch.full([n], float(angle)))
-
-def rest_state(kin_model, n=1):
-    num_joints = kin_model.get_num_joints() - 1
-    return (torch.zeros([n, 3]), identity_quat(n), identity_quat(n, num_joints))
-
-def push_pos_path(hist, kin_model, positions, anchor_inv=None):
-    """Stream a pure root-translation path."""
-    n = positions[0].shape[0]
-    if (anchor_inv is None):
-        anchor_inv = identity_quat(n)
-    root_rot = identity_quat(n)
-    joint_rot = identity_quat(n, kin_model.get_num_joints() - 1)
-
-    hist.reset(torch.arange(n), positions[0], root_rot, joint_rot)
-    for p in positions[1:]:
-        hist.push(p, root_rot, joint_rot, anchor_inv)
-    return
-
-def random_walk(steps, seed, scale=0.2):
-    torch.manual_seed(seed)
-    return [torch.randn([1, 3]) * scale for _ in range(steps)]
-
-def stream_increments(kin_model, increments, rho=RHO):
-    pos = [torch.zeros([1, 3])]
-    for step in increments:
-        pos.append(pos[-1] + step)
-    hist = make_hist(kin_model, rho=rho)
-    push_pos_path(hist, kin_model, pos)
-    return hist.extract()
-
-# ---------------------------------------------------------------------------
-# operator math
-# ---------------------------------------------------------------------------
-
-def test_m_matches_explicit_discounted_sum(kin_model):
-    """m_T = sum_k rho^(T-k) xi_k, computed independently from the raw path."""
-    torch.manual_seed(0)
-    steps = 12
-    pos = [torch.zeros([1, 3])]
-    for _ in range(steps):
-        pos.append(pos[-1] + torch.randn([1, 3]) * 0.1)
-
-    hist = make_hist(kin_model)
-    push_pos_path(hist, kin_model, pos)
-
-    expected = torch.zeros([1, 3])
-    for k in range(steps):
-        expected += (RHO ** (steps - 1 - k)) * (pos[k + 1] - pos[k])
-
-    m = hist.calc_motion_summary()
-    assert torch.allclose(m[:, 0:3], expected, atol=1e-5)
-    assert torch.allclose(m[:, 3:], torch.zeros([1, SUMMARY_DIM - 3]), atol=1e-6)
-
-def test_interactions_are_half_the_outer_product_of_m(kin_model):
-    """Per side the block is exactly {1/2 m_i m_j}_{i<j}, so it needs no
-    recursive state at all."""
-    out = stream_increments(kin_model, random_walk(9, seed=11))
-    m = out[0, :SUMMARY_DIM]
-    block = out[0, SUMMARY_DIM:]
-
-    idx = torch.triu_indices(SUMMARY_DIM, SUMMARY_DIM, offset=1)
-    expected = 0.5 * torch.outer(m, m)[idx[0], idx[1]]
-    assert torch.allclose(block, expected, atol=1e-6)
-    assert torch.max(torch.abs(block)).item() > 1e-4
-
-def test_interaction_differential_is_the_common_mode_modulation(kin_model):
-    """The identity the method rests on:
-
-        dc = 1/4 (dm sm^T + sm dm^T),  dm = m_ref - m_sim, sm = m_ref + m_sim
-
-    so what reaches the discriminator is the tracking error scaled by how much
-    absolute motion the two sides are doing."""
-    base = random_walk(11, seed=14)
-    extra = random_walk(11, seed=15, scale=0.05)
-
-    sim = stream_increments(kin_model, base)
-    ref = stream_increments(kin_model, [a + b for a, b in zip(base, extra)])
-
-    dm = ref[:, :SUMMARY_DIM] - sim[:, :SUMMARY_DIM]
-    sm = ref[:, :SUMMARY_DIM] + sim[:, :SUMMARY_DIM]
-    i, j = torch.triu_indices(SUMMARY_DIM, SUMMARY_DIM, offset=1)
-
-    dc = ref[:, SUMMARY_DIM:] - sim[:, SUMMARY_DIM:]
-    expected = 0.25 * (dm[:, i] * sm[:, j] + sm[:, i] * dm[:, j])
-    assert torch.allclose(dc, expected, atol=1e-5)
-
-def test_interaction_differential_is_not_a_function_of_the_summary_error(kin_model):
-    """The expansion is per side and the subtraction happens after it, so the
-    same summary error under different absolute motion produces a different
-    interaction differential. This is exactly the context a differential of
-    raw errors cannot carry."""
-    extra = random_walk(11, seed=16, scale=0.05)
-
-    def differential(base_seed):
-        base = random_walk(11, seed=base_seed)
-        sim = stream_increments(kin_model, base)
-        ref = stream_increments(kin_model, [a + b for a, b in zip(base, extra)])
-        return ref - sim
-
-    d_slow = differential(17)
-    d_fast = differential(18)
-
-    assert torch.allclose(d_slow[:, :SUMMARY_DIM], d_fast[:, :SUMMARY_DIM], atol=1e-6)
-    assert torch.max(torch.abs(d_slow[:, SUMMARY_DIM:] - d_fast[:, SUMMARY_DIM:])).item() > 1e-3
-
-def test_memory_decay_is_physical():
-    """rho is pinned to a physical memory time, so halving the control step
-    keeps the same effective memory."""
-    rho_30 = cpmd_obs.calc_memory_decay(32.0 / 30.0, 1.0 / 30.0)
-    rho_60 = cpmd_obs.calc_memory_decay(32.0 / 30.0, 1.0 / 60.0)
-    assert abs(rho_30 - np.exp(-1.0 / 32.0)) < 1e-9
-    assert abs(rho_60 ** 2 - rho_30) < 1e-9
-
-# ---------------------------------------------------------------------------
-# geometry
-# ---------------------------------------------------------------------------
-
-def test_full_roll_does_not_fold_to_zero(kin_model):
-    """A complete 2*pi root rotation accumulates 2*pi: the increments are
-    per-step logs, so the endpoint quaternion alias (q ~ identity) cannot
-    hide a completed roll."""
-    n = 1
-    steps = 36
-    d_angle = 2.0 * np.pi / steps
-
-    hist = make_hist(kin_model, rho=1.0)
-    root_pos, root_rot, joint_rot = rest_state(kin_model, n)
-    hist.reset(torch.arange(n), root_pos, root_rot, joint_rot)
-
-    anchor_inv = identity_quat(n)
-    for k in range(1, steps + 1):
-        hist.push(root_pos, axis_quat([0.0, 1.0, 0.0], d_angle * k, n), joint_rot, anchor_inv)
-
-    winding = hist.calc_motion_summary()[:, 3:6]
-    assert abs(winding[0, 1].item() - 2.0 * np.pi) < 1e-3
-    assert torch.max(torch.abs(winding[:, [0, 2]])).item() < 1e-4
-
-def test_quaternion_hemisphere_invariance(kin_model):
-    """q and -q describe the same rotation and must give the same blocks."""
-    n = 1
-    steps = 10
-    d_angle = 0.3
-
-    def run(flip):
-        hist = make_hist(kin_model)
-        root_pos, root_rot, joint_rot = rest_state(kin_model, n)
-        hist.reset(torch.arange(n), root_pos, root_rot, joint_rot)
-        anchor_inv = identity_quat(n)
-        for k in range(1, steps + 1):
-            rot = axis_quat([0.0, 1.0, 0.0], d_angle * k, n)
-            jr = joint_rot.clone()
-            if (flip and k % 2 == 0):
-                rot = -rot
-                jr = -jr
-            hist.push(root_pos + 0.01 * k, rot, jr, anchor_inv)
-        return hist.extract()
-
-    assert torch.allclose(run(False), run(True), atol=1e-5)
-
-def test_global_yaw_and_translation_invariance(kin_model):
-    """Rotating and translating the whole scene changes nothing: increments
-    kill the translation, the phase-0 heading anchor kills the yaw."""
-    n = 1
-    steps = 12
-    yaw = 0.9
-    offset = torch.tensor([[3.0, -2.0, 0.0]])
-
-    def run(rotated):
-        num_joints = kin_model.get_num_joints() - 1
-        joint_rot = identity_quat(n, num_joints)
-        yaw_q = axis_quat([0.0, 0.0, 1.0], yaw, n)
-
-        # the anchor always comes from the reference root rotation at phase 0
-        root_rot0 = identity_quat(n)
-        if (rotated):
-            root_rot0 = torch_util.quat_mul(yaw_q, root_rot0)
-        anchor_inv = cpmd_obs.calc_motion_anchor_quat_inv(root_rot0)
-
-        hist = make_hist(kin_model)
-
-        positions, rotations = [], []
-        for k in range(steps + 1):
-            p = torch.tensor([[0.05 * k, 0.02 * k, 0.9 + 0.01 * k]])
-            r = axis_quat([0.0, 1.0, 0.0], 0.25 * k, n)
-            if (rotated):
-                p = torch_util.quat_rotate(yaw_q, p) + offset
-                r = torch_util.quat_mul(yaw_q, r)
-            positions.append(p)
-            rotations.append(r)
-
-        hist.reset(torch.arange(n), positions[0], rotations[0], joint_rot)
-        for k in range(1, steps + 1):
-            hist.push(positions[k], rotations[k], joint_rot, anchor_inv)
-        return hist.extract()
-
-    assert torch.allclose(run(False), run(True), atol=1e-4)
-
-# ---------------------------------------------------------------------------
-# streaming / lifecycle
-# ---------------------------------------------------------------------------
-
-def test_perfect_tracking_gives_zero_differential(kin_model):
-    """Two operators fed identical states stay identical: the ADD ideal point
-    Delta = 0 survives the quadratic expansion, for the whole episode and not
-    just at reset."""
-    torch.manual_seed(4)
-    n = 3
-    steps = 15
-    num_joints = kin_model.get_num_joints() - 1
-
-    sim = make_hist(kin_model, num_envs=n)
-    ref = make_hist(kin_model, num_envs=n)
-
-    root_pos, root_rot, joint_rot = rest_state(kin_model, n)
-    env_ids = torch.arange(n)
-    sim.reset(env_ids, root_pos, root_rot, joint_rot)
-    ref.reset(env_ids, root_pos, root_rot, joint_rot)
-    assert torch.max(torch.abs(ref.extract() - sim.extract())).item() == 0.0
-
-    anchor_inv = identity_quat(n)
-    for _ in range(steps):
-        root_pos = root_pos + torch.randn([n, 3]) * 0.05
-        root_rot = torch_util.quat_mul(axis_quat([0.0, 1.0, 0.0], 0.2, n), root_rot)
-        joint_rot = torch_util.quat_normalize(joint_rot + torch.randn([n, num_joints, 4]) * 0.02)
-
-        sim.push(root_pos, root_rot, joint_rot, anchor_inv)
-        ref.push(root_pos, root_rot, joint_rot, anchor_inv)
-        assert torch.max(torch.abs(ref.extract() - sim.extract())).item() == 0.0
-
-def test_partial_reset_does_not_pollute_other_envs(kin_model):
-    n = 4
-    steps = 6
-    hist = make_hist(kin_model, num_envs=n)
-
-    pos = [torch.zeros([n, 3])]
-    torch.manual_seed(5)
-    for _ in range(steps):
-        pos.append(pos[-1] + torch.randn([n, 3]) * 0.2)
-    push_pos_path(hist, kin_model, pos)
-
-    before = hist.extract().clone()
-
-    reset_ids = torch.tensor([1, 3])
-    root_pos, root_rot, joint_rot = rest_state(kin_model, len(reset_ids))
-    hist.reset(reset_ids, root_pos, root_rot, joint_rot)
-
-    after = hist.extract()
-    keep = torch.tensor([0, 2])
-    assert torch.allclose(after[keep], before[keep], atol=0.0)
-    assert torch.max(torch.abs(after[reset_ids])).item() == 0.0
-    assert torch.all(hist.get_push_count()[reset_ids] == 0)
-    assert torch.all(hist.get_push_count()[keep] == steps)
-
-def test_reset_does_not_inherit_previous_episode(kin_model):
-    """After a reset the operator restarts from zero, and the first increment
-    of the new episode is measured from the reset pose (not from the last
-    pose of the previous episode)."""
-    n = 1
-    hist = make_hist(kin_model)
-
-    far = [torch.zeros([n, 3]), torch.tensor([[5.0, 0.0, 0.0]]), torch.tensor([[5.0, 5.0, 0.0]])]
-    push_pos_path(hist, kin_model, far)
-    assert torch.max(torch.abs(hist.extract())).item() > 1.0
-
-    root_pos, root_rot, joint_rot = rest_state(kin_model, n)
-    reset_pos = torch.tensor([[100.0, -100.0, 1.0]])
-    hist.reset(torch.arange(n), reset_pos, root_rot, joint_rot)
-    assert torch.max(torch.abs(hist.extract())).item() == 0.0
-
-    hist.push(torch.tensor([[100.1, -100.0, 1.0]]), root_rot, joint_rot, identity_quat(n))
-    out = hist.extract()
-    assert abs(out[0, 0].item() - 0.1) < 1e-5
-
-def test_push_count_tracks_increments(kin_model):
-    """Each push contributes exactly one increment; both sides are pushed the
-    same number of times when streamed together (the env-level guarantee is
-    re-checked at runtime in the Isaac smoke run)."""
-    n = 2
-    sim = make_hist(kin_model, num_envs=n)
-    ref = make_hist(kin_model, num_envs=n)
-    root_pos, root_rot, joint_rot = rest_state(kin_model, n)
-    sim.reset(torch.arange(n), root_pos, root_rot, joint_rot)
-    ref.reset(torch.arange(n), root_pos, root_rot, joint_rot)
-
-    for k in range(7):
-        sim.push(root_pos + 0.1 * k, root_rot, joint_rot, identity_quat(n))
-        ref.push(root_pos + 0.1 * k, root_rot, joint_rot, identity_quat(n))
-        assert torch.all(sim.get_push_count() == k + 1)
-        assert torch.all(ref.get_push_count() == sim.get_push_count())
-
-# ---------------------------------------------------------------------------
-# training-side invariants
-# ---------------------------------------------------------------------------
-
-def test_differential_dims(kin_model):
-    hist = make_hist(kin_model)
-    assert hist.get_summary_dim() == SUMMARY_DIM
-    assert hist.get_interaction_dim() == INTERACTION_DIM
-    assert hist.get_obs_dim() == SUMMARY_DIM + INTERACTION_DIM
-    assert STATE_DIM + hist.get_obs_dim() == TOTAL_DIM == 767
-
-def test_normalizer_keeps_zero_at_zero():
-    """The scale-only DiffNormalizer maps the ADD ideal point to itself, for
-    any recorded statistics."""
-    norm = diff_normalizer.DiffNormalizer([TOTAL_DIM], device=DEVICE)
-    torch.manual_seed(6)
-    norm.record(torch.randn([256, TOTAL_DIM]) * 7.0)
-    norm.update()
-
-    zeros = torch.zeros([4, TOTAL_DIM])
-    assert torch.max(torch.abs(norm.normalize(zeros))).item() == 0.0
-
-def make_disc_data(steps, num_envs, seed):
-    torch.manual_seed(seed)
-    obs = torch.randn([steps, num_envs, TOTAL_DIM])
-    demo = torch.randn([steps, num_envs, TOTAL_DIM])
-    return obs, demo
-
-def test_storing_only_the_differential_is_bit_identical():
-    """The endpoints are no longer kept: the difference every consumer used to
-    form is formed once at record time instead. Same arithmetic on the same
-    values, so the discriminator input is bit-identical -- and everything
-    downstream is a deterministic function of that input."""
-    steps, num_envs = 5, 8
-    obs, demo = make_disc_data(steps, num_envs, seed=20)
-
-    old = experience_buffer.ExperienceBuffer(steps, num_envs, DEVICE)
-    new = experience_buffer.ExperienceBuffer(steps, num_envs, DEVICE)
-    for k in range(steps):
-        old.record("disc_obs", obs[k])
-        old.record("disc_obs_demo", demo[k])
-        new.record("disc_diff", demo[k] - obs[k])
-        old.inc()
-        new.inc()
-
-    old_diff = old.get_data_flat("disc_obs_demo") - old.get_data_flat("disc_obs")
-    assert torch.equal(new.get_data_flat("disc_diff"), old_diff)
-
-    # and the endpoints are genuinely gone, which is the point of the change
-    assert set(new._buffers.keys()) == {"disc_diff"}
-
-class ReplayStub:
-    """Exercises the real replay path without constructing an agent."""
-    _store_disc_replay_data = add_agent.ADDAgent._store_disc_replay_data
-
-def test_replay_buffer_keeps_the_pairs_intact():
-    """Replay rows must be differentials of matching sim/ref pairs. With the
-    endpoints stored separately this was an indexing invariant; storing the
-    difference makes it structural."""
-    steps, num_envs = 4, 16
-    obs, demo = make_disc_data(steps, num_envs, seed=21)
-
-    agent = ReplayStub()
-    agent._device = DEVICE
-    agent._disc_replay_samples = 1000
-    agent._exp_buffer = experience_buffer.ExperienceBuffer(steps, num_envs, DEVICE)
-    agent._disc_buffer = experience_buffer.ExperienceBuffer(1000, 1, DEVICE)
-
-    for k in range(steps):
-        agent._exp_buffer.record("disc_diff", demo[k] - obs[k])
-        agent._exp_buffer.inc()
-
-    torch.manual_seed(22)
-    agent._store_disc_replay_data()
-
-    truth = (demo - obs).reshape(-1, TOTAL_DIM)
-    replay = agent._disc_buffer.sample(64)["disc_diff"].squeeze(1)
-    assert replay.shape[0] == 64
-
-    def is_a_true_pair(rows):
-        return torch.eq(rows.unsqueeze(1), truth.unsqueeze(0)).all(dim=-1).any(dim=-1)
-
-    assert torch.all(is_a_true_pair(replay))
-
-    # negative control: a mismatched pair would have been caught
-    cross = demo[0, 0] - obs[0, 1]
-    assert not is_a_true_pair(cross.unsqueeze(0)).item()
-
-def test_first_replay_push_caps_a_rollout_larger_than_capacity():
-    """8192 envs x 32 steps exceeds the stock 200k replay capacity.
-
-    The first push must select a capacity-sized subset rather than asserting;
-    every stored row must still be a genuine paired differential.
-    """
-    steps, num_envs, capacity = 4, 16, 32
-    obs, demo = make_disc_data(steps, num_envs, seed=23)
-
-    agent = ReplayStub()
-    agent._device = DEVICE
-    agent._disc_replay_samples = 8
-    agent._exp_buffer = experience_buffer.ExperienceBuffer(steps, num_envs, DEVICE)
-    agent._disc_buffer = experience_buffer.ExperienceBuffer(capacity, 1, DEVICE)
-
-    for k in range(steps):
-        agent._exp_buffer.record("disc_diff", demo[k] - obs[k])
-        agent._exp_buffer.inc()
-
-    torch.manual_seed(24)
-    agent._store_disc_replay_data()
-    assert agent._disc_buffer.get_sample_count() == capacity
-    assert agent._disc_buffer.is_full()
-
-    truth = (demo - obs).reshape(-1, TOTAL_DIM)
-    replay = agent._disc_buffer.sample(capacity)["disc_diff"].squeeze(1)
-    matches = torch.eq(replay.unsqueeze(1), truth.unsqueeze(0)).all(dim=-1).any(dim=-1)
-    assert torch.all(matches)
-
-def test_agent_does_not_change_add_training():
-    """The method is a differential, not a new training rule: the reward path
-    and the model builder are inherited untouched."""
-    cls = cpmd_agent.CPMDAgent
-    assert cls._compute_rewards is add_agent.ADDAgent._compute_rewards
-    assert cls._calc_disc_rewards is amp_agent.AMPAgent._calc_disc_rewards
-    assert cls._build_model is add_agent.ADDAgent._build_model
-    assert cls._build_normalizers is add_agent.ADDAgent._build_normalizers
-
-def test_diagnostics_are_pure_measurement():
-    """The only override, _compute_disc_loss, adds diagnostic keys and can
-    never shadow the ADD loss or its terms."""
-    # the agent is an nn.Module, so exercise the exact same function object on
-    # a light stand-in instead of half-constructing an agent
-    class DiagStub:
-        _compute_disc_diagnostics = cpmd_agent.CPMDAgent._compute_disc_diagnostics
-
-    agent = DiagStub()
-    agent._state_dim = STATE_DIM
-    agent._summary_dim = SUMMARY_DIM
-    agent._interaction_dim = INTERACTION_DIM
-    agent._dof_dim = 28
-    agent._state_vel_dim = 34
-    agent._memory_seconds = 32.0 / 30.0
-    agent._mean_motion_length = 2.0
-    agent._memory_to_motion_ratio = agent._memory_seconds / agent._mean_motion_length
-    agent._disc_obs_norm = diff_normalizer.DiffNormalizer([TOTAL_DIM], device=DEVICE)
-
-    torch.manual_seed(7)
-    info = agent._compute_disc_diagnostics(torch.randn([32, TOTAL_DIM]))
-
-    add_keys = {"disc_loss", "disc_grad_penalty", "disc_logit_loss", "disc_pos_acc",
-                "disc_neg_acc", "disc_pos_logit", "disc_neg_logit"}
-    assert add_keys.isdisjoint(info.keys())
-    for key in ["disc_state_rms", "disc_summary_rms", "disc_interaction_rms",
-                "disc_interaction_nonzero_frac", "disc_norm_min_scale_frac",
-                "disc_state_energy_frac", "disc_summary_energy_frac",
-                "disc_interaction_energy_frac", "cpmd_memory_to_motion_ratio"]:
-        assert key in info
-        assert torch.isfinite(info[key]).all()
-
-    energy_sum = (info["disc_state_energy_frac"]
-                  + info["disc_summary_energy_frac"]
-                  + info["disc_interaction_energy_frac"])
-    assert torch.allclose(energy_sum, torch.tensor(1.0))
-
-    zero_info = agent._compute_disc_diagnostics(torch.zeros([8, TOTAL_DIM]))
-    assert zero_info["disc_state_rms"].item() == 0.0
-    assert zero_info["disc_interaction_rms"].item() == 0.0
-
-
-def test_gradient_diagnostics_partition_existing_add_gradient():
-    class GradStub:
-        _compute_disc_input_diagnostics = cpmd_agent.CPMDAgent._compute_disc_input_diagnostics
-
-    agent = GradStub()
-    agent._state_dim = STATE_DIM
-    agent._summary_dim = SUMMARY_DIM
-    agent._interaction_dim = INTERACTION_DIM
-    agent._dof_dim = 28
-    agent._state_vel_dim = 34
-    agent._disc_reward_scale = 2.0
-
-    torch.manual_seed(25)
-    grad = torch.randn([16, TOTAL_DIM])
-    logits = torch.linspace(-7.0, 1.0, 16)
-    info = agent._compute_disc_input_diagnostics(
-        torch.randn([16, TOTAL_DIM]), grad, logits)
-
-    frac_sum = (info["disc_grad_state_frac"]
-                + info["disc_grad_summary_frac"]
-                + info["disc_grad_interaction_frac"])
-    assert torch.allclose(frac_sum, torch.tensor(1.0))
-    assert 0.0 <= info["disc_grad_dof_vel_frac"] <= info["disc_grad_state_frac"]
-    assert 0.0 <= info["disc_neg_logit_lt_m5_frac"] <= 1.0
-    assert torch.isfinite(info["disc_reward_logit_slope_mean"])
-
-def test_demo_api_fails_loudly():
-    """The reference blocks depend on episode age, so there is no honest way
-    to answer fetch_disc_obs_demo from a sampled motion frame. It must raise
-    rather than hand out [state, zeros]."""
-    with pytest.raises(RuntimeError, match="paired differential"):
-        cpmd_env.CPMDEnv.fetch_disc_obs_demo(None, 4)
-    with pytest.raises(RuntimeError):
-        cpmd_env.CPMDEnv._compute_disc_obs_demo(None, None, None)
-
-    # the base class builds the obs space by calling it, so CPMD has to derive
-    # the shape some other way or nothing would come up at all
-    assert cpmd_env.CPMDEnv.get_disc_obs_space is not amp_env.AMPEnv.get_disc_obs_space
-    assert "fetch_disc_obs_demo" not in cpmd_env.CPMDEnv.get_disc_obs_space.__code__.co_names
-
-# ---------------------------------------------------------------------------
-# checkpoints
-# ---------------------------------------------------------------------------
 
 class FakeEnv:
-    def __init__(self, disc_dim):
-        self._disc_dim = disc_dim
+    def __init__(self, delta_dim=DELTA_DIM, context_dim=CONTEXT_DIM,
+                 schema_version=SCHEMA_VERSION):
+        self._delta_dim = delta_dim
+        self._context_dim = context_dim
+        self._schema_version = schema_version
 
     def get_obs_space(self):
-        return spaces.Box(low=-np.inf, high=np.inf, shape=[64], dtype=np.float32)
+        return spaces.Box(
+            low=-np.inf, high=np.inf, shape=[64], dtype=np.float32)
 
     def get_action_space(self):
-        return spaces.Box(low=-1.0, high=1.0, shape=[28], dtype=np.float32)
+        return spaces.Box(
+            low=-1.0, high=1.0, shape=[28], dtype=np.float32)
 
     def get_disc_obs_space(self):
-        return spaces.Box(low=-np.inf, high=np.inf, shape=[self._disc_dim], dtype=np.float32)
+        return spaces.Box(
+            low=-np.inf, high=np.inf,
+            shape=[self._delta_dim], dtype=np.float32)
 
-def make_add_model(disc_dim):
+    def get_cpmd_context_dim(self):
+        return self._context_dim
+
+    def get_cpmd_schema_version(self):
+        return self._schema_version
+
+
+def metric_config(**overrides):
     config = {
+        "actor_net": "fc_2layers_128units",
+        "actor_init_output_scale": 0.01,
+        "actor_std_type": "FIXED",
+        "action_std": 0.05,
+        "critic_net": "fc_2layers_128units",
+        "cpmd_schema_version": SCHEMA_VERSION,
+        "metric_rank": 8,
+        "metric_base_weight": 0.01,
+        "metric_context_budget": 1.0,
+        "metric_norm_eps": 1.0e-8,
+        "metric_context_hidden": [64, 32],
+    }
+    config.update(overrides)
+    return config
+
+
+def make_metric_model(seed=0, **config_overrides):
+    torch.manual_seed(seed)
+    return cpmd_model.CPMDModel(
+        metric_config(**config_overrides), FakeEnv())
+
+
+def add_config():
+    return {
         "actor_net": "fc_2layers_128units",
         "actor_init_output_scale": 0.01,
         "actor_std_type": "FIXED",
@@ -622,23 +97,331 @@ def make_add_model(disc_dim):
         "critic_net": "fc_2layers_128units",
         "disc_net": "fc_2layers_128units",
     }
-    torch.manual_seed(0)
-    return add_model.ADDModel(config, FakeEnv(disc_dim))
 
-def test_checkpoint_round_trip():
-    model = make_add_model(TOTAL_DIM)
-    other = make_add_model(TOTAL_DIM)
+
+def random_unit_quat(num):
+    axis = torch.randn([num, 3])
+    angle = torch.rand([num]) * 2.0 - 1.0
+    return torch_util.axis_angle_to_quat(axis, angle)
+
+
+# ---------------------------------------------------------------------------
+# Structured metric geometry
+# ---------------------------------------------------------------------------
+
+
+def test_zero_anchor_is_exact_and_context_independent():
+    model = make_metric_model()
+    context_a = torch.randn([13, CONTEXT_DIM])
+    context_b = torch.randn([13, CONTEXT_DIM]) * 20.0
+    zero = torch.zeros([13, DELTA_DIM])
+
+    logits_a = model.eval_disc(zero, context_a)
+    logits_b = model.eval_disc(zero, context_b)
+    anchor = model.eval_zero_logit(13, zero.device, zero.dtype)
+
+    assert torch.equal(logits_a, anchor)
+    assert torch.equal(logits_b, anchor)
+    assert torch.equal(logits_a, logits_b)
+
+
+def test_nonzero_error_is_radially_monotone():
+    model = make_metric_model()
+    context = torch.randn([17, CONTEXT_DIM])
+    direction = torch.randn([17, DELTA_DIM])
+
+    z0 = model.eval_disc(torch.zeros_like(direction), context)
+    z_half = model.eval_disc(0.5 * direction, context)
+    z_one = model.eval_disc(direction, context)
+    z_two = model.eval_disc(2.0 * direction, context)
+
+    assert torch.all(z0 > z_half)
+    assert torch.all(z_half > z_one)
+    assert torch.all(z_one > z_two)
+
+
+def test_metric_has_fixed_trace_budget_and_bounded_context_energy():
+    model = make_metric_model()
+    delta = torch.randn([64, DELTA_DIM])
+    context = torch.randn([64, CONTEXT_DIM])
+    terms = model.eval_metric_terms(delta, context)
+
+    # epsilon makes the trace infinitesimally smaller than one, never larger.
+    assert torch.all(terms["trace"] <= 1.0 + 1.0e-6)
+    assert torch.all(terms["trace"] > 0.9999)
+    assert torch.allclose(
+        terms["metric_diag"].sum(dim=-1, keepdim=True),
+        terms["trace"], atol=1.0e-6, rtol=1.0e-6)
+
+    # A is PSD with trace at most one, hence delta^T A delta <= ||delta||^2.
+    bound = model.get_metric_context_budget() * torch.sum(
+        torch.square(delta), dim=-1, keepdim=True)
+    assert torch.all(terms["context_energy"] <= bound + 1.0e-5)
+
+
+class ConstantV(torch.nn.Module):
+    def __init__(self, v):
+        super().__init__()
+        self.register_buffer("v", v.reshape(1, -1))
+
+    def forward(self, context):
+        return self.v.expand(context.shape[0], -1)
+
+
+def test_context_metric_is_invariant_to_scaling_v():
+    model = make_metric_model(metric_norm_eps=1.0e-12)
+    delta = torch.randn([32, DELTA_DIM])
+    context = torch.randn([32, CONTEXT_DIM])
+    v = torch.randn([model.get_metric_rank(), DELTA_DIM])
+
+    model._metric_context_net = ConstantV(v)
+    terms_1 = model.eval_metric_terms(delta, context)
+    model._metric_context_net = ConstantV(10.0 * v)
+    terms_10 = model.eval_metric_terms(delta, context)
+
+    assert torch.allclose(
+        terms_1["context_energy"], terms_10["context_energy"],
+        atol=2.0e-6, rtol=2.0e-6)
+    assert torch.allclose(
+        terms_1["logit"], terms_10["logit"],
+        atol=2.0e-6, rtol=2.0e-6)
+
+
+def test_metric_is_sign_symmetric_by_design():
+    model = make_metric_model()
+    delta = torch.randn([31, DELTA_DIM])
+    context = torch.randn([31, CONTEXT_DIM])
+    assert torch.allclose(
+        model.eval_disc(delta, context),
+        model.eval_disc(-delta, context),
+        atol=1.0e-6, rtol=1.0e-6)
+
+
+def test_metric_network_receives_finite_nonzero_gradients():
+    model = make_metric_model()
+    delta = torch.randn([48, DELTA_DIM])
+    context = torch.randn([48, CONTEXT_DIM])
+    terms = model.eval_metric_terms(delta, context)
+
+    assert torch.all(terms["v_norm_sq"] > 0.0)
+    # The training signal is the logit itself.  Do not add context_energy to
+    # it here: logit already contains its negative, so that artificial sum
+    # would cancel the contextual path exactly.
+    loss = -terms["logit"].mean()
+    loss.backward()
+
+    grads = [p.grad for p in model.get_disc_params()]
+    assert all(g is not None for g in grads)
+    assert all(torch.isfinite(g).all() for g in grads)
+    assert any(torch.count_nonzero(g).item() > 0 for g in grads[:-1])
+    assert torch.count_nonzero(grads[-1]).item() > 0  # shared anchor b
+
+
+def test_positive_input_gradient_is_zero_and_negative_is_finite():
+    model = make_metric_model()
+    context = torch.randn([8, CONTEXT_DIM])
+    zero = torch.zeros([8, DELTA_DIM], requires_grad=True)
+    zero_logit = model.eval_disc(zero, context)
+    zero_grad = torch.autograd.grad(zero_logit.sum(), zero)[0]
+    assert torch.equal(zero_grad, torch.zeros_like(zero_grad))
+
+    delta = torch.randn([8, DELTA_DIM], requires_grad=True)
+    neg_logit = model.eval_disc(delta, context)
+    neg_grad = torch.autograd.grad(neg_logit.sum(), delta)[0]
+    assert torch.isfinite(neg_grad).all()
+    assert torch.count_nonzero(neg_grad).item() > 0
+
+
+# ---------------------------------------------------------------------------
+# Intrinsic reference context
+# ---------------------------------------------------------------------------
+
+
+def make_reference_state(num_envs=5, num_joints=3, dof_dim=7,
+                         num_bodies=6):
+    root_pos = torch.randn([num_envs, 3])
+    root_pos[:, 2] += 1.0
+    root_rot = random_unit_quat(num_envs)
+    root_vel = torch.randn([num_envs, 3])
+    root_ang_vel = torch.randn([num_envs, 3])
+    joint_rot = random_unit_quat(num_envs * num_joints).reshape(
+        num_envs, num_joints, 4)
+    dof_vel = torch.randn([num_envs, dof_dim])
+    body_offsets = torch.randn([num_envs, num_bodies, 3])
+    body_pos = root_pos.unsqueeze(1) + body_offsets
+    return (root_pos, root_rot, root_vel, root_ang_vel,
+            joint_rot, dof_vel, body_pos)
+
+
+def test_intrinsic_context_removes_global_xy():
+    state = make_reference_state()
+    context = cpmd_obs.compute_intrinsic_context(*state)
+    assert torch.equal(context[:, 0:2], torch.zeros_like(context[:, 0:2]))
+
+    translated = list(state)
+    shift = torch.tensor([91.0, -37.0, 0.0])
+    translated[0] = translated[0] + shift
+    translated[6] = translated[6] + shift
+    shifted_context = cpmd_obs.compute_intrinsic_context(*translated)
+    # Subtracting large float32 world coordinates can leave a few ulps in the
+    # root-relative body positions; the representation is otherwise equal.
+    assert torch.allclose(context, shifted_context, atol=1.0e-5, rtol=2.0e-6)
+
+
+def test_intrinsic_context_is_global_yaw_and_translation_invariant():
+    state = make_reference_state()
+    (root_pos, root_rot, root_vel, root_ang_vel,
+     joint_rot, dof_vel, body_pos) = state
+    context = cpmd_obs.compute_intrinsic_context(*state)
+
+    num_envs = root_pos.shape[0]
+    yaw_axis = torch.tensor([[0.0, 0.0, 1.0]]).repeat(num_envs, 1)
+    yaw = torch_util.axis_angle_to_quat(
+        yaw_axis, torch.linspace(-2.2, 2.2, num_envs))
+    shift = torch.tensor([8.0, -13.0, 0.0])
+
+    transformed_root_pos = torch_util.quat_rotate(yaw, root_pos) + shift
+    transformed_root_rot = torch_util.quat_mul(yaw, root_rot)
+    transformed_root_vel = torch_util.quat_rotate(yaw, root_vel)
+    transformed_root_ang_vel = torch_util.quat_rotate(yaw, root_ang_vel)
+    expanded_yaw = yaw.unsqueeze(1).expand(-1, body_pos.shape[1], -1)
+    transformed_body_pos = (
+        torch_util.quat_rotate(expanded_yaw, body_pos) + shift)
+
+    transformed_context = cpmd_obs.compute_intrinsic_context(
+        transformed_root_pos, transformed_root_rot,
+        transformed_root_vel, transformed_root_ang_vel,
+        joint_rot, dof_vel, transformed_body_pos)
+    assert torch.allclose(
+        context, transformed_context, atol=1.0e-5, rtol=1.0e-5)
+
+
+# ---------------------------------------------------------------------------
+# Configuration, routing, and checkpoints
+# ---------------------------------------------------------------------------
+
+
+def test_all_cpmd_env_configs_are_schema2_and_actor_reference_blind():
+    env_files = sorted((ROOT / "data/envs").glob("cpmd*.yaml"))
+    assert env_files
+    for path in env_files:
+        config = yaml.safe_load(path.read_text())
+        assert config["env_name"] == "cpmd"
+        assert config["cpmd_schema_version"] == SCHEMA_VERSION
+        assert config["enable_tar_obs"] is False
+        assert config["enable_phase_obs"] is False
+        assert "tar_obs_steps" not in config
+        assert not any("memory" in key.lower() for key in config)
+
+    agent_config = yaml.safe_load(
+        (ROOT / "data/agents/cpmd_humanoid_agent.yaml").read_text())
+    assert agent_config["agent_name"] == "CPMD"
+    assert agent_config["model"]["cpmd_schema_version"] == SCHEMA_VERSION
+    assert "disc_net" not in agent_config["model"]
+    assert "metric_rank" in agent_config["model"]
+    assert "metric_context_budget" in agent_config["model"]
+
+
+def test_schema_constants_and_builders_route_only_to_cpmd():
+    assert cpmd_env.CPMDEnv.SCHEMA_VERSION == SCHEMA_VERSION
+    assert cpmd_model.CPMDModel.SCHEMA_VERSION == SCHEMA_VERSION
+
+    agent_source = Path(agent_builder.__file__).read_text()
+    env_source = Path(env_builder.__file__).read_text()
+    assert 'agent_name == "CPMD"' in agent_source
+    assert "cpmd_agent.CPMDAgent" in agent_source
+    assert 'env_name == "cpmd"' in env_source
+    assert "cpmd_env.CPMDEnv" in env_source
+    assert "CPMD_COND" not in agent_source
+    assert "cpmd_cond" not in env_source
+
+    with pytest.raises(ValueError, match="schema version"):
+        cpmd_model.CPMDModel(
+            metric_config(cpmd_schema_version=1), FakeEnv(schema_version=1))
+    with pytest.raises(ValueError, match="schema mismatch"):
+        cpmd_model.CPMDModel(metric_config(), FakeEnv(schema_version=1))
+
+
+def test_schema2_checkpoint_round_trip_is_exact():
+    model = make_metric_model(seed=10)
+    other = make_metric_model(seed=11)
     other.load_state_dict(model.state_dict())
 
-    x = torch.randn([16, TOTAL_DIM])
-    assert torch.allclose(model.eval_disc(x), other.eval_disc(x), atol=0.0)
+    delta = torch.randn([19, DELTA_DIM])
+    context = torch.randn([19, CONTEXT_DIM])
+    assert torch.equal(
+        model.eval_disc(delta, context), other.eval_disc(delta, context))
 
-@pytest.mark.parametrize("src,dst", [(STATE_DIM + SUMMARY_DIM, TOTAL_DIM),
-                                     (TOTAL_DIM, STATE_DIM + SUMMARY_DIM),
-                                     (STATE_DIM, TOTAL_DIM)])
-def test_mismatched_checkpoints_fail_loudly(src, dst):
-    """A differential of a different width can never be silently loaded."""
-    src_model = make_add_model(src)
-    dst_model = make_add_model(dst)
+
+def test_old_add_checkpoint_is_rejected_loudly():
+    torch.manual_seed(0)
+    old_model = add_model.ADDModel(add_config(), FakeEnv())
+    new_model = make_metric_model()
     with pytest.raises(RuntimeError):
-        dst_model.load_state_dict(src_model.state_dict())
+        new_model.load_state_dict(old_model.state_dict(), strict=True)
+
+
+# ---------------------------------------------------------------------------
+# Paired replay
+# ---------------------------------------------------------------------------
+
+
+class ReplayStub:
+    _store_disc_replay_data = cpmd_agent.CPMDAgent._store_disc_replay_data
+
+
+def build_replay_stub(steps, num_envs, capacity, replay_samples=1000):
+    agent = ReplayStub()
+    agent._device = DEVICE
+    agent._disc_replay_samples = replay_samples
+    agent._exp_buffer = experience_buffer.ExperienceBuffer(
+        steps, num_envs, DEVICE)
+    agent._disc_buffer = experience_buffer.ExperienceBuffer(
+        capacity, 1, DEVICE)
+    return agent
+
+
+def record_identifiable_pairs(agent, steps, num_envs):
+    for step in range(steps):
+        ids = torch.arange(
+            step * num_envs, (step + 1) * num_envs,
+            dtype=torch.float32).unsqueeze(-1)
+        delta = torch.cat([ids, ids + 0.25, ids + 0.5], dim=-1)
+        context = torch.cat([-ids, 2.0 * ids + 1.0], dim=-1)
+        agent._exp_buffer.record("disc_diff", delta)
+        agent._exp_buffer.record("cpmd_context", context)
+        agent._exp_buffer.inc()
+
+
+def assert_replay_pairs_are_intact(replay):
+    delta = replay["disc_diff"].squeeze(1)
+    context = replay["cpmd_context"].squeeze(1)
+    ids = delta[:, 0]
+    assert torch.equal(delta[:, 1], ids + 0.25)
+    assert torch.equal(delta[:, 2], ids + 0.5)
+    assert torch.equal(context[:, 0], -ids)
+    assert torch.equal(context[:, 1], 2.0 * ids + 1.0)
+
+
+def test_replay_keeps_differential_and_context_at_the_same_indices():
+    steps, num_envs = 4, 16
+    agent = build_replay_stub(steps, num_envs, capacity=1000)
+    record_identifiable_pairs(agent, steps, num_envs)
+
+    torch.manual_seed(40)
+    agent._store_disc_replay_data()
+    replay = agent._disc_buffer.sample(steps * num_envs)
+    assert_replay_pairs_are_intact(replay)
+
+
+def test_first_replay_push_caps_an_overcapacity_rollout_without_unpairing():
+    steps, num_envs, capacity = 4, 16, 32
+    agent = build_replay_stub(
+        steps, num_envs, capacity=capacity, replay_samples=8)
+    record_identifiable_pairs(agent, steps, num_envs)
+
+    torch.manual_seed(41)
+    agent._store_disc_replay_data()
+    assert agent._disc_buffer.is_full()
+    assert agent._disc_buffer.get_sample_count() == capacity
+    assert_replay_pairs_are_intact(agent._disc_buffer.sample(capacity))

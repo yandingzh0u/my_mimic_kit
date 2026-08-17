@@ -21,10 +21,9 @@ target behavior rather than average tracking error:
                     actually performing the rotation (lie-down/get-up,
                     stand-and-wait, ...).
 
-All directional quantities are expressed in the per-episode fixed motion yaw
-anchor frame (reference root heading at motion time 0), the same anchor the
-CPMD increments use. The metrics only read root states, so this works for any
-ADD-style env.
+All directional quantities are expressed in a fixed motion yaw anchor frame
+(reference root heading at motion time 0). The metrics only read root states,
+so this works for any ADD-style environment.
 
 Example:
     python tools/cpmd/evaluate_roll_behavior.py \
@@ -47,7 +46,6 @@ sys.path.insert(0, os.path.join(REPO_DIR, "mimickit"))
 
 import envs.base_env as base_env
 import envs.env_builder as env_builder
-import envs.cpmd_obs as cpmd_obs
 import learning.agent_builder as agent_builder
 import learning.base_agent as base_agent
 import util.mp_util as mp_util
@@ -90,7 +88,7 @@ def build_motion_frames(env, device):
     motion_ids = torch.arange(num_motions, device=device, dtype=torch.long)
 
     _, root_rot0, _, _, _, _ = mlib.calc_motion_frame(motion_ids, torch.zeros(num_motions, device=device))
-    anchor_inv = cpmd_obs.calc_motion_anchor_quat_inv(root_rot0)
+    anchor_inv = torch_util.calc_heading_quat_inv(root_rot0)
 
     lengths = mlib.get_motion_length(motion_ids)
     num_samples = 200

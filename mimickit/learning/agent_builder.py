@@ -35,9 +35,6 @@ def build_agent(agent_file, env, device):
     elif (agent_name == "CPMD"):
         import learning.cpmd_agent as cpmd_agent
         agent = cpmd_agent.CPMDAgent(config=agent_config, env=env, device=device)
-    elif (agent_name == "CPMD_COND"):
-        import learning.cpmd_cond_agent as cpmd_cond_agent
-        agent = cpmd_cond_agent.CPMDConditionalAgent(config=agent_config, env=env, device=device)
     elif (agent_name == "LCP"):
         import learning.lcp_agent as lcp_agent
         agent = lcp_agent.LCPAgent(config=agent_config, env=env, device=device)

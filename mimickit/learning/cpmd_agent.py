@@ -1,144 +1,201 @@
 import torch
 
 import learning.add_agent as add_agent
+import learning.cpmd_model as cpmd_model
+import learning.normalizer as normalizer
+import util.torch_util as torch_util
 from util.logger import Logger
 
+
 class CPMDAgent(add_agent.ADDAgent):
-    """ADD agent for the CPMD differential: diagnostics only.
+    """ADD with a fixed-budget, reference-conditioned error metric.
 
-    Training is deliberately stock ADD and nothing here may change it: one
-    discriminator (ADDModel), one zero-vs-policy BCE with logit regularization
-    and gradient penalty, one reward r = scale * softplus(z). No branches, no
-    fusion, no auxiliary losses, no extra reward terms, and a single training
-    run: the state differential, the motion summary and the context
-    interactions all enter the same discriminator on every step.
-
-    The only addition is instrumentation of the three differential blocks
-    [state | summary | interactions], so a failure can be attributed to the
-    representation rather than guessed at: block RMS before and after the
-    scale-only normalizer, the effective support of the interaction block, and
-    how much of the normalizer sits on its floor.
+    The policy and critic remain reference-blind. The reward model receives
+    the normalized ADD differential and an intrinsic synchronized reference
+    context. Context can only reallocate a trace-one PSD metric; it cannot add
+    a logit by itself and every context shares the same zero anchor.
     """
 
     def __init__(self, config, env, device):
         super().__init__(config, env, device)
 
-        self._state_dim = env.get_disc_state_obs_dim()
-        self._summary_dim = env.get_cpmd_summary_dim()
-        self._interaction_dim = env.get_cpmd_interaction_dim()
-        self._dof_dim = env.get_cpmd_dof_dim()
-        self._state_vel_dim = 6 + self._dof_dim
-        self._memory_seconds = env.get_cpmd_memory_seconds()
-        self._mean_motion_length = env.get_cpmd_mean_motion_length()
-        self._memory_to_motion_ratio = self._memory_seconds / self._mean_motion_length
+        self._disc_dim = env.get_disc_state_obs_dim()
+        self._context_dim = env.get_cpmd_context_dim()
+        assert self._disc_dim == env.get_disc_obs_space().shape[0]
 
-        total_dim = env.get_disc_obs_space().shape[0]
-        assert self._state_dim + self._summary_dim + self._interaction_dim == total_dim
+        Logger.print(
+            "CPMD fixed-budget metric: differential {} + intrinsic context {}, "
+            "rank {}, base {:.6f}, budget {:.6f}".format(
+                self._disc_dim,
+                self._context_dim,
+                self._model.get_metric_rank(),
+                self._model.get_metric_base_weight(),
+                self._model.get_metric_context_budget(),
+            )
+        )
+        return
 
-        Logger.print("CPMD differential: state {} + summary {} + interactions {} = {} (rho {:.5f})".format(
-            self._state_dim, self._summary_dim, self._interaction_dim, total_dim,
-            env.get_cpmd_memory_decay()))
-        Logger.print("CPMD memory: {:.5f}s / mean motion {:.5f}s = {:.5f} cycles".format(
-            self._memory_seconds, self._mean_motion_length,
-            self._memory_to_motion_ratio))
+    def _build_model(self, config):
+        self._model = cpmd_model.CPMDModel(config["model"], self._env)
+        return
+
+    def _build_normalizers(self):
+        super()._build_normalizers()
+        context_space = self._env.get_cpmd_context_space()
+        context_dtype = torch_util.numpy_dtype_to_torch(context_space.dtype)
+        self._context_norm = normalizer.Normalizer(
+            context_space.shape,
+            clip=10.0,
+            device=self._device,
+            dtype=context_dtype,
+        )
+        return
+
+    def _record_data_post_step(self, next_obs, r, done, next_info):
+        super()._record_data_post_step(next_obs, r, done, next_info)
+        self._exp_buffer.record("cpmd_context", next_info["cpmd_context"])
+        return
+
+    def _store_disc_replay_data(self):
+        disc_diff = self._exp_buffer.get_data_flat("disc_diff")
+        context = self._exp_buffer.get_data_flat("cpmd_context")
+        assert disc_diff.shape[0] == context.shape[0]
+
+        n = disc_diff.shape[0]
+        rand_idx = torch.randperm(n, device=self._device, dtype=torch.long)
+        if self._disc_buffer.is_full():
+            num_samples = min(n, self._disc_replay_samples)
+        else:
+            num_samples = min(n, self._disc_buffer.get_capacity())
+
+        idx = rand_idx[:num_samples]
+        self._disc_buffer.push({
+            "disc_diff": disc_diff[idx].unsqueeze(1),
+            "cpmd_context": context[idx].unsqueeze(1),
+        })
+        return
+
+    def _compute_rewards(self):
+        task_r = self._exp_buffer.get_data_flat("reward")
+        disc_diff = self._exp_buffer.get_data_flat("disc_diff")
+        context = self._exp_buffer.get_data_flat("cpmd_context")
+
+        norm_diff = self._disc_obs_norm.normalize(disc_diff)
+        norm_context = self._context_norm.normalize(context)
+
+        with torch.no_grad():
+            inputs = {"disc_obs": norm_diff, "context": norm_context}
+            logits = torch_util.eval_minibatch(
+                self._model.eval_disc, inputs, self._disc_eval_batch_size
+            ).squeeze(-1)
+            prob = torch.sigmoid(logits)
+            disc_r = -torch.log(torch.clamp_min(1.0 - prob, 1.0e-4))
+            disc_r *= self._disc_reward_scale
+            if not torch.isfinite(logits).all() or not torch.isfinite(disc_r).all():
+                raise FloatingPointError(
+                    "Non-finite CPMD metric logit or discriminator reward")
+
+        r = self._task_reward_weight * task_r + self._disc_reward_weight * disc_r
+        self._exp_buffer.set_data_flat("reward", r)
+
+        if self._need_normalizer_update():
+            self._disc_obs_norm.record(disc_diff)
+            self._context_norm.record(context)
+
+        disc_reward_std, disc_reward_mean = torch.std_mean(disc_r)
+        return {
+            "disc_reward_mean": disc_reward_mean,
+            "disc_reward_std": disc_reward_std,
+            "disc_reward_logit_slope_mean": torch.mean(
+                self._disc_reward_scale * torch.sigmoid(logits)
+            ),
+        }
+
+    def _update_normalizers(self):
+        super()._update_normalizers()
+        self._context_norm.update()
         return
 
     def _compute_disc_loss(self, batch):
-        disc_info = super()._compute_disc_loss(batch)
-        with torch.no_grad():
-            disc_info.update(self._compute_disc_diagnostics(batch["disc_diff"]))
-        return disc_info
+        disc_diff = batch["disc_diff"]
+        context = batch["cpmd_context"]
 
-    def _compute_disc_diagnostics(self, diff_obs):
-        """Block statistics of the differential. Pure measurement: it never
-        touches the loss, the reward, or the normalizer state."""
-        norm_diff_obs = self._disc_obs_norm.normalize(diff_obs)
+        replay = self._disc_buffer.sample(disc_diff.shape[0])
+        disc_diff = torch.cat([disc_diff, replay["disc_diff"]], dim=0)
+        context = torch.cat([context, replay["cpmd_context"]], dim=0)
 
-        s = self._state_dim
-        d = self._summary_dim
+        norm_diff = self._disc_obs_norm.normalize(disc_diff)
+        norm_diff.requires_grad_(True)
+        norm_context = self._context_norm.normalize(context).detach()
 
-        def rms(x):
-            return torch.sqrt(torch.mean(torch.square(x)))
+        terms = self._model.eval_metric_terms(norm_diff, norm_context)
+        neg_logit = terms["logit"].squeeze(-1)
+        pos_logit = self._model.eval_zero_logit(
+            batch_size=1, device=norm_diff.device, dtype=norm_diff.dtype
+        ).squeeze(-1)
 
-        interactions = diff_obs[..., s + d:]
-        interactions_rms = rms(interactions)
+        disc_loss_pos = self._disc_loss_pos(pos_logit)
+        disc_loss_neg = self._disc_loss_neg(neg_logit)
+        disc_loss = 0.5 * (disc_loss_pos + disc_loss_neg)
 
-        norm_state = norm_diff_obs[..., :s]
-        norm_summary = norm_diff_obs[..., s:s + d]
-        norm_interactions = norm_diff_obs[..., s + d:]
-        state_energy = torch.sum(torch.square(norm_state))
-        summary_energy = torch.sum(torch.square(norm_summary))
-        interaction_energy = torch.sum(torch.square(norm_interactions))
-        total_energy = torch.clamp_min(
-            state_energy + summary_energy + interaction_energy, 1e-12)
+        # The metric has a fixed trace budget; only the shared zero-anchor
+        # logit remains as an unconstrained output scalar.
+        logit_weights = self._model.get_disc_logit_weights()
+        disc_logit_loss = torch.sum(torch.square(logit_weights))
+        disc_loss += self._disc_logit_reg * disc_logit_loss
+
+        # For a centered quadratic energy, grad z / grad delta is exactly zero
+        # at the positive anchor. Smoothness is therefore defined only on the
+        # normalized policy differential.
+        neg_grad = torch.autograd.grad(
+            neg_logit,
+            norm_diff,
+            grad_outputs=torch.ones_like(neg_logit),
+            create_graph=True,
+            retain_graph=True,
+            only_inputs=True,
+        )[0]
+        disc_grad_penalty = torch.mean(torch.sum(torch.square(neg_grad), dim=-1))
+        disc_loss += self._disc_grad_penalty * disc_grad_penalty
+
+        neg_acc, pos_acc = self._compute_disc_acc(neg_logit, pos_logit)
+
+        base_energy = terms["base_energy"]
+        context_energy = terms["context_energy"]
+        total_energy = torch.clamp_min(base_energy + context_energy, 1.0e-12)
+        metric_diag = terms["metric_diag"]
+        metric_diag_mean = torch.mean(metric_diag, dim=0)
 
         info = {
-            "disc_state_rms": rms(diff_obs[..., :s]),
-            "disc_state_rms_norm": rms(norm_diff_obs[..., :s]),
-            "disc_summary_rms": rms(diff_obs[..., s:s + d]),
-            "disc_summary_rms_norm": rms(norm_diff_obs[..., s:s + d]),
-            "disc_interaction_rms": interactions_rms,
-            "disc_interaction_rms_norm": rms(norm_diff_obs[..., s + d:]),
-            "disc_state_energy_frac": state_energy / total_energy,
-            "disc_summary_energy_frac": summary_energy / total_energy,
-            "disc_interaction_energy_frac": interaction_energy / total_energy,
-            "disc_state_abs_max_norm": torch.max(torch.abs(norm_state)),
-            "disc_summary_abs_max_norm": torch.max(torch.abs(norm_summary)),
-            "disc_interaction_abs_max_norm": torch.max(torch.abs(norm_interactions)),
-            "cpmd_memory_seconds": torch.tensor(self._memory_seconds, device=diff_obs.device),
-            "cpmd_motion_length_mean": torch.tensor(self._mean_motion_length, device=diff_obs.device),
-            "cpmd_memory_to_motion_ratio": torch.tensor(self._memory_to_motion_ratio, device=diff_obs.device),
+            "disc_loss": disc_loss,
+            "disc_class_loss": 0.5 * (disc_loss_pos + disc_loss_neg).detach(),
+            "disc_grad_penalty": disc_grad_penalty.detach(),
+            "disc_logit_loss": disc_logit_loss.detach(),
+            "disc_pos_acc": pos_acc.detach(),
+            "disc_neg_acc": neg_acc.detach(),
+            "disc_pos_logit": torch.mean(pos_logit).detach(),
+            "disc_neg_logit": torch.mean(neg_logit).detach(),
+            "metric_base_energy": torch.mean(base_energy).detach(),
+            "metric_context_energy": torch.mean(context_energy).detach(),
+            "metric_context_energy_frac": torch.mean(context_energy / total_energy).detach(),
+            "metric_trace_mean": torch.mean(terms["trace"]).detach(),
+            "metric_trace_min": torch.min(terms["trace"]).detach(),
+            "metric_trace_max": torch.max(terms["trace"]).detach(),
+            "metric_v_norm_mean": torch.mean(torch.sqrt(terms["v_norm_sq"])).detach(),
+            "metric_diag_min": torch.min(metric_diag_mean).detach(),
+            "metric_diag_max": torch.max(metric_diag_mean).detach(),
+            "metric_diag_context_std": torch.mean(
+                torch.std(metric_diag, dim=0, unbiased=False)
+            ).detach(),
+            "disc_neg_logit_lt_m5_frac": torch.mean((neg_logit < -5.0).float()).detach(),
         }
 
-        # effective support: entries above 10% of the block RMS. Near zero
-        # means the interaction block rides on a handful of coordinates.
-        thresh = 0.1 * torch.clamp_min(interactions_rms, 1e-8)
-        info["disc_interaction_nonzero_frac"] = torch.mean((torch.abs(interactions) > thresh).float())
-
-        # how much of the scale-only normalizer sits on its floor: those
-        # coordinates are effectively unnormalized
-        abs_mean = self._disc_obs_norm.get_abs_mean()
-        min_diff = self._disc_obs_norm._min_diff
-        info["disc_norm_min_scale_frac"] = torch.mean((abs_mean <= min_diff).float())
-
+        finite_tensors = [disc_loss, neg_logit, base_energy, context_energy,
+                          terms["trace"], terms["v_norm_sq"]]
+        all_finite = torch.stack([
+            torch.isfinite(x).all() for x in finite_tensors
+        ]).all()
+        if not bool(all_finite.detach().cpu().item()):
+            raise FloatingPointError("Non-finite CPMD metric training value")
+        info["metric_all_finite"] = all_finite.float().detach()
         return info
-
-    def _compute_disc_input_diagnostics(self, norm_diff_obs, disc_neg_grad,
-                                        disc_neg_logit):
-        """Attribute ADD's existing input gradient to CPMD's three blocks.
-
-        This reuses ``disc_neg_grad`` already required by the gradient penalty;
-        it performs no extra forward/backward pass and cannot change the loss.
-        Fractions sum to one (up to floating-point error).  Velocity fractions
-        identify the original ADD instantaneous velocity coordinates inside
-        the 172-D state block.
-        """
-        with torch.no_grad():
-            s = self._state_dim
-            d = self._summary_dim
-
-            grad_sq = torch.square(disc_neg_grad.detach())
-            state_grad = torch.sum(grad_sq[..., :s])
-            summary_grad = torch.sum(grad_sq[..., s:s + d])
-            interaction_grad = torch.sum(grad_sq[..., s + d:])
-            total_grad = torch.clamp_min(
-                state_grad + summary_grad + interaction_grad, 1e-12)
-
-            state_vel_start = s - self._state_vel_dim
-            dof_vel_start = s - self._dof_dim
-            state_vel_grad = torch.sum(grad_sq[..., state_vel_start:s])
-            dof_vel_grad = torch.sum(grad_sq[..., dof_vel_start:s])
-
-            logits = disc_neg_logit.detach()
-            # Before the numerical reward cap, dr/dz = scale * sigmoid(z).
-            reward_slope = self._disc_reward_scale * torch.sigmoid(logits)
-
-            return {
-                "disc_grad_state_frac": state_grad / total_grad,
-                "disc_grad_summary_frac": summary_grad / total_grad,
-                "disc_grad_interaction_frac": interaction_grad / total_grad,
-                "disc_grad_state_vel_frac": state_vel_grad / total_grad,
-                "disc_grad_dof_vel_frac": dof_vel_grad / total_grad,
-                "disc_reward_logit_slope_mean": torch.mean(reward_slope),
-                "disc_neg_logit_lt_m5_frac": torch.mean((logits < -5.0).float()),
-            }

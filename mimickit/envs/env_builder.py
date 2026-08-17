@@ -29,9 +29,6 @@ def build_env(env_file, engine_file, num_envs, device, visualize, record_video=F
     elif (env_name == "cpmd"):
         import envs.cpmd_env as cpmd_env
         env = cpmd_env.CPMDEnv(env_config=env_config, engine_config=engine_config, num_envs=num_envs, device=device, visualize=visualize, record_video=record_video)
-    elif (env_name == "cpmd_cond"):
-        import envs.cpmd_cond_env as cpmd_cond_env
-        env = cpmd_cond_env.CPMDConditionalEnv(env_config=env_config, engine_config=engine_config, num_envs=num_envs, device=device, visualize=visualize, record_video=record_video)
     elif (env_name == "smp"):
         import envs.smp_env as smp_env
         env = smp_env.SMPEnv(env_config=env_config, engine_config=engine_config, num_envs=num_envs, device=device, visualize=visualize, record_video=record_video)

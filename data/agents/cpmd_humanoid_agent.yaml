@@ -1,10 +1,9 @@
 agent_name: "CPMD"
 
-# CPMD agent: item-for-item the official ADD humanoid agent, with only the agent
-# name changed. The whole method lives in the differential (see
-# data/envs/cpmd_*), so the training side must stay stock ADD: one discriminator
-# net, one zero-vs-policy BCE, one softplus reward, no branch weights, no
-# auxiliary losses, no extra reward terms.
+# Fixed-budget contextual differential metric.  The policy and value function
+# see only the robot observation.  The synchronized reference is used only by
+# the reward model to redistribute a fixed metric budget over the normalized
+# ADD differential.
 model:
   actor_net: "fc_2layers_1024units"
   actor_init_output_scale: 0.01
@@ -13,7 +12,12 @@ model:
   
   critic_net: "fc_2layers_1024units"
 
-  disc_net: "fc_2layers_1024units"
+  cpmd_schema_version: 2
+  metric_rank: 8
+  metric_base_weight: 0.01
+  metric_context_budget: 1.0
+  metric_norm_eps: 1.0e-8
+  metric_context_hidden: [256, 128]
 
 actor_optimizer:
     type: "SGD"
@@ -26,7 +30,10 @@ critic_optimizer:
 disc_optimizer:
     type: "SGD"
     learning_rate: 2.5e-4
-    weight_decay: 0.0001
+    # Scaling V does not change the trace-normalized metric.  Weight decay
+    # would therefore shrink an unidentifiable scale toward the epsilon floor.
+    weight_decay: 0.0
+    grad_clip: 10.0
 
 discount: 0.99
 steps_per_iter: 32
@@ -41,6 +48,7 @@ critic_epochs: 2
 critic_batch_size: 2
 disc_epochs: 2
 disc_batch_size: 2
+disc_eval_batch_size: 8192
 
 td_lambda: 0.95
 ppo_clip_ratio: 0.2
@@ -52,7 +60,9 @@ action_reg_weight: 0.0
 disc_buffer_size: 200000
 disc_replay_samples: 1000
 disc_logit_reg: 0.01
-disc_grad_penalty: 2
+# The positive input-gradient is analytically zero for a centered quadratic
+# energy.  This coefficient applies to the negative-side logit gradient only.
+disc_grad_penalty: 1.0
 disc_reward_scale: 2
 
 task_reward_weight: 0.0

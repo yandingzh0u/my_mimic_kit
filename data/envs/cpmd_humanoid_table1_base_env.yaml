@@ -3,11 +3,8 @@ env_name: "cpmd"
 char_file: "data/assets/humanoid/humanoid.xml"
 camera_mode: "track"
 
-# Shared protocol for the 13 single-clip skills in ADD Table I.  Per-skill
-# motion, allowed contacts, and optional static objects are supplied by
-# data/experiments/cpmd_humanoid_table1_seed0.yaml.
-cpmd_memory_seconds: 1.0666666667
-cpmd_schema_version: 1
+# Shared reference-blind protocol for the single-clip benchmark skills.
+cpmd_schema_version: 2
 
 episode_length: 10.0
 global_obs: True
@@ -15,9 +12,8 @@ root_height_obs: True
 pose_termination: False
 pose_termination_dist: 1.0
 enable_phase_obs: False
-enable_tar_obs: True
+enable_tar_obs: False
 num_phase_encoding: 4
-tar_obs_steps: [1, 2, 3]
 num_disc_obs_steps: 1
 rand_reset: True
 log_tracking_error: True

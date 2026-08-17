@@ -1,0 +1,44 @@
+CPMD fixed-budget contextual metric: Roll behavior evaluation
+============================================================
+
+Training checkpoint
+-------------------
+output: output/cpmd_metric_roll_cycle_1k_seed0
+last saved iteration: 900
+training environments: 4096
+training episode: 2.0 s (60 control steps)
+random seed: 0
+
+Evaluation protocol
+-------------------
+checkpoint: model.pt saved at iteration 900
+evaluation seed: 7
+episodes: 256
+environments: 64
+episode length: 10.0 s (300 control steps)
+
+Results
+-------
+completed: 256/256
+failed: 0/256
+winding ratio mean: +0.005
+winding ratio std: 0.031
+winding ratio median: +0.009
+displacement ratio mean: +0.058
+displacement ratio std: 0.087
+displacement ratio median: +0.063
+root height RMSE mean: +0.386
+root height RMSE std: 0.071
+root height RMSE median: +0.343
+upright rate: 0.000
+shortcut rate: 1.000 (256/256 completed episodes have winding < 0.5)
+mean episode length: 300.0
+
+Conclusion
+----------
+The run is numerically healthy but behaviorally unsuccessful. The policy does
+not execute the directed Roll and takes a shortcut in every evaluated episode.
+The contextual energy fraction falls from 0.281 at iteration 0 to 0.012 at
+iteration 900, so the learned reward is dominated by the isotropic base metric.
+Training was stopped at iteration 900 rather than spending the final 100
+iterations on a candidate that had not entered the successful Roll regime.
