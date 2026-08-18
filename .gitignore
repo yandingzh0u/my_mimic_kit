@@ -5,3 +5,6 @@ __pycache__/
 output/
 .vscode/
 wandb/
+PAPER/*.aux
+PAPER/*.log
+PAPER/*.synctex.gz

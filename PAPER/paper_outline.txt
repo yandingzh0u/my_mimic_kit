@@ -1,0 +1,673 @@
+Matching Policy Commands to Differential Rewards
+=================================================
+
+论文大纲
+========
+
+草稿状态说明
+------------
+
+本文档同时包含论文结构、已发表的基线数据和等待实验完成的排版占位值。为避免任何混淆，统一采用：
+
+- 无标记数值：来自明确注明出处的已发表结果，或已经核验的本地实验结果；
+- 🟥[PLACEHOLDER]：人为生成的理想化排版占位值或占位结论，不是实验结果，不得进入投稿版本；
+- 所有 🟥 内容必须通过搜索 `PLACEHOLDER` 在投稿前逐项替换或删除。
+
+在 LaTeX 草稿中，将所有 🟥 内容写成 `\textcolor{red}{...}`；最终论文中不保留红色占位内容。
+
+摘要
+----
+
+1. 物理运动跟踪需要同时协调姿态、速度、全身位置和接触，传统方法通常依赖手工加权奖励。
+2. 学习式差分奖励可以从数据中聚合多个跟踪目标，但策略通常仍通过未作差的参考状态接收命令。
+3. 本文研究策略命令与差分奖励之间的坐标关系，并构造信息严格等价的直接目标表示与残差坐标表示。
+4. 我们证明两种表示不改变可表达策略集合；残差坐标使当前残差、参考增量、实际特征响应和
+   下一步奖励残差满足精确的闭合恒等式。
+5. 实验在严格配对和跨动作设置下比较两种表示，并分析动作完成率、跟踪质量和学习过程。
+
+
+1. Introduction
+---------------
+
+1.1 物理运动跟踪
+~~~~~~~~~~~~~~~~
+
+- 目标是让受动力学、接触和执行器限制的物理角色复现给定运动，而不是简单播放运动学动画。
+- 动态动作要求 root、关节、全身构型和速度在真实物理交互中协调演化。
+- 传统方法先分别构造 joint pose、joint velocity、root pose、root velocity 和 key-body position 等误差，
+  再用若干带尺度的指数核组成奖励：
+
+      R_t^hand = sum_k w_k exp(-alpha_k E_k(s_t,hat{s}_t)).
+
+- 这种设计同时需要确定每个误差 E_k 的坐标、关节权重、尺度 alpha_k 和组件权重 w_k；不同动作中的
+  接触、旋转与位移关系不同，因而同一组参数不一定具有相同意义。
+
+1.2 学习模仿目标
+~~~~~~~~~~~~~~~~
+
+- DeepMimic 使用精细设计的跟踪奖励学习动态技能。
+- GAIL、AMP 等对抗方法从数据中学习模仿信号，减少手工奖励工程。
+- 差分判别器可以对 reference–policy residual 学习多个跟踪误差的非线性标量化。
+
+1.3 尚未研究的接口问题
+~~~~~~~~~~~~~~~~~~~~~~
+
+- 差分跟踪奖励直接在残差上评价控制结果。
+- 策略接收的控制命令通常仍由未作差的参考状态表示。
+- 在信息充分时，策略可以隐式恢复残差；但有限网络还必须在学习控制映射的同时学习这一坐标变换。
+- 由此产生本文的问题：奖励坐标与命令坐标的一致性是否会影响策略优化？
+
+1.4 本文思路
+~~~~~~~~~~~~
+
+- 用统一的跟踪特征 phi 构造当前残差 e_t 和一步参考增量 m_t。
+- 将 [x_t,hat{x}_t,hat{x}_{t+1}] 与 [x_t,e_t,m_t] 作为信息、维度和容量严格匹配的实验条件。
+- 保持奖励函数和优化目标一致，只比较策略命令坐标。
+
+1.5 贡献
+~~~~~~~~
+
+1. 提出并隔离 policy-command / differential-reward coordinate mismatch 这一研究问题。
+2. 给出直接目标表示与残差坐标表示的严格信息等价性，以及奖励残差的闭合恒等式。
+3. 分析输入重参数化如何改变有限网络的梯度几何，而不改变策略函数类。
+4. 通过严格配对、多随机种子和跨动作实验检验动作完成、跟踪精度与学习稳定性。
+
+
+2. Related Work
+---------------
+
+2.1 Physics-based motion tracking
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- DeepMimic 及后续 reference-conditioned controllers。
+- 手工跟踪奖励、动作表示和动态技能学习。
+
+2.2 Adversarial imitation
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- GAIL 的 occupancy matching。
+- AMP 的 adversarial motion prior。
+- ASE 等可复用技能表示。
+
+2.3 Learned differential rewards
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- ADD 的 differential construction、zero positive、policy negative 和 learned scalarization。
+- ADD 是学习式差分奖励的代表性实例；本文的命令坐标构造不依赖具体的差分奖励学习算法。
+
+2.4 Goal and relative conditioning
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- Goal-conditioned policies、relative goal encodings 和 target offsets。
+- UHC、PHC、MaskedMimic 等 reference-conditioned humanoid controllers。
+- 动作空间与输入表示对物理控制优化的影响。
+
+2.5 Feedback and residual coordinates
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- 经典控制中的跟踪误差与参考运动增量。
+- Residual control 和 learned feedback controllers。
+- 本文使用通用 MLP 策略；feedback 与 feedforward 仅描述 e_t 和 m_t 的坐标语义。
+
+
+3. Background
+-------------
+
+3.1 Reference-conditioned tracking
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- 状态 s_t、观测 o_t、动作 a_t 和动力学 P(s_{t+1}|s_t,a_t)。
+- 同步参考状态 hat{s}_t 与下一控制步参考状态 hat{s}_{t+1}。
+- 特征 phi 包含 root/joint pose、body configuration 和速度信息。
+- 旋转采用固定的欧氏嵌入，因此本文的减法发生在同一特征坐标中。
+
+3.2 Handcrafted tracking rewards
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+经典 reference-conditioned controller 先分别衡量若干跟踪目标，例如 joint pose、joint velocity、
+root pose、root velocity 和 key-body position。第 i 项通常写成
+
+    R_t^i = exp(-alpha_i ||hat{q}_t^i minus q_t^i||_2^2),
+
+再手工组合为
+
+    R_t^hand = sum_i w_i R_t^i.
+
+这里不仅要选择各目标的权重 w_i，还要确定误差坐标和尺度 alpha_i。不同运动对姿态、速度、位移与
+接触协调的要求不同，因此这些参数往往需要反复调整。这正是学习式差分奖励希望替代的人工标量化。
+
+3.3 Learned differential rewards
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+令跟踪差分为
+
+    Delta_t = phi(hat{s}_t) minus phi(s_t).
+
+差分判别器 D_theta(Delta) 判断一个差分是否代表理想跟踪。它只使用一种正样本：
+
+    Delta^+ = 0,
+
+即所有跟踪目标同时达到零误差；策略 rollout 产生的非零 Delta_t 构成负样本。按照 ADD 的概率记法，
+判别器通过最小化下式训练：
+
+    L_D(theta)
+      = -log D_theta(0)
+        - E_{s_t~pi}[log(1-D_theta(Delta_t))]
+        + lambda_GP E_{s_t~pi}[||grad_Delta D_theta(Delta_t)||_2^2].
+
+第一项把零差分判为理想解，第二项把策略差分判为非理想解；梯度惩罚避免判别器退化为只在零点取高值的
+尖峰函数。策略随后获得奖励
+
+    R_t^diff = -log(1-D_theta(Delta_t)).
+
+因此，策略通过减小 Delta_t 来提高奖励，而判别器学习如何把多维跟踪差分非线性地聚合成一个标量，
+无需预先指定各目标之间的外层权重 w_i。
+
+实验代码在数值上使用 discriminator logits 和 binary cross-entropy 实现同一分类目标，并沿用官方实现的
+regularization、replay 和 reward scale。本文不改变判别器目标或策略奖励；后续只比较策略表示参考命令的
+坐标。
+
+3.4 Direct-target policy conditioning
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+定义以当前特征和绝对参考特征表示的一步控制命令：
+
+    z_t^tar = [x_t,hat{x}_t,hat{x}_{t+1}].
+
+该表示作为后续严格配对的坐标对照。ADD 的官方 target observation 另作为外部基线报告。
+
+
+4. Policy Commands in Residual Coordinates
+-------------------------------------------
+
+4.1 Residual-coordinate representation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+定义
+
+    e_t = hat{x}_t - x_t,
+    m_t = hat{x}_{t+1} - hat{x}_t,
+    z_t^res = [x_t,e_t,m_t].
+
+其中 e_t 表示当前跟踪残差，m_t 表示参考运动在一个控制步内的特征增量。策略为
+
+    a_t ~ pi(. | o_t,z_t^res).
+
+直接目标表示与残差坐标表示使用相同的一步参考范围、相同 phi、相同输入维度和相同策略网络。
+
+4.2 Information equivalence
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+两种表示满足
+
+    z_t^res = T z_t^tar,
+
+    T = [ I   0   0
+         -I   I   0
+          0  -I   I ].
+
+其逆变换为
+
+    x_t   = x_t,
+    hat{x}_t     = x_t + e_t,
+    hat{x}_{t+1} = x_t + e_t + m_t.
+
+因此 T 可逆，且两种表示包含相同信息。令 bar{T}=diag(I_o,T)。对于具有仿射第一层和相同输出
+参数化的 MLP，可令 W_res=W_tar bar{T}^{-1}，使两种策略在所有配对输入上产生相同动作分布。
+在相同初始分布、reference distribution 和动力学下，两种表示因而具有相同的可表达策略集合和
+最优可达回报集合。
+
+4.3 Shared standardization
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+使用从 reference data 计算并固定的对角尺度 S：
+
+    q_t       = S^{-1}(x_t - mu),
+    hat{q}_t  = S^{-1}(hat{x}_t - mu),
+    hat{q}_{t+1} = S^{-1}(hat{x}_{t+1} - mu),
+    bar{e}_t  = S^{-1}e_t,
+    bar{m}_t  = S^{-1}m_t.
+
+同一尺度同时用于直接目标表示与残差坐标表示，因而可逆关系在标准化后保持成立。两组实验采用相同的
+self-observation preprocessing。
+
+4.4 Residual closure
+~~~~~~~~~~~~~~~~~~~~
+
+令动作产生的实际特征增量为
+
+    delta_t = x_{t+1} - x_t.
+
+则
+
+    e_{t+1}
+      = hat{x}_{t+1} - x_{t+1}
+      = (hat{x}_t-x_t) + (hat{x}_{t+1}-hat{x}_t) - (x_{t+1}-x_t)
+      = e_t + m_t - delta_t.
+
+因此策略命令中的 e_t 和 m_t、动作产生的 delta_t，以及下一步奖励评价的 e_{t+1} 位于同一坐标系。
+该等式是坐标恒等式，不依赖平滑动力学；它本身不蕴含可控性、误差收缩或稳定性保证。
+
+4.5 Optimization geometry
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+可逆变换不改变函数类，但 Euclidean SGD/PPO 并不对输入重参数化严格不变。在 function-matched 策略和
+同一 batch 上，第一层梯度满足
+
+    G_res = G_tar bar{T}^T.
+
+将残差坐标中的一步 vanilla-SGD 更新映回直接目标参数，相当于引入 bar{T}^T bar{T} 所定义的固定
+参数度量。
+本文据此提出可检验假设：差分坐标可能减少绝对参考 block 的 common-mode correlation，使有限网络更
+直接地表示残差修正与参考推进方向。该假设通过输入统计、梯度统计和学习曲线验证，而不作为收敛定理。
+
+4.6 Training procedure
+~~~~~~~~~~~~~~~~~~~~~~
+
+Algorithm 1：Matching policy commands to differential rewards
+
+    Input: reference motion M, feature map phi
+    Initialize policy pi, value function V, discriminator D, replay buffer B
+
+    while training do
+        Sample an initial reference phase and initialize the character
+
+        for t = 0,...,T-1 do
+            Observe simulated state s_t and policy observation o_t
+            Query synchronized reference states hat{s}_t and hat{s}_{t+1}
+
+            x_t       <- phi(s_t)
+            hat{x}_t  <- phi(hat{s}_t)
+            hat{x}^+  <- phi(hat{s}_{t+1})
+            e_t       <- hat{x}_t - x_t
+            m_t       <- hat{x}^+ - hat{x}_t
+
+            a_t       ~ pi(. | o_t, x_t, e_t, m_t)
+            s_{t+1}   ~ P(. | s_t, a_t)
+
+            Delta_{t+1} <- phi(hat{s}_{t+1}) - phi(s_{t+1})
+            R_{t+1}     <- -log(1-D(Delta_{t+1}))
+            Store transition and Delta_{t+1} in B
+        end for
+
+        Update D with zero positives and policy differentials from B
+        Update V and pi with the unchanged value loss and PPO objective
+    end while
+
+算法相对标准 differential-reward tracking 的唯一方法步骤，是在动作执行前以同一 phi 构造
+[e_t,m_t] 作为策略命令。判别器训练、策略奖励和 PPO 更新保持不变。严格配对的 direct-target 对照在
+同一位置将 [x_t,e_t,m_t] 换为 [x_t,hat{x}_t,hat{x}_{t+1}]。
+
+
+5. Experiments
+--------------
+
+5.1 Research questions
+~~~~~~~~~~~~~~~~~~~~~~
+
+- RQ1：在严格匹配的信息、容量和预算下，命令坐标是否影响学习效率与最终性能？
+- RQ2：结果能否跨随机种子和不同类型动作复现？
+- RQ3：性能差异是否与信息等价的坐标重参数化及其优化几何一致？
+
+5.2 Compared conditions
+~~~~~~~~~~~~~~~~~~~~~~~
+
+- DeepMimic-style handcrafted tracking reward。
+- AMP。
+- ADD，作为 learned differential reward 的官方实现与基线。
+- direct-target representation：[o_t,x_t,hat{x}_t,hat{x}_{t+1}]。
+- residual-coordinate representation：[o_t,x_t,e_t,m_t]。
+
+两种配对表示构成主要因果比较；其他方法提供经典跟踪、对抗模仿和 learned differential reward 基线。
+
+5.3 Tasks
+~~~~~~~~~
+
+主 benchmark 与 qualitative gallery 使用七个动作，覆盖不同控制结构：
+
+- Run：快速周期 locomotion 与 root translation；
+- Jump：起跳、腾空和落地；
+- Backflip：快速后向全身旋转；
+- Crawl：持续多点地面接触；
+- Getup Facedown：从地面状态恢复到站立；
+- SpinKick：快速转向、单脚支撑和踢腿；
+- Climb：长时程推进以及角色与障碍物的复杂接触。
+
+此外，Roll 用作已观察到 incomplete-motion behavior 的机制任务；Sideflip 作为独立的高动态确认任务，
+只有在其严格配对训练完成后才进入 quantitative completion analysis，不提前放入 qualitative gallery。
+
+5.4 Training and evaluation protocol
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- 所有条件使用相同环境数、physics samples、episode horizon 和 random phase reset。
+- Actor/Critic 宽度、优化器、学习率、termination 和 contact settings 保持一致。
+- learned-reward 条件使用相同奖励模型架构、目标、更新规则、replay、regularization 和 reward scale。
+- 代码使用 logit-domain binary cross-entropy；所有配对条件固定使用同一 output-weight regularization、
+  zero/policy differential gradient penalty 及其系数。具体数值在统一的 hyperparameter table 中报告。
+- 两种配对表示使用 paired seeds；Roll 至少 5 个训练种子，其他核心动作至少 3 个。
+- 使用固定最终 checkpoint，并同时报告预先设定检查点上的 learning curve。
+
+5.5 Primary metrics
+~~~~~~~~~~~~~~~~~~~
+
+主结果只使用三类指标：
+
+1. Motion completion
+   - Roll：完整有向滚转的 episode completion rate 与 signed winding ratio；
+   - Sideflip：完整侧翻的 episode completion rate、signed lateral rotation 与落地成功率。
+
+2. Tracking accuracy
+   - Position tracking error；
+   - DoF velocity tracking error。
+
+3. Learning reliability
+   - 多 seed training success rate；
+   - learning curves 与达到动作完成标准所需的 physics samples。
+
+Position 与 DoF velocity 使用物理运动跟踪中通行的定义，不重新设计加权总分。
+
+5.6 Secondary task metrics
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- Roll：forward displacement ratio 与 cycle-period error。
+- Sideflip：airborne phase、rotation direction 和 landing pose error。
+- SpinKick：signed yaw progress、kick-foot trajectory error 和 stance-foot slip。
+- Jog/Run：forward speed、displacement、cadence 和 lateral drift。
+
+5.7 Mechanism analysis
+~~~~~~~~~~~~~~~~~~~~~~
+
+- Closure error：||e_{t+1}-(e_t+m_t-delta_t)||，仅作为实现检查。
+- Input geometry：covariance spectrum、condition number 和 block correlation。
+- Optimization geometry：first-layer gradient statistics、PPO clip fraction 和 sample efficiency。
+
+
+6. Results
+----------
+
+6.1 Tracking accuracy
+~~~~~~~~~~~~~~~~~~~~~
+
+- 展示各动作的 Position 和 DoF velocity tracking errors。
+- 报告每个训练种子的原始结果、均值/中位数和置信区间。
+- 🟥[PLACEHOLDER CONCLUSION] 在主 benchmark 上，residual-coordinate conditioning 相对严格配对的
+  direct-target control 将 Position error 平均降低约 18%，DoF velocity error 平均降低约 15%；改善主要
+  集中在高动态与长时程动作，Run、Crawl 和 SpinKick 保持相近精度。该句仅用于展示最终结果段落的写法。
+
+6.2 Motion completion
+~~~~~~~~~~~~~~~~~~~~~
+
+- 报告 Roll 与 Sideflip 的完整动作完成率和有向旋转进度。
+- 用长时行为序列区分完整动作与低误差 shortcut。
+- 🟥[PLACEHOLDER CONCLUSION] residual-coordinate policies 在 Roll/Sideflip 上分别达到 94%/88% 的
+  completion rate，而 direct-target controls 为 12%/18%；未完成轨迹主要表现为倒地后起身或停留在
+  初始支撑姿态。真实实验完成后必须用逐 seed 统计替换。
+
+6.3 Learning curves and consistency
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- 绘制 Roll 与 Sideflip 的多 seed learning curves。
+- 比较最终成功率、跨 seed 方差和达到完成标准所需样本数。
+- 🟥[PLACEHOLDER CONCLUSION] residual-coordinate representation 在 5/5 seeds 中学会完整 Roll，达到
+  completion criterion 的中位样本数为 2.1e8；direct-target representation 仅 1/5 seeds 达标。
+
+6.4 Information-matched comparison
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- 直接比较 direct-target 与 residual-coordinate representations。
+- 核对输入维度、网络参数量、reference horizon、标准化和训练预算一致。
+- 报告 paired effect size 和每个种子的训练轨迹。
+- 🟥[PLACEHOLDER CONCLUSION] 在信息、网络与初始化严格匹配后仍观察到显著差异，支持性能变化来自
+  坐标重参数化所改变的有限样本优化过程，而不是新增参考信息。只有配对实验通过后才能保留此结论。
+
+6.5 Cross-motion results
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+- 比较接触丰富动作与常规 locomotion 上的收益和代价。
+- 分析性能变化是否集中于特定 tracking blocks 或接触阶段。
+- 🟥[PLACEHOLDER CONCLUSION] 改善在 Roll、Backflip 和 Climb 最明显；Run、Crawl 与 SpinKick 的标准
+  tracking metrics 没有统计显著退化，说明结果并非通过牺牲常规运动精度换取高动态动作完成率。
+
+6.6 Coordinate analysis
+~~~~~~~~~~~~~~~~~~~~~~~
+
+- 比较输入 covariance、first-layer gradient statistics 和 sample efficiency。
+- 将分析限定为坐标重参数化的机制证据。
+- 🟥[PLACEHOLDER CONCLUSION] residual coordinates 降低 reference blocks 的相关性并提高早期有效策略
+  更新的一致性；这些统计只作为优化机制证据，不被解释为稳定性或全局收敛保证。
+
+
+7. Ablations
+------------
+
+7.1 Coordinate ablation
+~~~~~~~~~~~~~~~~~~~~~~~
+
+- direct-target：[x_t,hat{x}_t,hat{x}_{t+1}]。
+- residual-coordinate：[x_t,e_t,m_t]。
+
+7.2 Command-factor ablations
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- Error-only：[x_t,e_t,0]。
+- Motion-only：[x_t,0,m_t]。
+- Summed command：[x_t,e_t+m_t,0]。
+- Full differential command：[x_t,e_t,m_t]。
+
+所有条件保留相同输入维度和策略参数量。
+
+7.3 Normalization ablations
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- shared fixed reference scale；
+- independent block scales；
+- common scale with a shuffled coordinate transform。
+
+7.4 Feature and horizon ablations
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- pose-only versus full phi；
+- velocity-block removal；
+- one-step versus longer reference horizon；
+- root/body/velocity block leave-one-out。
+
+
+8. Statistical Analysis
+-----------------------
+
+- 训练 seed 作为统计单位。
+- 报告每个 seed、95% confidence interval 和 paired effect size。
+- Primary endpoints 与动作完成阈值在正式实验前确定。
+- 所有方法使用相同 checkpoint selection 和 physics budget。
+- 失败训练和数值异常完整计入结果并说明原因。
+
+
+9. Discussion and Limitations
+-----------------------------
+
+- 两种配对表示信息等价；它们的比较隔离了有限模型及联合训练过程中的命令坐标效应。
+- Residual closure 是恒等式，不保证 closed-loop stability 或 controllability。
+- 接触切换、欠驱动 root 和动作限制可能使一步 reference increment 不可实现。
+- phi 中的旋转差是嵌入空间 increment，而非一般意义上的 Lie tangent。
+- 通用 MLP 可以混合 e_t 与 m_t，因此本文研究的是输入坐标，而非显式 feedback/feedforward 控制律。
+- 策略仍使用当前与下一参考状态派生的信息，研究任务属于 reference-conditioned tracking。
+- 对多动作统一策略、不同角色和真实机器人系统的推广需要进一步验证。
+
+
+10. Conclusion
+--------------
+
+- 差分奖励根据 reference–policy residual 评价控制结果。
+- 本文研究如何在相同残差坐标中向策略表达一步控制命令。
+- 两种表示包含相同信息，而残差坐标与 reward residual transition 精确闭合。
+- 实验结论根据严格配对、跨动作和机制诊断结果填写。
+
+
+Figures and Tables
+------------------
+
+以下只保留支撑主论点所需的图表。版式借鉴 ADD 的 Algorithm 1、Table 1 和多 seed learning curves，
+但内容围绕 policy-command coordinates 重新组织。
+
+
+Algorithm 1：Residual-coordinate differential tracking
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+采用第 4.6 节的完整伪代码。算法图中必须明确显示三个连续关系：
+
+    reference transition -> [e_t,m_t] policy command
+    action               -> realized increment delta_t
+    residual             -> e_{t+1}=e_t+m_t-delta_t -> D(e_{t+1})
+
+不要把 standard PPO、buffer sampling 或 discriminator update 画成本文新增模块；它们在算法末尾用一行
+“update D, V, and pi”表示即可。
+
+
+Table 1：Motion tracking benchmark
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+用途：对应 ADD 原论文 Table 1，选用 Run、Jump、Backflip、Crawl、Getup Facedown、SpinKick 和 Climb。
+除 Jump 外，其余动作的 AMP、DeepMimic、ADD 数字来自 Zhang et al. (2025), Table 1。原表没有单独的
+Jump 行，因此以 `—` 标明未报告，绝不从其他跳跃动作推算。本文方法列只有在使用相同评估定义和
+episode 数后才能替换红色占位。
+
+Skill           Length | Position Tracking Error [m]                         | DoF Velocity Error [rad/s]
+                       | AMP          DeepMimic     ADD          Residual     | AMP          DeepMimic     ADD          Residual
+Run              0.80  | .163±.008    .013±.002    .165±.017   🟥[PLACEHOLDER .012±.002]
+                                                                              | 2.811±.048   .584±.054    .478±.007   🟥[PLACEHOLDER .450±.010]
+Jump             TBD   | —             —             —           🟥[PLACEHOLDER .040±.005]
+                                                                              | —             —             —           🟥[PLACEHOLDER .650±.040]
+Backflip         1.75  | .267±.015    .111±.054    .062±.001   🟥[PLACEHOLDER .055±.006]
+                                                                              | 2.243±.113   1.103±.024   .878±.013   🟥[PLACEHOLDER .800±.040]
+Crawl            2.93  | .050±.006    .027±.000    .028±.002   🟥[PLACEHOLDER .026±.002]
+                                                                              | .646±.089    .430±.006    .283±.002   🟥[PLACEHOLDER .270±.010]
+Getup Facedown   3.03  | .096±.018    .023±.001    .022±.001   🟥[PLACEHOLDER .020±.002]
+                                                                              | .838±.029    .433±.008    .325±.005   🟥[PLACEHOLDER .300±.015]
+SpinKick         1.28  | .064±.010    .078±.062    .025±.000   🟥[PLACEHOLDER .023±.002]
+                                                                              | 1.453±.327   1.222±.233   .774±.007   🟥[PLACEHOLDER .720±.025]
+Climb            9.97  | .185±.021    .066±.004    .046±.031   🟥[PLACEHOLDER .040±.006]
+                                                                              | 1.190±.012   .567±.015    .374±.071   🟥[PLACEHOLDER .340±.030]
+
+Caption draft：Position and DoF velocity tracking errors. Published AMP, DeepMimic, and ADD values use five
+training seeds and 4096 test episodes per model. The residual-coordinate column must use the same reporting
+protocol before it is placed beside them. Lower is better. 不允许把不同协议的本地数值与 published columns
+做显著性检验。
+
+
+Table 2：Strict information-matched comparison
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+用途：全文最重要的因果结果表。这里只比较完全相同的 phi、一步 reference horizon、输入维度、网络、
+normalization、训练预算和 seeds；唯一差异是 absolute/direct-target coordinates 与 residual coordinates。
+
+Motion    Condition       Position [m]     DoF Vel [rad/s]   Completion [%]   Signed progress
+Roll      Direct-target   🟥[PLACEHOLDER .145±.018]  🟥[PLACEHOLDER 1.29±.09]  🟥[PLACEHOLDER 12±8]  🟥[PLACEHOLDER .13±.09]
+          Residual        🟥[PLACEHOLDER .096±.010]  🟥[PLACEHOLDER .84±.06]   🟥[PLACEHOLDER 94±4]  🟥[PLACEHOLDER .98±.03]
+Sideflip  Direct-target   🟥[PLACEHOLDER .142±.012]  🟥[PLACEHOLDER 1.31±.08]  🟥[PLACEHOLDER 18±9]  🟥[PLACEHOLDER .21±.11]
+          Residual        🟥[PLACEHOLDER .108±.009]  🟥[PLACEHOLDER .99±.05]   🟥[PLACEHOLDER 88±6]  🟥[PLACEHOLDER .95±.04]
+SpinKick  Direct-target   🟥[PLACEHOLDER .050±.004]  🟥[PLACEHOLDER .61±.03]   🟥[PLACEHOLDER 96±3]  🟥[PLACEHOLDER .99±.02]
+          Residual        🟥[PLACEHOLDER .047±.003]  🟥[PLACEHOLDER .58±.03]   🟥[PLACEHOLDER 98±2]  🟥[PLACEHOLDER 1.00±.01]
+Run       Direct-target   🟥[PLACEHOLDER .030±.003]  🟥[PLACEHOLDER .55±.03]   🟥[PLACEHOLDER 99±1]  —
+          Residual        🟥[PLACEHOLDER .028±.002]  🟥[PLACEHOLDER .52±.02]   🟥[PLACEHOLDER 99±1]  —
+
+Caption draft：All entries are computed under the same local protocol and summarized across independent training
+seeds. Completion is motion-specific and fixed before confirmatory evaluation. Lower tracking error and higher
+completion/progress are better.
+
+
+Table 3：Command representation ablation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+用途：回答成功是否真正依赖完整且可逆的 [e_t,m_t] 表示，而不是更多参数或单独一个 reference cue。
+所有删减条件通过 zero padding 保持输入维度和参数量一致。
+
+Condition                     Invertible   Roll completion   Sideflip completion   Mean Position   Relative cost
+Direct [x,hat{x},hat{x}^+]       Yes       🟥[PLACEHOLDER 12] 🟥[PLACEHOLDER 18]     🟥[PLACEHOLDER .094]  1.00x
+Residual [x,e,m]                 Yes       🟥[PLACEHOLDER 94] 🟥[PLACEHOLDER 88]     🟥[PLACEHOLDER .069]  1.00x
+Error only [x,e,0]                No       🟥[PLACEHOLDER 35] 🟥[PLACEHOLDER 28]     🟥[PLACEHOLDER .101]  1.00x
+Motion only [x,0,m]               No       🟥[PLACEHOLDER 22] 🟥[PLACEHOLDER 20]     🟥[PLACEHOLDER .118]  1.00x
+Summed [x,e+m,0]                  No       🟥[PLACEHOLDER 40] 🟥[PLACEHOLDER 31]     🟥[PLACEHOLDER .096]  1.00x
+
+Caption draft：Ablations preserve network size and optimization budget. The summed representation is not
+information-equivalent because it cannot recover e and m separately.
+
+
+Figure 1：Teaser and failure mode
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- 使用七个动作：Run、Jump、Backflip、Crawl、Getup Facedown、SpinKick、Climb。
+- 推荐排版为 4+3 的两行 motion gallery；每个动作内部按 `Reference | Baseline | Residual-coordinate`
+  排列 3–5 个等时间关键帧。
+- 已有真实 rollout 的动作使用同一初始 reference phase 截图；尚未训练完成的动作暂时使用 motion clip 的
+  reference frames 或随机 rollout 作为版式替代，但必须覆盖红色标签：
+
+      🟥[PLACEHOLDER IMAGE — NOT A METHOD RESULT]
+
+- 临时图片不能标成成功、失败或 shortcut；只有相应 checkpoint 完成统一评估后，才能替换为
+  `Baseline incomplete motion` 或 `Residual complete motion`。
+- 最终图中每个动作选择固定等时间帧，不能只挑本文方法最漂亮的瞬间。
+- 图下方同时写 Position error；具有明确完成事件的 Jump、Backflip、Getup 和 Climb 再报告 completion，
+  避免只靠视觉判断。
+- 🟥[PLACEHOLDER CAPTION] Across locomotion, aerial, ground-contact, recovery, rotational, and long-horizon
+  skills, residual-coordinate conditioning improves motion completion while preserving tracking accuracy under
+  the same differential reward and reference information.
+
+
+Figure 2：Method overview
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+- 左：direct-target 输入 [x_t,hat{x}_t,hat{x}_{t+1}]；右：residual 输入 [x_t,e_t,m_t]。
+- 中间画双向箭头 T 与 T^{-1}，直接表达信息等价。
+- 下方只保留一条闭环：
+
+      [e_t,m_t] -> policy -> delta_t -> e_{t+1}=e_t+m_t-delta_t -> D(e_{t+1}).
+
+- 图注必须说明：reward、policy class 和 reference horizon 不变；改变的是命令坐标。
+
+
+Figure 3：Multi-seed learning curves
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+借鉴 ADD Figure 4 的 mean curve + uncertainty band，但主曲线不能只画 tracking error，因为 shortcut 也可能
+具有不高的逐帧误差。每个动作画两列：Position error 与 motion completion；实线为跨 seed mean，阴影为
+95% CI，并以 physics samples 为横轴。
+
+用于排版测试的 synthetic completion anchors：
+
+Samples (million)          0     100    200    300    400    524
+Roll Direct              🟥[PLACEHOLDER 0, .02, .05, .08, .10, .12]
+Roll Residual            🟥[PLACEHOLDER 0, .15, .62, .87, .93, .94]
+Sideflip Direct          🟥[PLACEHOLDER 0, .03, .07, .12, .16, .18]
+Sideflip Residual        🟥[PLACEHOLDER 0, .10, .45, .72, .84, .88]
+
+这些 anchor 只用于提前确定坐标轴、颜色和 legend，真实曲线必须从所有 seeds 的 checkpoint evaluation
+重新生成，不能对训练日志做人工平滑。
+
+
+Figure 4：Long-horizon motion execution
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- Roll：画 reference、direct-target、residual 三条累计 signed root rotation 曲线，理想轨迹每周期增加约
+  2pi；同时画 forward displacement ratio。
+- Sideflip：画累计 lateral rotation，并标出 takeoff、airborne 和 landing 区间。
+- 该图直接展示“低 tracking error 但动作没有完成”的情况，比再增加一个加权总分更有解释力。
+- 🟥[PLACEHOLDER CAPTION] Residual-coordinate policies match both the direction and rate of the reference motion;
+  direct-target policies remain near zero progress after entering an incomplete-motion behavior.
+
+
+Figure 5：Command representation ablation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- 左图：Roll/Sideflip completion grouped bars；右图：Position 与 DoF velocity error 的 paired-dot plot。
+- 条件只包含 Direct、Residual、Error-only、Motion-only、Summed 五种表示。
+- 每个点对应一个训练 seed；不要只画柱状均值，也不要加入没有服务于 coordinate hypothesis 的旧原型。
+
+
+结果填写顺序
+------------
+
+1. 先替换 Table 2 和 Figure 3，因为它们决定“相同信息、不同坐标”这一核心主张是否成立。
+2. 再填 Table 1，建立与公开基线的性能背景，但不把跨协议数字当作严格因果比较。
+3. 然后完成 Table 3 和 Figure 5，检验 e、m 及可逆表示是否必要。
+4. 最后制作 Figure 1 和 Figure 4 的长时行为可视化，确保 tracking error 没有掩盖 incomplete motion。
+5. 全部真实数据填入后运行 `rg -n "PLACEHOLDER" PAPER/`；结果必须为空才能进入投稿稿件。
