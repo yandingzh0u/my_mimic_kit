@@ -67,6 +67,35 @@ class Normalizer(torch.nn.Module):
     def get_std(self):
         return self._std
 
+    def training_state_dict(self):
+        """State needed to continue online moment updates exactly.
+
+        ``_mean_sq`` and the pending accumulators are intentionally not model
+        parameters, so the lightweight inference ``model.pt`` stays backward
+        compatible.  Full training checkpoints save them through BaseAgent.
+        """
+        return {
+            "mean_sq": (None if self._mean_sq is None
+                        else self._mean_sq.detach().cpu()),
+            "new_count": int(self._new_count),
+            "new_sum": self._new_sum.detach().cpu(),
+            "new_sum_sq": self._new_sum_sq.detach().cpu(),
+        }
+
+    def load_training_state_dict(self, state_dict):
+        mean_sq = state_dict.get("mean_sq", None)
+        if mean_sq is None:
+            self._mean_sq = None
+        else:
+            self._mean_sq = mean_sq.to(
+                device=self._mean.device, dtype=self.dtype).clone()
+        self._new_count = int(state_dict.get("new_count", 0))
+        self._new_sum.copy_(state_dict["new_sum"].to(
+            device=self._new_sum.device, dtype=self._new_sum.dtype))
+        self._new_sum_sq.copy_(state_dict["new_sum_sq"].to(
+            device=self._new_sum_sq.device, dtype=self._new_sum_sq.dtype))
+        return
+
     def set_mean_std(self, mean, std):
         shape = self.get_shape()
         

@@ -1,3 +1,4 @@
+import hashlib
 import numpy as np
 import os
 import shutil
@@ -42,6 +43,22 @@ def build_agent(args, env, device):
     agent_file = args.parse_string("agent_config")
     agent = agent_builder.build_agent(agent_file, env, device)
     return agent
+
+def _file_sha256(filename):
+    digest = hashlib.sha256()
+    with open(filename, "rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+def build_checkpoint_context(args):
+    """Content identity that prevents resuming under another experiment."""
+    context = {}
+    for key in ("env_config", "agent_config", "engine_config"):
+        filename = args.parse_string(key)
+        if filename != "":
+            context[key + "_sha256"] = _file_sha256(filename)
+    return context
 
 def train(agent, max_samples, out_dir, save_int_models, logger_type):
     agent.train_model(max_samples=max_samples, out_dir=out_dir, 
@@ -100,6 +117,12 @@ def run(rank, num_procs, device, master_port, args):
     visualize = args.parse_bool("visualize", True)
     logger_type = args.parse_string("logger", "txt")
     model_file = args.parse_string("model_file", "")
+    resume_file = args.parse_string("resume_file", "")
+
+    if (model_file != "" and resume_file != ""):
+        raise ValueError("--model_file and --resume_file are mutually exclusive.")
+    if (resume_file != "" and mode != "train"):
+        raise ValueError("--resume_file is only valid in train mode.")
 
     out_dir = args.parse_string("out_dir", "output/")
     save_int_models = args.parse_bool("save_int_models", False)
@@ -113,9 +136,12 @@ def run(rank, num_procs, device, master_port, args):
 
     env = build_env(args, num_envs, device, visualize)
     agent = build_agent(args, env, device)
+    agent.set_checkpoint_context(build_checkpoint_context(args))
 
     if (model_file != ""):
         agent.load(model_file)
+    elif (resume_file != ""):
+        agent.resume(resume_file)
 
     if (mode == "train"):
         save_config_files(args, out_dir)

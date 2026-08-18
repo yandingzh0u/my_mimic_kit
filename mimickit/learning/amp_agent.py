@@ -101,18 +101,21 @@ class AMPAgent(ppo_agent.PPOAgent):
         disc_obs = self._exp_buffer.get_data_flat("disc_obs")
 
         n = disc_obs.shape[0]
-        rand_idx = torch.randperm(n, device=self._device, dtype=torch.long)
-        
-        if (self._disc_buffer.is_full()):
-            num_samples = min(n, self._disc_replay_samples)
-        else:
-            num_samples = n
-        
-        idx = rand_idx[:num_samples]
+        idx = self._sample_disc_replay_indices(n)
         replay_disc_obs = disc_obs[idx]
         disc_data = {"disc_obs": replay_disc_obs.unsqueeze(1)}
         self._disc_buffer.push(disc_data)
         return
+
+    def _sample_disc_replay_indices(self, num_candidates):
+        if (self._disc_buffer.is_full()):
+            num_samples = min(num_candidates, self._disc_replay_samples)
+        else:
+            num_samples = min(num_candidates,
+                              self._disc_buffer.get_capacity())
+        rand_idx = torch.randperm(
+            num_candidates, device=self._device, dtype=torch.long)
+        return rand_idx[:num_samples]
 
     def _compute_rewards(self):
         task_r = self._exp_buffer.get_data_flat("reward")
@@ -157,6 +160,11 @@ class AMPAgent(ppo_agent.PPOAgent):
                 loss = loss_info["disc_loss"]
 
             self._disc_optimizer.step(loss)
+
+            loss_info["disc_param_grad_norm"] = torch.tensor(
+                self._disc_optimizer.get_last_grad_norm(),
+                device=self._device,
+                dtype=torch.float32)
 
             torch_util.add_torch_dict(loss_info, info)
         

@@ -45,6 +45,10 @@ class ExperienceBuffer():
     def get_total_samples(self):
         return self._total_samples
 
+    def set_total_samples(self, total_samples):
+        self._total_samples = int(total_samples)
+        return
+
     def get_capacity(self):
         return self._buffer_length * self._batch_size
 
@@ -58,8 +62,7 @@ class ExperienceBuffer():
     def record(self, name, data):
         assert(data.shape[0] == self._batch_size)
 
-        sample_count = self.get_sample_count()
-        if (sample_count == 0 and name not in self._buffers):
+        if (name not in self._buffers):
             self.add_buffer(name, data.shape[1:], data.dtype)
 
         data_buf = self._buffers[name]
@@ -104,6 +107,14 @@ class ExperienceBuffer():
         return output
     
     def push(self, data_dict):
+        input_n = next(iter(data_dict.values())).shape[0]
+        if (input_n > self._buffer_length):
+            # Keep a capacity-sized subset selected by the caller.  AMP/ADD
+            # shuffle before pushing, so this also fixes the first 8192-env
+            # rollout (262144 samples into the default 200000-slot replay).
+            offset = input_n - self._buffer_length
+            data_dict = {key: val[offset:] for key, val in data_dict.items()}
+
         if (len(self._buffers) == 0):
             for key, data in data_dict.items():
                 self.add_buffer(name=key, data_shape=data.shape[2:], dtype=data.dtype)
@@ -126,7 +137,84 @@ class ExperienceBuffer():
                 curr_buf[0:remainder] = curr_data[store_n:]  
 
         self._buffer_head = (self._buffer_head + n) % self._buffer_length
-        self._total_samples += n
+        self._total_samples += input_n
+        return
+
+    def state_dict(self):
+        """Serialize ring-buffer contents and sampling position on CPU."""
+        stored_rows = min(
+            self._buffer_length,
+            int((self._total_samples + self._batch_size - 1)
+                // self._batch_size))
+        return {
+            "buffer_length": self._buffer_length,
+            "batch_size": self._batch_size,
+            "buffer_head": self._buffer_head,
+            "total_samples": self._total_samples,
+            "stored_rows": stored_rows,
+            "sample_buf": self._sample_buf.detach().cpu(),
+            "sample_buf_head": self._sample_buf_head,
+            "buffers": {
+                key: val[:stored_rows].detach().cpu()
+                for key, val in self._buffers.items()
+            },
+        }
+
+    def sampling_state_dict(self):
+        """Serialize only cursor state needed at an iteration boundary.
+
+        The on-policy rollout itself is deliberately not checkpointed: a
+        resumed run starts by collecting a fresh, complete rollout.  Its
+        minibatch permutation and cursor still affect the next optimizer
+        update, however, so they must be preserved for a strict continuation.
+        """
+        return {
+            "buffer_length": self._buffer_length,
+            "batch_size": self._batch_size,
+            "buffer_head": self._buffer_head,
+            "sample_buf": self._sample_buf.detach().cpu(),
+            "sample_buf_head": self._sample_buf_head,
+        }
+
+    def load_sampling_state_dict(self, state_dict):
+        if (int(state_dict["buffer_length"]) != self._buffer_length
+                or int(state_dict["batch_size"]) != self._batch_size):
+            raise ValueError(
+                "Experience-buffer sampler shape mismatch: checkpoint has "
+                "{}x{}, current buffer is {}x{}.".format(
+                    state_dict["buffer_length"], state_dict["batch_size"],
+                    self._buffer_length, self._batch_size))
+        self._buffer_head = int(state_dict.get("buffer_head", 0))
+        self._sample_buf.copy_(state_dict["sample_buf"].to(
+            device=self._device, dtype=torch.long))
+        self._sample_buf_head = int(state_dict.get("sample_buf_head", 0))
+        return
+
+    def load_state_dict(self, state_dict):
+        if (int(state_dict["buffer_length"]) != self._buffer_length
+                or int(state_dict["batch_size"]) != self._batch_size):
+            raise ValueError(
+                "Experience-buffer shape mismatch: checkpoint has "
+                "{}x{}, current buffer is {}x{}.".format(
+                    state_dict["buffer_length"], state_dict["batch_size"],
+                    self._buffer_length, self._batch_size))
+
+        self._buffers = dict()
+        self._flat_buffers = dict()
+        stored_rows = int(state_dict.get("stored_rows",
+                                        self._buffer_length))
+        for key, data in state_dict.get("buffers", {}).items():
+            self.add_buffer(key, data.shape[2:], data.dtype)
+            self._buffers[key][:stored_rows].copy_(data)
+
+        self._buffer_head = int(state_dict["buffer_head"])
+        self._total_samples = int(state_dict["total_samples"])
+        sample_buf = state_dict.get("sample_buf", None)
+        if (sample_buf is None):
+            self._reset_sample_buf()
+        else:
+            self._sample_buf.copy_(sample_buf.to(device=self._device))
+            self._sample_buf_head = int(state_dict.get("sample_buf_head", 0))
         return
 
 

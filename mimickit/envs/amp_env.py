@@ -184,7 +184,10 @@ class AMPEnv(deepmimic_env.DeepMimicEnv):
         return
     
     def _update_ref_motion(self):
-        if (self._enable_ref_char()):
+        # AMP itself does not consume the clocked reference.  Tracking
+        # diagnostics do, however, and must never compare the policy to the
+        # frozen reset frame when visualization is disabled.
+        if (self._enable_ref_char() or self._log_tracking_error):
             super()._update_ref_motion()
         return
     

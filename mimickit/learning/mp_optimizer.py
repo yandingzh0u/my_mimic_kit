@@ -10,6 +10,7 @@ class MPOptimizer():
         self._grad_clip = float(config.get("grad_clip", 0.0))
         self._optimizer = self._build_optimizer(config, param_list)
         self._steps = 0
+        self._last_grad_norm = 0.0
         
         if (mp_util.enable_mp()):
             self._param_buffer = self._build_param_buffer()
@@ -24,6 +25,8 @@ class MPOptimizer():
         if (mp_util.enable_mp()):
             self._aggregate_mp_grads()
 
+        self._last_grad_norm = self._calc_grad_norm()
+
         if (self._enable_grad_clip()):
             self._clip_grads(self._grad_clip)
 
@@ -33,10 +36,34 @@ class MPOptimizer():
             assert(self._check_synced()), "Network parameters desynchronized"
 
         self._steps += 1
-        return
+        return self._last_grad_norm
 
     def get_steps(self):
         return self._steps
+
+    def get_last_grad_norm(self):
+        return self._last_grad_norm
+
+    def state_dict(self):
+        """Return all state required to continue optimizer updates."""
+        return {
+            "optimizer": self._optimizer.state_dict(),
+            "steps": self._steps,
+        }
+
+    def load_state_dict(self, state_dict):
+        self._optimizer.load_state_dict(state_dict["optimizer"])
+        self._steps = int(state_dict.get("steps", 0))
+
+        # Optimizer tensors are not parameters and older torch versions do not
+        # always follow the module's map_location when loading them.
+        if (len(self._param_list) > 0):
+            device = self._param_list[0].device
+            for state in self._optimizer.state.values():
+                for key, val in state.items():
+                    if (torch.is_tensor(val)):
+                        state[key] = val.to(device=device)
+        return
 
     def sync(self):
         with torch.no_grad():
@@ -86,6 +113,17 @@ class MPOptimizer():
     
     def _enable_grad_clip(self):
         return self._grad_clip > 0.0
+
+    def _calc_grad_norm(self):
+        grad_sq_sum = None
+        for param in self._param_list:
+            if (param.grad is not None):
+                curr_sum = torch.sum(torch.square(param.grad.detach()))
+                grad_sq_sum = (curr_sum if grad_sq_sum is None
+                               else grad_sq_sum + curr_sum)
+        if (grad_sq_sum is None):
+            return 0.0
+        return torch.sqrt(grad_sq_sum).item()
     
     def _clip_grads(self, max_norm):
         torch.nn.utils.clip_grad_norm_(self._param_list, max_norm)

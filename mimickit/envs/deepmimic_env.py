@@ -9,8 +9,39 @@ import engines.engine as engine
 import util.stats_tracker as stats_tracker
 import util.torch_util as torch_util
 
+
+def parse_static_object_specs(env_config):
+    """Validate optional static objects shared by every tracking method."""
+    objects = env_config.get("objects", [])
+    if not isinstance(objects, list):
+        raise ValueError("objects must be a list")
+
+    specs = []
+    for i, obj in enumerate(objects):
+        if not isinstance(obj, dict):
+            raise ValueError("objects[{}] must be a mapping".format(i))
+
+        asset_file = obj.get("file")
+        if not isinstance(asset_file, str) or asset_file == "":
+            raise ValueError("objects[{}].file must be a non-empty path".format(i))
+
+        pos = np.asarray(obj.get("pos"), dtype=np.float32)
+        rot = np.asarray(obj.get("rot", [0.0, 0.0, 0.0, 1.0]), dtype=np.float32)
+        if pos.shape != (3,) or not np.all(np.isfinite(pos)):
+            raise ValueError("objects[{}].pos must contain three finite values".format(i))
+        if rot.shape != (4,) or not np.all(np.isfinite(rot)):
+            raise ValueError("objects[{}].rot must contain four finite values".format(i))
+        if np.linalg.norm(rot) < 1e-8:
+            raise ValueError("objects[{}].rot must be a nonzero quaternion".format(i))
+
+        rot = rot / np.linalg.norm(rot)
+        specs.append({"file": asset_file, "pos": pos, "rot": rot})
+    return specs
+
+
 class DeepMimicEnv(char_env.CharEnv):
     def __init__(self, env_config, engine_config, num_envs, device, visualize, record_video=False):
+        self._static_object_specs = parse_static_object_specs(env_config)
         self._enable_early_termination = env_config["enable_early_termination"]
         self._num_phase_encoding = env_config.get("num_phase_encoding", 0)
 
@@ -313,7 +344,23 @@ class DeepMimicEnv(char_env.CharEnv):
             else:
                 ref_char_id0 = self._ref_char_ids[0]
                 assert(ref_char_id0 == ref_char_id)
+
+        self._build_static_objects(env_id)
         return 
+
+    def _build_static_objects(self, env_id):
+        color = np.array([0.3, 0.3, 0.3])
+        for i, obj_config in enumerate(self._static_object_specs):
+            self._engine.create_obj(
+                env_id=env_id,
+                obj_type=engine.ObjType.rigid,
+                asset_file=obj_config["file"],
+                name="static_object{:d}".format(i),
+                start_pos=obj_config["pos"],
+                start_rot=obj_config["rot"],
+                fix_root=True,
+                color=color)
+        return
     
     def _build_ref_character(self, env_id, env_config, color):
         char_file = env_config["char_file"]

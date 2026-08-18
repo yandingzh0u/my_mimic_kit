@@ -3,6 +3,7 @@ import torch
 
 import envs.base_env as base_env
 import learning.base_agent as base_agent
+import learning.distribution_gaussian_diag as distribution_gaussian_diag
 import learning.mp_optimizer as mp_optimizer
 import learning.ppo_model as ppo_model
 import learning.rl_util as rl_util
@@ -194,6 +195,11 @@ class PPOAgent(base_agent.BaseAgent):
 
             self._critic_optimizer.step(loss)
 
+            loss_info["critic_grad_norm"] = torch.tensor(
+                self._critic_optimizer.get_last_grad_norm(),
+                device=self._device,
+                dtype=torch.float32)
+
             torch_util.add_torch_dict(loss_info, info)
         
         torch_util.scale_torch_dict(1.0 / steps, info)
@@ -202,6 +208,12 @@ class PPOAgent(base_agent.BaseAgent):
     def _update_actor(self, batch_size, num_steps):
         info = dict()
         device_type = torch.device(self._device).type
+
+        # A fixed slice of the just-collected rollout gives an exact, cheap
+        # pre/post-update policy diagnostic.  Unlike the PPO importance ratio,
+        # this compares the complete Gaussian action distributions on the same
+        # observations and is therefore suitable for cross-run analysis.
+        audit_obs, audit_old_dist = self._build_policy_audit_batch()
 
         for i in range(num_steps):
             batch = self._exp_buffer.sample(batch_size)
@@ -212,9 +224,79 @@ class PPOAgent(base_agent.BaseAgent):
 
             self._actor_optimizer.step(loss)
 
+            loss_info["actor_grad_norm"] = torch.tensor(
+                self._actor_optimizer.get_last_grad_norm(),
+                device=self._device,
+                dtype=torch.float32)
+
             torch_util.add_torch_dict(loss_info, info)
         
         torch_util.scale_torch_dict(1.0 / num_steps, info)
+        info.update(self._compute_policy_audit(audit_obs, audit_old_dist))
+        info.update(self._compute_first_layer_grad_info())
+        return info
+
+    def _build_policy_audit_batch(self, max_samples=4096):
+        obs = self._exp_buffer.get_data_flat("obs")
+        num_samples = min(int(obs.shape[0]), int(max_samples))
+        norm_obs = self._obs_norm.normalize(obs[:num_samples]).detach()
+
+        with torch.no_grad():
+            old_dist = self._model.eval_actor(norm_obs)
+            old_dist_data = {
+                "mean": old_dist.mean.detach().clone(),
+                "logstd": old_dist.logstd.detach().clone(),
+            }
+        return norm_obs, old_dist_data
+
+    def _compute_policy_audit(self, norm_obs, old_dist_data):
+        with torch.no_grad():
+            new_dist = self._model.eval_actor(norm_obs)
+            old_dist = distribution_gaussian_diag.DistributionGaussianDiag(
+                mean=old_dist_data["mean"], logstd=old_dist_data["logstd"])
+            policy_kl = torch.mean(old_dist.kl(new_dist))
+            action_mean_delta = torch.sqrt(torch.mean(torch.square(
+                new_dist.mean - old_dist.mean)))
+            action_bound_frac = torch.mean(
+                (torch.abs(new_dist.mean) > 1.0).to(dtype=torch.float32))
+
+        return {
+            "policy_kl": policy_kl,
+            "action_mean_update_rms": action_mean_delta,
+            "action_mean_bound_frac": action_bound_frac,
+        }
+
+    def _compute_first_layer_grad_info(self):
+        first_linear = None
+        for module in self._model._actor_layers.modules():
+            if isinstance(module, torch.nn.Linear):
+                first_linear = module
+                break
+
+        if first_linear is None or first_linear.weight.grad is None:
+            return {}
+
+        grad = first_linear.weight.grad.detach()
+        info = {"actor_first_layer_grad_norm": torch.linalg.vector_norm(grad)}
+
+        # RCCI's paired interfaces have a known [self, x, command1, command2]
+        # layout.  Per-block norms test whether learning actually uses each
+        # coordinate block; no corresponding loss or gradient is introduced.
+        if (hasattr(self._env, "get_rcci_self_obs_dim")
+                and hasattr(self._env, "get_rcci_phi_dim")):
+            self_dim = self._env.get_rcci_self_obs_dim()
+            phi_dim = self._env.get_rcci_phi_dim()
+            slices = {
+                "actor_grad_self_block": slice(0, self_dim),
+                "actor_grad_x_block": slice(self_dim, self_dim + phi_dim),
+                "actor_grad_command1_block": slice(
+                    self_dim + phi_dim, self_dim + 2 * phi_dim),
+                "actor_grad_command2_block": slice(
+                    self_dim + 2 * phi_dim, self_dim + 3 * phi_dim),
+            }
+            for key, block_slice in slices.items():
+                info[key] = torch.linalg.vector_norm(grad[:, block_slice])
+
         return info
     
     def _compute_critic_loss(self, batch):

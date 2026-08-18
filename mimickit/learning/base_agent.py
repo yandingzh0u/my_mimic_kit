@@ -1,8 +1,12 @@
 import abc
 import enum
 import gymnasium.spaces as spaces
+import json
+import numbers
 import numpy as np
 import os
+import random
+import tempfile
 import time
 import torch
 
@@ -25,6 +29,8 @@ class AgentMode(enum.Enum):
     TEST = 1
 
 class BaseAgent(torch.nn.Module):
+    CHECKPOINT_VERSION = 2
+
     def __init__(self, config, env, device):
         super().__init__()
 
@@ -47,14 +53,40 @@ class BaseAgent(torch.nn.Module):
         self._mode = AgentMode.TRAIN
         self._curr_obs = None
         self._curr_info = None
+        self._elapsed_train_time = 0.0
+        self._last_test_info = {
+            "mean_return": 0.0,
+            "mean_ep_len": 0.0,
+            "num_eps": 0,
+        }
+        self._resume_pending = False
+        self._resume_exp_total_samples = 0
+        self._resume_exp_sampling_state = None
+        self._resume_count = 0
+        self._last_output_sample_count = 0
+        self._last_output_wall_time = 0.0
+        self._checkpoint_context = {}
+        return
+
+    def set_checkpoint_context(self, context):
+        self._checkpoint_context = dict(context)
         return
 
     def train_model(self, max_samples, out_dir, save_int_models, logger_type):
-        start_time = time.time()
+        resume_run = self._resume_pending
+        start_time = time.time() - self._elapsed_train_time
 
         out_model_file = os.path.join(out_dir, "model.pt")
+        out_checkpoint_file = os.path.join(out_dir, "checkpoint.pt")
         log_file = os.path.join(out_dir, "log.txt")
-        self._logger = self._build_logger(logger_type, log_file, self._config)
+        self._train_metrics_file = os.path.join(
+            out_dir, "train_metrics.jsonl")
+        if (mp_util.is_root_proc() and not resume_run):
+            os.makedirs(out_dir, exist_ok=True)
+            with open(self._train_metrics_file, "w"):
+                pass
+        self._logger = self._build_logger(logger_type, log_file, self._config,
+                                          append=resume_run)
         
         if (save_int_models):
             int_out_dir = os.path.join(out_dir, "int_models")
@@ -65,6 +97,7 @@ class BaseAgent(torch.nn.Module):
         
         self._curr_obs, self._curr_info = self._reset_envs()
         self._init_train()
+        test_info = self._last_test_info
 
         while self._sample_count < max_samples:
             train_info = self._train_iter()
@@ -74,6 +107,7 @@ class BaseAgent(torch.nn.Module):
 
             if (output_iter):
                 test_info = self.test_model(self._test_episodes)
+                self._last_test_info = test_info
             
             env_diag_info = self._env.record_diagnostics()
             self._log_train_info(train_info, test_info, env_diag_info, start_time) 
@@ -81,7 +115,12 @@ class BaseAgent(torch.nn.Module):
 
             if (output_iter):
                 self._logger.write_log()
-                self._output_train_model(self._iter, out_model_file, int_out_dir)
+                self._write_train_metrics_jsonl()
+                self._elapsed_train_time = time.time() - start_time
+                self._last_output_sample_count = self._sample_count
+                self._last_output_wall_time = self._elapsed_train_time
+                self._output_train_model(self._iter, out_model_file,
+                                         out_checkpoint_file, int_out_dir)
 
                 self._train_return_tracker.reset()
                 self._curr_obs, self._curr_info = self._reset_envs()
@@ -129,14 +168,163 @@ class BaseAgent(torch.nn.Module):
     def save(self, out_file):
         if (mp_util.is_root_proc()):
             state_dict = self.state_dict()
-            torch.save(state_dict, out_file)
+            self._atomic_torch_save(state_dict, out_file)
         return
 
     def load(self, in_file):
-        state_dict = torch.load(in_file, map_location=self._device)
+        state_dict = self._torch_load(in_file)
+        if (self._is_training_checkpoint(state_dict)):
+            state_dict = state_dict["model_state_dict"]
         self.load_state_dict(state_dict)
         self._sync_optimizer()
-        Logger.print("Loaded model parameters from {:s}".format(in_file))
+        Logger.print("Loaded model parameters from {:s}".format(str(in_file)))
+        return
+
+    def save_checkpoint(self, out_file, next_iter=None):
+        if (not mp_util.is_root_proc()):
+            return
+
+        if (next_iter is None):
+            next_iter = self._iter
+
+        checkpoint = {
+            "checkpoint_version": self.CHECKPOINT_VERSION,
+            "metadata": {
+                "agent_class": self.__class__.__name__,
+                "num_envs": int(self.get_num_envs()),
+                "world_size": max(1, int(mp_util.get_num_procs())),
+                "checkpoint_context": dict(self._checkpoint_context),
+            },
+            "model_state_dict": self.state_dict(),
+            "optimizer_state_dicts": {
+                name: optimizer.state_dict()
+                for name, optimizer in self._get_optimizers().items()
+            },
+            "normalizer_training_states": {
+                name: module.training_state_dict()
+                for name, module in self.named_modules()
+                if isinstance(module, normalizer.Normalizer)
+            },
+            "trainer_state": {
+                "next_iter": int(next_iter),
+                "sample_count": int(self._sample_count),
+                "exp_total_samples": int(self._exp_buffer.get_total_samples()),
+                "elapsed_train_time": float(self._elapsed_train_time),
+                "last_test_info": dict(self._last_test_info),
+                "resume_count": int(self._resume_count),
+                "last_output_sample_count": int(
+                    self._last_output_sample_count),
+                "last_output_wall_time": float(
+                    self._last_output_wall_time),
+            },
+            "exp_buffer_sampling_state": (
+                self._exp_buffer.sampling_state_dict()),
+            "rng_state": self._get_rng_state(),
+            "replay_buffer_states": {
+                name: buffer.state_dict()
+                for name, buffer in self._get_replay_buffers().items()
+            },
+        }
+        self._atomic_torch_save(checkpoint, out_file)
+        return
+
+    def resume(self, in_file):
+        checkpoint = self._torch_load(in_file)
+        if (not self._is_training_checkpoint(checkpoint)):
+            raise ValueError(
+                "{} is a weights-only model. Use --model_file for evaluation "
+                "or resume from checkpoint.pt.".format(in_file))
+
+        version = int(checkpoint["checkpoint_version"])
+        if (version != self.CHECKPOINT_VERSION):
+            raise ValueError("Unsupported checkpoint version: {}".format(version))
+
+        metadata = checkpoint.get("metadata", {})
+        expected_metadata = {
+            "agent_class": self.__class__.__name__,
+            "num_envs": int(self.get_num_envs()),
+            "world_size": max(1, int(mp_util.get_num_procs())),
+        }
+        if (expected_metadata["world_size"] != 1):
+            raise ValueError(
+                "Strict checkpoint resume currently supports one training "
+                "process only; per-rank RNG and replay state are intentionally "
+                "not approximated.")
+        for key, expected_val in expected_metadata.items():
+            saved_val = metadata.get(key, expected_val)
+            if (saved_val != expected_val):
+                raise ValueError(
+                    "Checkpoint {} mismatch: saved {!r}, current {!r}."
+                    .format(key, saved_val, expected_val))
+
+        saved_context = metadata.get("checkpoint_context", {})
+        if saved_context != self._checkpoint_context:
+            raise ValueError(
+                "Checkpoint configuration mismatch: saved context {!r}, "
+                "current context {!r}.".format(
+                    saved_context, self._checkpoint_context))
+
+        self.load_state_dict(checkpoint["model_state_dict"])
+
+        normalizers = {
+            name: module
+            for name, module in self.named_modules()
+            if isinstance(module, normalizer.Normalizer)
+        }
+        saved_normalizers = checkpoint.get("normalizer_training_states", {})
+        if set(normalizers.keys()) != set(saved_normalizers.keys()):
+            raise ValueError(
+                "Normalizer mismatch: checkpoint has {}, current agent has {}."
+                .format(sorted(saved_normalizers.keys()),
+                        sorted(normalizers.keys())))
+        for name, module in normalizers.items():
+            module.load_training_state_dict(saved_normalizers[name])
+
+        optimizers = self._get_optimizers()
+        saved_optimizers = checkpoint["optimizer_state_dicts"]
+        if (set(optimizers.keys()) != set(saved_optimizers.keys())):
+            raise ValueError(
+                "Optimizer mismatch: checkpoint has {}, current agent has {}."
+                .format(sorted(saved_optimizers.keys()),
+                        sorted(optimizers.keys())))
+        for name, optimizer in optimizers.items():
+            optimizer.load_state_dict(saved_optimizers[name])
+
+        replay_buffers = self._get_replay_buffers()
+        saved_replay_buffers = checkpoint.get("replay_buffer_states", {})
+        if (set(replay_buffers.keys()) != set(saved_replay_buffers.keys())):
+            raise ValueError(
+                "Replay-buffer mismatch: checkpoint has {}, current agent has {}."
+                .format(sorted(saved_replay_buffers.keys()),
+                        sorted(replay_buffers.keys())))
+        for name, buffer in replay_buffers.items():
+            buffer.load_state_dict(saved_replay_buffers[name])
+
+        trainer_state = checkpoint["trainer_state"]
+        self._iter = int(trainer_state["next_iter"])
+        self._sample_count = int(trainer_state["sample_count"])
+        self._resume_exp_total_samples = int(
+            trainer_state["exp_total_samples"])
+        self._resume_exp_sampling_state = checkpoint.get(
+            "exp_buffer_sampling_state", None)
+        self._elapsed_train_time = float(
+            trainer_state.get("elapsed_train_time", 0.0))
+        self._last_test_info = dict(trainer_state.get(
+            "last_test_info", self._last_test_info))
+        self._resume_count = int(trainer_state.get("resume_count", 0)) + 1
+        self._last_output_sample_count = int(trainer_state.get(
+            "last_output_sample_count", self._sample_count))
+        self._last_output_wall_time = float(trainer_state.get(
+            "last_output_wall_time", self._elapsed_train_time))
+
+        self._sync_optimizer()
+        # Restore RNG last so future synchronization implementations cannot
+        # perturb the saved continuation stream.
+        self._set_rng_state(checkpoint["rng_state"])
+        self._resume_pending = True
+        Logger.print(
+            "Resuming training from {:s} at iteration {:d}, sample {:d}."
+            .format(str(in_file), self._iter, self._sample_count))
         return
 
     def calc_num_params(self):
@@ -197,7 +385,7 @@ class BaseAgent(torch.nn.Module):
         self._test_return_tracker = return_tracker.ReturnTracker(self.get_num_envs(), self._device)
         return
 
-    def _build_logger(self, logger_type, log_file, config):
+    def _build_logger(self, logger_type, log_file, config, append=False):
         if (logger_type == "txt"):
             log = logger.Logger()
         elif (logger_type == "tb"):
@@ -209,7 +397,10 @@ class BaseAgent(torch.nn.Module):
 
         log.set_step_key("Samples")
         if (mp_util.is_root_proc()):
-            log.configure_output_file(log_file)
+            if (logger_type == "txt"):
+                log.configure_output_file(log_file, append=append)
+            else:
+                log.configure_output_file(log_file)
         
         return log
 
@@ -219,9 +410,25 @@ class BaseAgent(torch.nn.Module):
         return sample_count
     
     def _init_train(self):
-        self._iter = 0
-        self._sample_count = 0
-        self._exp_buffer.clear()
+        if (self._resume_pending):
+            # Simulator state and the partial on-policy rollout are deliberately
+            # not checkpointed.  Resume starts a fresh rollout at the saved
+            # iteration boundary while preserving the global sample schedule.
+            self._exp_buffer.set_total_samples(
+                self._resume_exp_total_samples)
+            if (self._resume_exp_sampling_state is not None):
+                self._exp_buffer.load_sampling_state_dict(
+                    self._resume_exp_sampling_state)
+            self._resume_exp_sampling_state = None
+            self._resume_pending = False
+        else:
+            self._iter = 0
+            self._sample_count = 0
+            self._elapsed_train_time = 0.0
+            self._resume_count = 0
+            self._last_output_sample_count = 0
+            self._last_output_wall_time = 0.0
+            self._exp_buffer.clear()
         self._train_return_tracker.reset()
         self._test_return_tracker.reset()
         return
@@ -356,7 +563,21 @@ class BaseAgent(torch.nn.Module):
         self._logger.log("Iteration", self._iter, collection="1_Info")
         self._logger.log("Wall_Time", wall_time_hrs, collection="1_Info")
         self._logger.log("Samples", self._sample_count, collection="1_Info")
-        self._logger.log("Samples_Per_Second", self._sample_count / wall_time_secs, collection="1_Info", quiet=True)
+        interval_samples = self._sample_count - self._last_output_sample_count
+        interval_time = wall_time_secs - self._last_output_wall_time
+        interval_sps = interval_samples / max(interval_time, 1e-8)
+        self._logger.log("Samples_Per_Second", interval_sps,
+                         collection="1_Info", quiet=True)
+        self._logger.log("Resume_Count", self._resume_count,
+                         collection="1_Info", quiet=True)
+
+        peak_gpu_memory_mb = 0.0
+        if (torch.cuda.is_available()
+                and torch.device(self._device).type == "cuda"):
+            peak_gpu_memory_mb = (
+                torch.cuda.max_memory_allocated(self._device) / (1024 * 1024))
+        self._logger.log("Peak_GPU_Memory_MB", peak_gpu_memory_mb,
+                         collection="1_Info", quiet=True)
 
         test_return = test_info["mean_return"]
         test_ep_len = test_info["mean_ep_len"]
@@ -421,13 +642,100 @@ class BaseAgent(torch.nn.Module):
 
         return loss
 
-    def _output_train_model(self, iter, out_model_file, int_out_dir):
+    def _output_train_model(self, iter, out_model_file, out_checkpoint_file,
+                            int_out_dir):
         self.save(out_model_file)
+        self.save_checkpoint(out_checkpoint_file, next_iter=iter + 1)
 
         if (int_out_dir != ""):
             int_model_file = os.path.join(int_out_dir, "model_{:010d}.pt".format(iter))
             self.save(int_model_file)
         return
+
+    def _write_train_metrics_jsonl(self):
+        if (not mp_util.is_root_proc()):
+            return
+
+        row = {
+            "iteration": int(self._iter),
+            "samples": int(self._sample_count),
+            "resume_segment": int(self._resume_count),
+        }
+        for key, entry in self._logger.log_current_row.items():
+            val = entry.val
+            if (torch.is_tensor(val) and val.numel() == 1):
+                val = val.item()
+            if (isinstance(val, numbers.Integral)):
+                row[key] = int(val)
+            elif (isinstance(val, numbers.Real)):
+                row[key] = float(val)
+
+        with open(self._train_metrics_file, "a") as metrics_file:
+            metrics_file.write(json.dumps(row, sort_keys=True) + "\n")
+        return
+
+    def _get_optimizers(self):
+        return {
+            name: val
+            for name, val in vars(self).items()
+            if isinstance(val, mp_optimizer.MPOptimizer)
+        }
+
+    def _get_replay_buffers(self):
+        return {
+            name: val
+            for name, val in vars(self).items()
+            if (name != "_exp_buffer"
+                and isinstance(val, experience_buffer.ExperienceBuffer))
+        }
+
+    def _get_rng_state(self):
+        state = {
+            "python": random.getstate(),
+            "numpy": np.random.get_state(),
+            "torch": torch.get_rng_state(),
+        }
+        if (torch.cuda.is_available()):
+            state["cuda"] = torch.cuda.get_rng_state_all()
+        return state
+
+    def _set_rng_state(self, state):
+        random.setstate(state["python"])
+        np.random.set_state(state["numpy"])
+        torch.set_rng_state(state["torch"].cpu())
+        if (torch.cuda.is_available() and "cuda" in state):
+            torch.cuda.set_rng_state_all(
+                [rng_state.cpu() for rng_state in state["cuda"]])
+        return
+
+    def _torch_load(self, in_file):
+        # Stage on CPU so a large replay snapshot does not temporarily occupy
+        # a second full copy on the training GPU. Explicit weights_only=False
+        # is required for RNG tuples on torch 2.6+.
+        try:
+            return torch.load(in_file, map_location="cpu",
+                              weights_only=False)
+        except TypeError:
+            return torch.load(in_file, map_location="cpu")
+
+    def _atomic_torch_save(self, state, out_file):
+        out_dir = os.path.dirname(os.path.abspath(out_file))
+        os.makedirs(out_dir, exist_ok=True)
+        file_handle, tmp_file = tempfile.mkstemp(
+            prefix=".checkpoint_", suffix=".tmp", dir=out_dir)
+        os.close(file_handle)
+        try:
+            torch.save(state, tmp_file)
+            os.replace(tmp_file, out_file)
+        finally:
+            if (os.path.exists(tmp_file)):
+                os.remove(tmp_file)
+        return
+
+    def _is_training_checkpoint(self, state):
+        return (isinstance(state, dict)
+                and "checkpoint_version" in state
+                and "model_state_dict" in state)
     
     @abc.abstractmethod
     def _build_model(self, config):

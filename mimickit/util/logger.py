@@ -31,6 +31,7 @@ class Logger:
         self._need_update = True
         self._data_buffer = None
         self._step_key = None
+        self._append_existing_headers = None
         return
 
     def reset(self):
@@ -44,7 +45,7 @@ class Logger:
             self.output_file.truncate(0)
         return
 
-    def configure_output_file(self, filename=None):
+    def configure_output_file(self, filename=None, append=False):
         """
         Set output directory to d, or to /tmp/somerandomnumber if d is None
         """
@@ -62,9 +63,27 @@ class Logger:
                 os.makedirs(out_dir, exist_ok=True)
         
             if (Logger.is_root()):
-                self.output_file = open(output_path, 'w')
+                file_exists = os.path.exists(output_path)
+                file_nonempty = file_exists and os.path.getsize(output_path) > 0
+                mode = 'a' if append else 'w'
+                self.output_file = open(output_path, mode)
                 assert os.path.exists(output_path)
                 atexit.register(self.output_file.close)
+
+                self._append_existing_headers = None
+                if (append and file_nonempty):
+                    with open(output_path, 'r') as existing_file:
+                        lines = existing_file.read().splitlines()
+                    for line in reversed(lines):
+                        tokens = line.split()
+                        try:
+                            for token in tokens:
+                                float(token)
+                        except ValueError:
+                            # Use the most recent header when a prior resume
+                            # appended a new schema segment.
+                            self._append_existing_headers = tokens
+                            break
 
                 Logger.print("Logging data to " + self.output_file.name)
 
@@ -143,7 +162,9 @@ class Logger:
                     vals.append(val)
             
             if self.output_file is not None:
-                if (self._row_count == 0):
+                write_header = (self._row_count == 0
+                                and self.log_headers != self._append_existing_headers)
+                if (write_header):
                     header_str = self._dump_str_template.format(*self.log_headers)
                     self.output_file.write(header_str + "\r")
 

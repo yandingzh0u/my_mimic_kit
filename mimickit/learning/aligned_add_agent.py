@@ -1,5 +1,3 @@
-import torch
-
 import learning.add_agent as add_agent
 import learning.aligned_obs_normalizer as aligned_obs_normalizer
 import util.torch_util as torch_util
@@ -22,22 +20,3 @@ class AlignedADDAgent(add_agent.ADDAgent):
             device=self._device, dtype=obs_dtype)
         obs_norm.set_error_normalizer(self._disc_obs_norm)
         self._obs_norm = obs_norm
-
-    def _store_disc_replay_data(self):
-        """Stock ADD replay sampling with a safe first push at 8192 envs."""
-        disc_obs = self._exp_buffer.get_data_flat("disc_obs")
-        disc_obs_demo = self._exp_buffer.get_data_flat("disc_obs_demo")
-
-        n = disc_obs.shape[0]
-        rand_idx = torch.randperm(n, device=self._device, dtype=torch.long)
-        if self._disc_buffer.is_full():
-            num_samples = min(n, self._disc_replay_samples)
-        else:
-            num_samples = min(n, self._disc_buffer.get_capacity())
-
-        idx = rand_idx[:num_samples]
-        disc_data = {
-            "disc_obs": disc_obs[idx].unsqueeze(1),
-            "disc_obs_demo": disc_obs_demo[idx].unsqueeze(1),
-        }
-        self._disc_buffer.push(disc_data)
