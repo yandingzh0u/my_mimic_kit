@@ -6,7 +6,7 @@ import util.torch_util as torch_util
 
 
 class AlignedADDAgent(add_agent.ADDAgent):
-    """Stock ADD with an actor-side aligned observation normalizer."""
+    """Stock ADD with a policy-reward differentially aligned command."""
 
     def _build_normalizers(self):
         # Build the untouched ADD DiffNormalizer first.
@@ -20,7 +20,7 @@ class AlignedADDAgent(add_agent.ADDAgent):
         obs_norm = aligned_obs_normalizer.AlignedObsNormalizer(
             self_dim=self_dim, command_dim=command_dim,
             device=self._device, dtype=obs_dtype)
-        obs_norm.set_error_normalizer(self._disc_obs_norm)
+        obs_norm.set_command_normalizer(self._disc_obs_norm)
         self._obs_norm = obs_norm
 
     def _store_disc_replay_data(self):
