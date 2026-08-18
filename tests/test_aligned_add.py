@@ -46,38 +46,41 @@ def test_aligned_agent_keeps_stock_add_objective():
     assert "_build_model" not in aligned_add_agent.AlignedADDAgent.__dict__
 
 
-def test_prda_command_uses_shared_add_scale():
-    command_norm = diff_normalizer.DiffNormalizer([3], device="cpu")
-    samples = torch.tensor([[2.0, -4.0, 8.0], [-2.0, 4.0, -8.0]])
-    command_norm.record(samples)
-    command_norm.update()
+def test_factorized_command_uses_independent_scales():
+    error_norm = diff_normalizer.DiffNormalizer([3], device="cpu")
+    error_samples = torch.tensor([[2.0, -4.0, 8.0], [-2.0, 4.0, -8.0]])
+    error_norm.record(error_samples)
+    error_norm.update()
 
     obs_norm = aligned_obs_normalizer.AlignedObsNormalizer(
         self_dim=2, command_dim=3, device="cpu")
-    obs_norm.set_command_normalizer(command_norm)
+    obs_norm.set_error_normalizer(error_norm)
 
-    obs = torch.tensor([[1.0, -1.0, 2.0, -4.0, 8.0]])
+    obs = torch.tensor([[1.0, -1.0, 2.0, -4.0, 8.0, 1.0, -10.0, 100.0]])
+    obs_norm.record(obs)
+    obs_norm.update()
     norm_obs = obs_norm.normalize(obs)
-    assert torch.allclose(norm_obs[0, 2:], torch.tensor([1.0, -1.0, 1.0]))
+    assert torch.allclose(norm_obs[0, 2:5], torch.tensor([1.0, -1.0, 1.0]))
+    assert torch.allclose(norm_obs[0, 5:], torch.tensor([1.0, -1.0, 1.0]))
 
     state_keys = obs_norm.state_dict().keys()
-    assert all("command" not in key for key in state_keys)
+    assert any("motion_norm" in key for key in state_keys)
+    assert all("error_norm" not in key for key in state_keys)
 
 
-def test_prda_residual_identity():
+def test_factorized_command_closure_identity():
     sim_t = torch.randn(8, 172)
     sim_t1 = torch.randn(8, 172)
     ref_t = torch.randn(8, 172)
     ref_t1 = torch.randn(8, 172)
 
-    error_t = ref_t - sim_t
-    ref_motion = ref_t1 - ref_t
-    command = aligned_add_env.compute_prda_command(ref_t1, sim_t)
+    error_t, ref_motion = aligned_add_env.compute_factorized_command(
+        ref_t, ref_t1, sim_t)
     actual_motion = sim_t1 - sim_t
     error_t1 = ref_t1 - sim_t1
 
-    assert torch.allclose(command, error_t + ref_motion, atol=1e-6, rtol=1e-6)
-    assert torch.allclose(error_t1, command - actual_motion, atol=1e-6, rtol=1e-6)
+    assert torch.allclose(
+        error_t1, error_t + ref_motion - actual_motion, atol=1e-6, rtol=1e-6)
 
 
 def test_method_configs_and_budget():
@@ -101,10 +104,10 @@ def test_method_configs_and_budget():
         assert "--num_envs 8192" in args
         assert "--max_samples 524288000" in args
 
-    prda_args = (ROOT / "args/prda_add_humanoid_roll_2k_8192_args.txt").read_text()
-    assert "--num_envs 8192" in prda_args
-    assert "--max_samples 524288000" in prda_args
-    assert "--out_dir output/prda_add_roll_2k_8192_seed0" in prda_args
+    fdc_args = (ROOT / "args/fdc_add_humanoid_roll_2k_8192_args.txt").read_text()
+    assert "--num_envs 8192" in fdc_args
+    assert "--max_samples 524288000" in fdc_args
+    assert "--out_dir output/fdc_add_roll_2k_8192_seed0" in fdc_args
 
 
 def test_builder_routes_exist():

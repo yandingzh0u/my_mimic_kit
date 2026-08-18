@@ -17,20 +17,21 @@ def validate_aligned_add_config(env_config):
 
 
 class AlignedADDEnv(add_env.ADDEnv):
-    """ADD with a one-step residual command in discriminator coordinates.
+    """ADD with a factorized differential command for policy conditioning.
 
     The discriminator path is inherited without modification.  The actor sees
-    its ordinary character observation followed by the single PRDA command
+    its ordinary character observation followed by
 
-      c_t = phi(ref_t+1) - phi(sim_t).
+      e_t   = phi(ref_t)   - phi(sim_t)
+      m_t^r = phi(ref_t+1) - phi(ref_t).
 
-    Here phi is exactly ``add_env.compute_disc_obs``.  If the action produces
-    delta_t = phi(sim_t+1) - phi(sim_t), then the untouched ADD reward observes
+    Here phi is exactly ``add_env.compute_disc_obs``. If the action produces
+    delta_t = phi(sim_t+1) - phi(sim_t), the untouched ADD reward observes
 
-      e_t+1 = c_t - delta_t.
+      e_t+1 = e_t + m_t^r - delta_t.
 
-    The policy command and the post-action reward residual therefore share the
-    same feature axes and the same ADD DiffNormalizer.
+    The two command factors preserve their distinct feedback and feedforward
+    semantics and statistics while sharing ADD's differential feature axes.
     """
 
     def __init__(self, env_config, engine_config, num_envs, device, visualize, record_video=False):
@@ -43,7 +44,7 @@ class AlignedADDEnv(add_env.ADDEnv):
     def get_aligned_self_obs_dim(self):
         obs_dim = self.get_obs_space().shape[0]
         command_dim = self.get_aligned_command_dim()
-        return int(obs_dim - command_dim)
+        return int(obs_dim - 2 * command_dim)
 
     def get_aligned_command_dim(self):
         return int(self.get_disc_obs_space().shape[0])
@@ -55,20 +56,22 @@ class AlignedADDEnv(add_env.ADDEnv):
 
     def _compute_obs(self, env_ids=None):
         self_obs = super()._compute_obs(env_ids)
-        command = self._compute_aligned_command(env_ids)
-        return torch.cat([self_obs, command], dim=-1)
+        curr_error, ref_motion = self._compute_aligned_commands(env_ids)
+        return torch.cat([self_obs, curr_error, ref_motion], dim=-1)
 
-    def _compute_aligned_command(self, env_ids=None):
+    def _compute_aligned_commands(self, env_ids=None):
         if env_ids is None:
             motion_ids = self._motion_ids
         else:
             motion_ids = self._motion_ids[env_ids]
 
         motion_times = self._get_motion_times(env_ids)
+        ref_obs = self._compute_disc_obs_demo(motion_ids, motion_times)
         dt = self._engine.get_timestep() * self._aligned_command_step
         next_ref_obs = self._compute_disc_obs_demo(motion_ids, motion_times + dt)
         sim_obs = self._compute_current_sim_disc_obs(env_ids)
-        return compute_prda_command(next_ref_obs, sim_obs)
+
+        return compute_factorized_command(ref_obs, next_ref_obs, sim_obs)
 
     def _compute_current_sim_disc_obs(self, env_ids=None):
         char_id = self._get_char_id()
@@ -103,6 +106,8 @@ class AlignedADDEnv(add_env.ADDEnv):
             global_obs=self._global_obs)
 
 
-def compute_prda_command(next_ref_obs, sim_obs):
-    """Desired one-step displacement expressed in ADD feature coordinates."""
-    return next_ref_obs - sim_obs
+def compute_factorized_command(ref_obs, next_ref_obs, sim_obs):
+    """Feedback residual and feedforward tangent in ADD feature coordinates."""
+    curr_error = ref_obs - sim_obs
+    ref_motion = next_ref_obs - ref_obs
+    return curr_error, ref_motion
