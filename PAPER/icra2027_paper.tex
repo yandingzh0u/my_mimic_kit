@@ -1,35 +1,16 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% Anonymous ICRA 2027 draft. All red content is a synthetic layout placeholder.
-% Replace every \placeholder and \pnum before submission.
+% Anonymous ICRA 2027 draft. Red content is a layout placeholder, not a result.
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \documentclass[letterpaper,10pt,conference]{ieeeconf}
-
 \IEEEoverridecommandlockouts
 \overrideIEEEmargins
-
-\usepackage{amsmath,amssymb}
-\usepackage{booktabs}
-\usepackage{multirow}
-\usepackage{graphicx}
-\usepackage{xcolor}
-\usepackage{cite}
-\usepackage{url}
-\usepackage{microtype}
-\usepackage{newtxtext,newtxmath}
-\usepackage{tikz}
-\usetikzlibrary{arrows.meta,positioning,calc,fit}
-
+\usepackage{amsmath,amssymb,booktabs,multirow,graphicx,xcolor,cite,url,microtype,newtxtext,newtxmath,tikz,balance}
 \definecolor{placeholderred}{RGB}{190,25,25}
-\definecolor{softblue}{RGB}{224,238,250}
-\definecolor{softgreen}{RGB}{226,244,232}
-\definecolor{softgray}{RGB}{242,242,242}
 \newcommand{\placeholder}[1]{\textcolor{placeholderred}{\textbf{[PLACEHOLDER---NOT A RESULT: #1]}}}
 \newcommand{\pnum}[1]{\textcolor{placeholderred}{#1$^{\dagger}$}}
 \newcommand{\vect}[1]{\mathbf{#1}}
-\newcommand{\R}{\mathbb{R}}
 
-\title{\LARGE \bf Matching Policy Commands to Differential Rewards}
-
+\title{\LARGE \bf Differential Reference Conditioning with Adversarial Tracking Rewards}
 \author{Anonymous Authors}
 
 \begin{document}
@@ -38,979 +19,903 @@
 \pagestyle{empty}
 
 \begin{abstract}
-High-fidelity physics-based motion tracking traditionally relies on manually
-weighted pose, velocity, root, and contact objectives that must be retuned
-across skills. Learned differential rewards remove this handcrafted
-aggregation by training a discriminator to combine raw tracking errors.
-Eliminating manual reward weighting, however, does not by itself guarantee
-reliable policy learning: optimization can still converge to incomplete
-shortcuts or fail inconsistently across seeds. We study a remaining asymmetry
-at the policy--reward interface. The learned reward evaluates residual
-coordinates, while the policy is typically conditioned on absolute reference
-states. We compare two one-step command interfaces containing exactly the same
-information: an absolute representation
-$[\vect{x}_t,\hat{\vect{x}}_t,\hat{\vect{x}}_{t+1}]$ and a residual
-representation $[\vect{x}_t,\vect{e}_t,\vect{m}_t]$, where
-$\vect{e}_t=\hat{\vect{x}}_t-\vect{x}_t$ and
-$\vect{m}_t=\hat{\vect{x}}_{t+1}-\hat{\vect{x}}_t$. The representations are
-related by an invertible linear map and therefore induce identical policy
-classes. Only the residual representation, however, closes directly under the
-reward transition:
-$\vect{e}_{t+1}=\vect{e}_t+\vect{m}_t-(\vect{x}_{t+1}-\vect{x}_t)$.
-This change adds neither reference information nor manually weighted reward
-terms. \placeholder{Report the final multi-seed change in successful-run rate,
-full-motion completion, time to criterion, and standard tracking error.}
+Physics-based motion tracking commonly relies on handcrafted rewards that
+combine pose, velocity, root-motion, and contact objectives using
+motion-specific weights. Learned differential rewards remove this manual
+aggregation by training a discriminator directly on tracking errors. The
+resulting reward is expressive, but difficult contact-rich motions can still
+be learned unreliably or collapse to incomplete shortcuts. We present
+\emph{Differential Reference Conditioning} (DRC), which retains the learned
+adversarial reward while representing reference information through the
+current tracking residual and the one-step reference change. This conditioning
+contains the same target information as an absolute one-step representation,
+adds no reward term, and leaves the policy and discriminator objectives
+unchanged. It instead exposes the correction and reference evolution that
+jointly determine the next differential evaluated by the reward.
+\placeholder{Insert the final motion and seed counts, improvement in
+full-motion success and time to success, and change in tracking errors.} The
+framework preserves motion tracking without manually weighted imitation
+rewards while improving the reliability with which complete motions are
+learned.
 \end{abstract}
 
 \section{Introduction}
-Physics-based character control must coordinate joint pose, velocity, global
-motion, and intermittent contacts while respecting dynamics and actuation
-limits. A classical tracking reward decomposes this problem into feature-wise
-terms,
-\begin{equation}
- R_t^{\mathrm{hand}}=\sum_i w_i
- \exp\!\left(-\alpha_i
- \lVert\hat{\vect{q}}_t^i\ominus\vect{q}_t^i\rVert_2^2\right),
- \label{eq:manual}
-\end{equation}
-where both the component weights $w_i$ and scales $\alpha_i$ are selected by
-hand. Such rewards have enabled impressive skills~\cite{peng2018deepmimic}, but
-each new motion may require reconsidering both the included terms and their
-relative scales. This manual aggregation is especially fragile when pose,
-velocity, global displacement, and intermittent contact compete in a highly
-dynamic motion.
+Physics-based character control seeks policies that reproduce reference
+motions while satisfying dynamics, actuation limits, and intermittent contact.
+The dominant approach constructs a scalar reward from separate pose, joint
+velocity, root, end-effector, and contact terms~\cite{peng2018deepmimic}.
+Although effective, this formulation requires choices about which errors to
+include, how to scale them, and how strongly each term should influence
+learning. Those choices often change across motions because walking, aerial
+rotation, ground recovery, and object interaction emphasize different physical
+events.
 
-Adversarial Differential Discriminators (ADD) address this burden by replacing
-the manually weighted sum with a learned nonlinear aggregation of raw tracking
-errors~\cite{zhang2025add}. The discriminator receives one ideal zero
-differential as its positive example and policy tracking differentials as
-negative examples, dynamically balancing objectives while retaining
-frame-synchronized tracking. This is an important step toward motion tracking
-without motion-specific reward weighting. A learned reward, however, specifies
-which outcomes are desirable; it does not ensure that finite-network policy
-optimization will reliably discover the corresponding controller. ADD itself
-reports that Sideflip and Roll can converge to suboptimal behaviors; for
-Sideflip, the policy may remain standing instead of executing the flip
-\cite{zhang2025add}. This illustrates that reward automation and policy-learning
-reliability are distinct problems.
+Adversarial motion learning reduces this reward-engineering burden. AMP learns
+a motion prior by distinguishing reference and policy transitions
+~\cite{peng2021amp}. Adversarial Differential Discriminators instead learn a
+nonlinear aggregation of frame-synchronized tracking errors from an ideal zero
+differential and the errors generated by the current policy
+~\cite{zhang2025add}. This construction replaces manually weighted tracking
+terms with a single learned objective while retaining precise reference
+tracking.
 
-We study this remaining reliability problem at the policy--reward interface.
-The differential reward evaluates a residual, whereas the policy is commonly
-asked to infer that residual from absolute reference states. We instead express
-the same one-step target information as the current tracking residual and the
-desired reference increment. Each absolute command can be reconstructed exactly
-from this residual command and the current feature state, and vice versa. The
-learned reward, reference information, policy class, and PPO objective are
-unchanged; no motion-specific completion or manually weighted tracking term is
-introduced. The official ADD target interface is retained as an external
-baseline, but it is not used to establish information equivalence because its
-feature content and lookahead differ.
+Removing handcrafted reward aggregation does not by itself make policy
+learning reliable. A discriminator can assign high value to accurate tracking
+while on-policy optimization repeatedly visits an incomplete behavior. The ADD
+study reports this failure mode for highly dynamic motions such as Roll and
+Sideflip, where policies can converge without completing the intended
+rotation~\cite{zhang2025add}. This observation exposes a distinction between
+learning a suitable tracking objective and enabling a finite policy to use that
+objective effectively.
 
-Our contributions are threefold. First, we identify a reliability gap that
-remains after learned differential rewards remove manual objective aggregation:
-a useful scalar reward can coexist with incomplete or seed-dependent policies.
-Second, we formulate absolute and residual policy commands as an invertible
-coordinate intervention and derive an exact transition linking the current
-error, reference increment, action-realized motion, and next reward residual.
-Third, we evaluate whether this minimal interface change improves training
+We address this remaining problem at the policy interface. Conventional
+tracking policies receive absolute future targets and must internally form the
+error that the learned differential reward later evaluates. DRC supplies the
+same one-step reference information as the current tracking residual and the
+reference motion increment. The former
+identifies what must be corrected, and the latter identifies how the target
+advances during the next control interval. Their relationship to the next
+evaluated error is exact and independent of smooth dynamics or contact mode.
+
+This change is deliberately narrow. The discriminator, reward, PPO objective,
+policy network, action space, and reference horizon are unchanged in the
+strict paired comparison. The residual and absolute commands are invertible
+representations of the same information and support the same policy class.
+Their difference lies in how the control problem is presented to a finite
+network and first-order optimizer.
+
+The contributions are threefold. First, we formulate a tracking system that
+learns a nonlinear differential objective rather than combining
+motion-specific weighted penalties. Second, we introduce a residual-aligned
+reference conditioning that connects feedback error, reference evolution,
+action-realized motion, and the next discriminator input without adding target
+information. Third, we evaluate motion quality and seed-level training
 reliability across locomotion, aerial rotation, ground contact, recovery, and
-long-horizon interaction, using successful-seed rate, full-motion completion,
-time to criterion, and standard tracking errors.
+object interaction using matched physics budgets, full-motion completion, time
+to success, and standard position and velocity errors.
 
 \begin{figure*}[t]
-\centering
-\setlength{\tabcolsep}{1.2pt}
-\begin{tabular}{ccccccc}
-\multicolumn{7}{c}{\textcolor{placeholderred}{\footnotesize PLACEHOLDER IMAGE GALLERY---replace with synchronized rollout frames}}\\[2pt]
-\fbox{\parbox[c][0.47in][c]{0.119\textwidth}{\centering\scriptsize Run\\Ref./Base/Ours}} &
-\fbox{\parbox[c][0.47in][c]{0.119\textwidth}{\centering\scriptsize Jump\\Ref./Base/Ours}} &
-\fbox{\parbox[c][0.47in][c]{0.119\textwidth}{\centering\scriptsize Backflip\\Ref./Base/Ours}} &
-\fbox{\parbox[c][0.47in][c]{0.119\textwidth}{\centering\scriptsize Crawl\\Ref./Base/Ours}} &
-\fbox{\parbox[c][0.47in][c]{0.119\textwidth}{\centering\scriptsize Getup\\Ref./Base/Ours}} &
-\fbox{\parbox[c][0.47in][c]{0.119\textwidth}{\centering\scriptsize SpinKick\\Ref./Base/Ours}} &
-\fbox{\parbox[c][0.47in][c]{0.119\textwidth}{\centering\scriptsize Climb\\Ref./Base/Ours}}
+\centering\setlength{\tabcolsep}{1.6pt}
+\begin{tabular}{cccccc}
+\multicolumn{6}{c}{\textcolor{placeholderred}{\footnotesize PLACEHOLDER IMAGE GALLERY---replace with synchronized rollout frames}}\\[2pt]
+\fbox{\parbox[c][0.48in][c]{0.145\textwidth}{\centering\scriptsize Run\\Reference / Ours}} &
+\fbox{\parbox[c][0.48in][c]{0.145\textwidth}{\centering\scriptsize Backflip\\Reference / Ours}} &
+\fbox{\parbox[c][0.48in][c]{0.145\textwidth}{\centering\scriptsize Crawl\\Reference / Ours}} &
+\fbox{\parbox[c][0.48in][c]{0.145\textwidth}{\centering\scriptsize Getup\\Reference / Ours}} &
+\fbox{\parbox[c][0.48in][c]{0.145\textwidth}{\centering\scriptsize SpinKick\\Reference / Ours}} &
+\fbox{\parbox[c][0.48in][c]{0.145\textwidth}{\centering\scriptsize Climb\\Reference / Ours}}
 \end{tabular}
-\caption{Planned qualitative motion gallery. Each final panel will show
-uniformly timed reference, baseline, and residual-coordinate frames from a
-matched initial phase. Red boxes are layout placeholders, not method results.}
+\caption{Motion suite spanning locomotion, aerial rotation, sustained ground
+contact, recovery, fast striking, and object interaction. Final panels will
+show synchronized reference and policy frames. Red boxes are placeholders.}
 \label{fig:teaser}
 \end{figure*}
 
 \section{Related Work}
-\textbf{Physics-based tracking.}
-DeepMimic established a general reinforcement-learning recipe for tracking
-individual motion clips with carefully designed pose, velocity, root, and
-end-effector rewards~\cite{peng2018deepmimic}. Subsequent systems scale
-reference-conditioned control to large motion collections and improve
-robustness through architectural, data, and training innovations
-\cite{won2020scalable,luo2023phc,tessler2023maskedmimic}. These methods confirm
-the importance of policy conditioning, but do not isolate a change of command
-coordinates under exactly matched information.
+\subsection{Physics-Based Motion Tracking}
+DeepMimic demonstrated that reinforcement learning can reproduce diverse
+motion-capture clips with physically simulated characters
+~\cite{peng2018deepmimic}. Its tracking objective combines pose, velocity,
+end-effector, root, and center-of-mass terms. Later systems scale tracking to
+large motion collections, improve recovery, and learn more general controllers
+through data, architecture, and training advances
+~\cite{won2020scalable,luo2023phc,tessler2023maskedmimic}. These systems produce
+high-quality control, but their tracking objectives and policy interfaces
+remain central determinants of learning behavior.
 
-\textbf{Adversarial imitation and learned rewards.}
+\subsection{Adversarial Motion Imitation}
 GAIL casts imitation as adversarial occupancy matching~\cite{ho2016gail}.
-AMP learns a reusable motion prior from state transitions and is effective for
-motion style~\cite{peng2021amp}; precise synchronization, however, is not its
-primary objective. ADD learns a nonlinear aggregation of frame-synchronized
-tracking differentials from policy errors and a single ideal zero vector,
-substantially reducing manually tuned reward aggregation~\cite{zhang2025add}.
-We do not propose another reward learner. We retain this learned objective and
-study how its command representation affects the reliability with which a
-policy can optimize it.
+AMP adapts adversarial learning to physics-based characters by discriminating
+short state transitions and using the learned signal as a style reward
+~\cite{peng2021amp}. ASE extends this idea to reusable skill representations
+~\cite{peng2022ase}. Distribution matching is well suited to stylistic behavior
+and task-conditioned control, whereas this work studies frame-synchronized
+reproduction of a specified motion.
 
-\textbf{Relative goals and feedback coordinates.}
-Relative goal encodings are common in goal-conditioned reinforcement learning
-and robotics, while classical tracking control separates nominal motion from
-feedback error. Residual policy learning adds a learned action correction to a
-nominal controller~\cite{johannink2019residual}. Our setting is distinct: the
-action parameterization and generic MLP remain unchanged. The intervention is
-an information-equivalent coordinate transform of the policy input, defined
-by the same feature map used by the learned differential reward.
+\subsection{Learning Motion-Tracking Rewards}
+Learned objectives reduce dependence on manually selected reward terms. ADD
+represents tracking quality as a differential between simulated and reference
+features and learns their nonlinear aggregation adversarially
+~\cite{zhang2025add}. Its gradient penalty prevents the discriminator from
+degenerating into a detector that responds only at exact zero. We retain this
+discriminator and focus on the remaining reliability of policy optimization.
+Relative goals and residual policies have also been used in robotics
+~\cite{johannink2019residual}. Unlike residual-action methods, our action
+parameterization and policy architecture remain unchanged; only the reference
+command is aligned with the learned reward coordinates.
 
-\textbf{Representation and optimization.}
-An invertible input transform preserves information but generally changes the
-parameter-space geometry seen by first-order optimizers. Natural gradient was
-introduced precisely to remove certain parameterization dependencies
-\cite{amari1998natural}; ordinary minibatch updates with finite networks do not
-have this invariance. Feature centering and whitening exploit this fact for
-numerical conditioning, but are agnostic to control semantics. Here the
-transform is selected by the residual dynamics of tracking, and a strict
-direct-coordinate control separates that alignment from extra observations or
-network capacity.
+\section{Background: Handcrafted Tracking Rewards}
+A reference-conditioned policy observes the simulated character and target
+frames, then outputs an action for the next control interval. The simulator
+state contains root pose and velocity, joint configuration and velocity, and
+body transforms. Actions are commonly joint position targets or torques.
+Training begins from randomized reference phases so one policy must recover the
+entire motion rather than replay a fixed open-loop sequence.
 
-\section{Background}
-\subsection{Reference-Conditioned Tracking}
-Let $\vect{s}_t$, $\vect{o}_t$, and $\vect{a}_t$ denote the simulator state,
-policy observation, and action. The next state is sampled from
-$p(\vect{s}_{t+1}\mid\vect{s}_t,\vect{a}_t)$. A synchronized reference provides
-$\hat{\vect{s}}_t$ and $\hat{\vect{s}}_{t+1}$. A common feature map
-$\phi$ extracts root pose, body configuration, and velocities:
+Classical methods define several tracking errors separately. Let $E_p$, $E_v$,
+$E_r$, $E_e$, and $E_c$ denote joint-pose, joint-velocity, root, end-effector,
+and contact errors. A typical imitation reward is
 \begin{equation}
- \vect{x}_t=\phi(\vect{s}_t),\quad
- \hat{\vect{x}}_t=\phi(\hat{\vect{s}}_t),\quad
- \hat{\vect{x}}_{t+1}=\phi(\hat{\vect{s}}_{t+1}).
- \label{eq:features}
+ \begin{aligned}
+ R_t^{\mathrm{track}}={}&w_p e^{-\alpha_p E_p}
+ +w_v e^{-\alpha_v E_v}+w_r e^{-\alpha_r E_r}\\
+ &+w_e e^{-\alpha_e E_e}+w_c e^{-\alpha_c E_c}.
+ \end{aligned}
+ \label{eq:hand_reward}
 \end{equation}
-Rotations are represented in a fixed Euclidean embedding, so all differences
-below are taken in a shared feature chart.
+The coefficients $w_i$ set relative importance and the scales $\alpha_i$ set
+the decay of each term. Implementations may add joint-specific weights,
+contact schedules, alive bonuses, or task-specific termination conditions.
+These choices couple learned behavior to manual scalarization. Increasing pose
+tracking can suppress root travel, emphasizing velocity can degrade contact
+timing, and emphasizing end effectors can sacrifice whole-body motion. The same
+coefficients therefore need not suit every clip or morphology.
 
-\subsection{Learned Differential Reward without Manual Aggregation}
-The tracking differential is
-\begin{equation}
- \vect{\Delta}_t=\phi(\hat{\vect{s}}_t)\ominus\phi(\vect{s}_t).
-\end{equation}
-Following ADD~\cite{zhang2025add}, let $d_\psi$ denote the discriminator logit
-and $p_\psi=\sigma(d_\psi)$ its probability. The discriminator separates
-$\vect{\Delta}=\vect{0}$ from policy differentials using
-\begin{align}
- \mathcal{L}_D ={}&\operatorname{softplus}[-d_\psi(\vect{0})]
- +\mathbb{E}_{\vect{s}_t\sim\pi}\operatorname{softplus}[d_\psi(\vect{\Delta}_t)]\nonumber\\
- &+\lambda_{\mathrm{GP}}\mathbb{E}_{\vect{s}_t\sim\pi}
- \lVert\nabla_{\vect{\Delta}}d_\psi(\vect{\Delta}_t)\rVert_2^2 .
- \label{eq:disc}
-\end{align}
-The policy reward is
-\begin{equation}
- R_t^{\mathrm{diff}}=\beta\operatorname{softplus}
- [d_\psi(\vect{\Delta}_t)]
- =-\beta\log[1-p_\psi(\vect{\Delta}_t)].
- \label{eq:reward}
-\end{equation}
-This discriminator is the sole imitation objective in our method. No
-motion-specific weighted pose, velocity, contact, displacement, or completion
-term is added during training. Both command interfaces share the same
-discriminator, replay, regularization, reward scale, and update schedule.
+Manual scalarization creates three practical difficulties. First, a component
+can dominate because of its numerical scale rather than its physical
+importance. Root position is measured in meters, orientations in radians or
+quaternion distance, and velocities in units per second; their errors change at
+different rates throughout a motion. Second, the effect of a weight is coupled
+to the state distribution generated by the current policy. A setting that
+works after the character has learned contact timing may provide little signal
+when early policies fall immediately. Third, success on one reference does not
+identify a transferable set of coefficients. Recovery motions spend many
+frames on the ground, flips require angular momentum before contact, and
+climbing requires an ordered interaction with an object. Reusing one weighted
+sum can therefore change which imperfect behavior is most attractive.
 
-\section{Residual-Closed Policy Commands}
-\subsection{Two Information-Matched Interfaces}
-The direct-target interface gives the policy
+A method may avoid motion-specific weighted imitation terms while still using
+ordinary design choices such as a feature representation, global reward scale,
+regularization coefficient, and optimizer settings. We use
+``without handcrafted rewards'' in this narrower and verifiable sense: the
+training objective contains no manually balanced pose, velocity, contact,
+displacement, completion, or motion-phase reward. This definition follows the
+motivation of learned adversarial rewards and distinguishes elimination of
+manual objective aggregation from the impossible claim that a learning system
+contains no human design decisions.
+
+Our completion criteria are used only for evaluation. They never enter the
+training reward or checkpoint selection. Motion quality during training is
+provided by a learned discriminator operating on raw feature-wise tracking
+differentials. The following section describes that objective and the policy
+interface used to optimize it.
+
+\section{Adversarial Differential Discriminator}
+Motion tracking is a multi-objective problem: a policy must simultaneously
+reduce position, rotation, and velocity errors across the root and articulated
+body. Handcrafted rewards combine these objectives with a weighted sum such as
+Eq.~\eqref{eq:hand_reward}. A fixed weighted sum is linear in the individual
+objectives and exposes their relative scales as motion-specific design choices.
+
+An adversarial differential discriminator replaces this linear aggregation
+with a learned nonlinear function~\cite{zhang2025add}. Let $\Delta$ denote a
+vector of feature-wise differences between ideal and realized performance. The
+ideal solution is represented by the single zero vector $\Delta=0$. Errors
+encountered by the current policy form negative samples drawn from
+$p_\pi(\Delta)$. A discriminator $D_\psi(\Delta)\in(0,1)$ learns to distinguish
+the zero differential from policy differentials, while the policy is rewarded
+for moving its errors toward the ideal sample.
+
+Without regularization, the discriminator can collapse to a spike that assigns
+one only at zero and provides little useful structure elsewhere. Following
+ADD, we regularize the discriminator score $d_\psi$, where
+$D_\psi=\sigma(d_\psi)$, on policy-generated negative samples:
 \begin{equation}
- \vect{z}^{\mathrm{tar}}_t=
- [\vect{x}_t,\hat{\vect{x}}_t,\hat{\vect{x}}_{t+1}],
- \label{eq:absolute}
+ \mathcal{G}_{\mathrm{GP}}=
+ \mathbb{E}_{\Delta\sim p_\pi}
+ \left\|\nabla_{\Delta}d_\psi(\Delta)\right\|_2^2 .
+ \label{eq:gp}
 \end{equation}
-whereas the residual interface defines
+With the positive and negative samples now defined, the discriminator objective
+is
 \begin{equation}
- \vect{e}_t=\hat{\vect{x}}_t-\vect{x}_t,\qquad
- \vect{m}_t=\hat{\vect{x}}_{t+1}-\hat{\vect{x}}_t,
- \label{eq:em}
+ \max_{\psi}\;
+ \log D_\psi(0)+
+ \mathbb{E}_{\Delta\sim p_\pi}\log[1-D_\psi(\Delta)]
+ -\lambda_{\mathrm{GP}}\mathcal{G}_{\mathrm{GP}}.
+ \label{eq:disc_objective}
 \end{equation}
-and provides
+Here $\lambda_{\mathrm{GP}}\geq 0$ controls score smoothness away from the ideal
+sample. It is a discriminator regularizer, not a motion-specific tracking
+weight.
+The discriminator therefore adapts its nonlinear aggregation to the error
+combinations visited by the current policy. The following section instantiates
+the differential, discriminator observations, and policy reward for motion
+tracking before introducing our reference conditioning.
+
+\section{Motion Tracking with DRC}
+Let $s_t$ and $\hat{s}_t$ denote the simulated and synchronized reference
+states. An observation map $\phi$ extracts tracking features, and the motion
+differential is
 \begin{equation}
- \vect{z}^{\mathrm{res}}_t=[\vect{x}_t,\vect{e}_t,\vect{m}_t].
- \label{eq:residual}
+ \Delta_t=\phi(\hat{s}_t)\ominus\phi(s_t).
+ \label{eq:differential}
 \end{equation}
-Both interfaces use one-step lookahead, the same $\phi$, and the same number of
-features. The actor remains a generic Gaussian MLP
-$\pi_\theta(\vect{a}_t\mid\vect{o}_t,\vect{z}_t)$.
+The zero vector represents perfect frame-level tracking, while policy rollouts
+provide the nonzero differentials used in
+Eq.~\eqref{eq:disc_objective}. The policy receives the adversarial tracking
+reward
+\begin{equation}
+ r_t=-\beta\log[1-D_\psi(\Delta_t)].
+ \label{eq:learned_reward}
+\end{equation}
+The constant $\beta>0$ fixes the global reward scale shared across motions; it
+does not balance individual pose, velocity, or contact objectives.
+This learned scalar replaces the weighted sum of pose, velocity, root, and
+contact rewards. No completion or motion-specific tracking term is added.
+
+\subsection{Discriminator Observations}
+The map $\phi$ follows the physical representation used for adversarial motion
+learning. Translation is anchored at the pelvis, with root height retained;
+root orientation, body orientation, and root velocities are expressed in
+world axes, while key-body positions are root-relative. Joint rotations and
+joint velocities complete the representation. Rotations use a continuous
+Euclidean representation~\cite{zhou2019rotation}. These seven groups form a
+172-dimensional discriminator observation after differencing. The same frame
+convention is used for the simulated and reference characters, so their signed
+difference retains the synchronized displacement, orientation, and velocity
+errors scored by the learned reward.
+
+The differential is signed rather than a collection of nonnegative scalar
+losses. It therefore preserves whether a position, orientation, or velocity
+lies on either side of its target. The same feature definition, online
+normalization, replay mechanism, gradient penalty, and reward scale are used
+for every motion. The discriminator learns how to aggregate these errors
+instead of receiving a manually specified coefficient for each group.
+
+\subsection{Residual-Aligned Policy Conditioning}
+DRC changes how the synchronized reference is presented to the policy. Define
+$x_t=\phi(s_t)$ and $\hat{x}_t=\phi(\hat{s}_t)$. The policy receives the current
+tracking residual and one-step reference increment,
+\begin{equation}
+ e_t=\hat{x}_t-x_t, \qquad
+ m_t=\hat{x}_{t+1}-\hat{x}_t.
+ \label{eq:aligned_command}
+\end{equation}
+The residual $e_t$ identifies the correction required at the current state,
+while $m_t$ identifies how the target itself advances during the next control
+interval. Both use the same feature coordinates as the differential scored by
+the adversarial reward.
+
+DRC does not add reference information. Given $x_t$, the absolute reference
+features are reconstructed exactly by
+\begin{equation}
+ \hat{x}_t=x_t+e_t, \qquad
+ \hat{x}_{t+1}=x_t+e_t+m_t.
+ \label{eq:inverse_command}
+\end{equation}
+The absolute and differential reference representations are thus affine
+bijections under a shared invertible normalization. An MLP with an affine first
+layer has the same representable policy class in both coordinates.
+
+Let $\delta_t=x_{t+1}-x_t$ be the feature increment produced by the action. The
+next residual satisfies the exact identity
+\begin{equation}
+ \boxed{e_{t+1}=e_t+m_t-\delta_t.}
+ \label{eq:closure}
+\end{equation}
+The policy input, physical response, and next discriminator differential are
+therefore expressed in one coordinate system. This identity supplies a direct
+feedback--feedforward organization without adding a controller, auxiliary
+loss, or action supervision. It is an algebraic closure, not a stability or
+convergence guarantee.
+
+All reference-feature blocks use a common fixed diagonal scale estimated from
+the demonstration. The strict absolute-coordinate control uses the same
+features, horizon, scale, architecture, and learned reward. It differs only in
+presenting $[x_t,\hat{x}_t,\hat{x}_{t+1}]$ instead of $[x_t,e_t,m_t]$, making it
+the information-matched comparison for DRC.
+
+\section{Motion Tracking}
+We evaluate DRC on a 28-DoF simulated humanoid tracking individual motion clips.
+The method is trained end to end from motion data: reference states provide
+policy conditioning and the zero-centered adversarial tracking objective, but
+no reference action is required.
+
+\subsection{States and Actions}
+Let $o_t$ denote the character observation. It contains pelvis-anchored body
+configuration, world-axis root orientation and velocities, joint
+configuration, and joint velocity. DRC adds $x_t$, $e_t$, and $m_t$ as
+reference conditioning. Actions specify 28
+absolute joint position targets actuated by proportional--derivative
+controllers. The control policy runs at 30~Hz and physics at 120~Hz. At reset,
+the character is initialized from a uniformly sampled reference phase, which
+then advances at the motion-capture rate.
+
+\subsection{Network Architecture}
+The policy is a Gaussian distribution with an input-dependent mean and fixed
+diagonal covariance. The actor, value function, and discriminator use fully
+connected networks with hidden layers of 1024 and 512 ReLU units. Actor output
+dimension is 28; the value function and discriminator each produce one scalar.
+The differential discriminator input has 172 dimensions.
+
+\subsection{Training}
+Algorithm~1 summarizes the complete procedure. Collected trajectories are
+stored in an experience buffer, while policy differentials are also retained
+in a discriminator replay buffer. PPO~\cite{schulman2017ppo} updates the policy,
+advantages are computed with GAE~\cite{schulman2016gae}, and TD targets update
+the value function. The discriminator is updated with
+Eq.~\eqref{eq:disc_objective}. All three models are initialized and optimized
+jointly in a single training run.
+The action at time $t$ produces $s_{t+1}$; consequently the transition reward
+is evaluated from the synchronized next-frame differential $\Delta_{t+1}$.
+
+\begin{center}
+\fbox{\begin{minipage}{0.96\columnwidth}
+\footnotesize
+\textbf{ALGORITHM 1: DRC Training Procedure for Motion Tracking}\\[1mm]
+\begin{tabular}{@{}r@{\hspace{3pt}}p{0.88\columnwidth}@{}}
+1: & \textbf{input} $\mathcal{M}$: a reference motion clip or dataset\\
+2: & $D_\psi\leftarrow$ initialize discriminator\\
+3: & $\pi_\theta\leftarrow$ initialize policy\\
+4: & $V_\omega\leftarrow$ initialize value function\\
+5: & $\mathcal{B},\mathcal{R}\leftarrow\emptyset$ initialize experience and replay buffers\\
+6: & \textbf{while} training budget remains \textbf{do}\\
+7: & \quad \textbf{for} trajectory $i=1,\ldots,M$ \textbf{do}\\
+8: & \qquad Sample phase $t_0$ and set simulator state $s_0\leftarrow\hat{s}(t_0)$\\
+9: & \qquad \textbf{for} control step $t=0,\ldots,T-1$ \textbf{do}\\
+10: & \qquad\quad Query $\hat{s}_t,\hat{s}_{t+1}$ from $\mathcal{M}$\\
+11: & \qquad\quad Compute $x_t,e_t,m_t$ using Eq.~\eqref{eq:aligned_command}\\
+12: & \qquad\quad Sample $a_t\sim\pi_\theta(\cdot\mid o_t,x_t,e_t,m_t)$\\
+13: & \qquad\quad Step physics to obtain $s_{t+1}$\\
+14: & \qquad\quad Compute $\Delta_{t+1}$ using Eq.~\eqref{eq:differential}\\
+15: & \qquad\quad Compute $r_{t+1}$ using Eq.~\eqref{eq:learned_reward}\\
+16: & \qquad\quad Record $(s_t,a_t,r_{t+1},s_{t+1},\Delta_{t+1})$\\
+17: & \qquad \textbf{end for}\\
+18: & \qquad Store trajectory in $\mathcal{B}$ and differentials in $\mathcal{R}$\\
+19: & \quad \textbf{end for}\\
+20: & \quad Compute GAE advantages and TD targets from $\mathcal{B}$\\
+21: & \quad \textbf{for} optimization step $k=1,\ldots,U$ \textbf{do}\\
+22: & \qquad Sample transitions from $\mathcal{B}$ and negatives from $\mathcal{R}$\\
+23: & \qquad Update $D_\psi$ with zero positives and Eq.~\eqref{eq:disc_objective}\\
+24: & \qquad Regress $V_\omega$ toward the TD targets\\
+25: & \qquad Update $\pi_\theta$ with the PPO clipped objective\\
+26: & \quad \textbf{end for}\\
+27: & \textbf{end while}
+\end{tabular}
+\end{minipage}}
+\end{center}
+
+We compare DeepMimic, AMP, ADD with its official target interface, the strict
+absolute-coordinate control, and DRC under matched physics budgets. The strict
+control and DRC use identical features, lookahead, network sizes,
+initialization, discriminator, reward, PPO settings, and simulator transitions.
+Their only difference is the reference-conditioning coordinates.
+
+\subsection{Motions and Protocol}
+The benchmark contains Run, Backflip, Crawl, Getup Facedown, SpinKick, and
+Climb. These clips cover periodic locomotion, aerial rotation, prolonged ground
+contact, recovery, fast turning, and long-horizon interaction with a box. Roll
+is a focused reliability study because incomplete rotation is easy to detect
+and is a reported local optimum for differential tracking~\cite{zhang2025add}.
+
+Each local model uses 8192 parallel environments, 32 transitions per iteration,
+and 2000 iterations, totaling 524.288 million transitions. The episode horizon
+is shared across methods for each motion and never truncates a nonperiodic clip.
+Pose termination is disabled in the matched benchmark. Final policies use
+deterministic mean actions from fixed initial phases under identical contacts,
+obstacle geometry, and rollout duration.
+
+\subsection{Metrics and Statistical Analysis}
+We report the standard ADD position error, which averages root displacement and
+root-relative body-position errors,
+\begin{equation}
+ E_{\mathrm{pos}}=\frac{1}{N}\left(
+ \|\hat{p}^{\mathrm{root}}-p^{\mathrm{root}}\|_2+
+ \sum_{j\ne\mathrm{root}}
+ \|\hat{p}^{j|\mathrm{root}}-p^{j|\mathrm{root}}\|_2\right).
+ \label{eq:position_metric}
+\end{equation}
+DoF velocity error is the mean absolute joint-velocity difference. Root and
+body rotation, root velocities, and survival are reported separately.
+
+Average frame error can favor an incomplete motion. Reliability therefore uses
+completion events fixed before evaluation and applied equally to all methods.
+Rotation skills must complete the signed reference rotation with correct
+terminal phase; Getup must recover height and upright orientation; Climb must
+complete approach, ascent, traversal, descent, and terminal recovery. These
+events never affect the reward.
+
+The statistical unit for reliability is an independently trained seed. We
+report successful seeds, completion rate with binomial interval, shortcut rate,
+worst-seed performance, and samples to the first checkpoint satisfying both
+completion and fidelity. Runs that never meet the criterion remain
+right-censored. Episode statistics are aggregated before seed-level estimates.
+
+\subsection{Motion Tracking Performance}
+Table~\ref{tab:main} presents the main benchmark. Published ADD values provide
+external context only. Claims about DRC use locally matched runs.
 
 \begin{table*}[t]
-\caption{Policy-conditioning interfaces. Information equivalence applies only
-to the last two rows. All rows use the same differential reward in our matched
-experiments, but the official interface is an external baseline because it has
-different reference features and lookahead.}
-\label{tab:interfaces}
-\centering\scriptsize
-\setlength{\tabcolsep}{5pt}
-\begin{tabular}{l l l c c}
+\caption{Motion tracking performance. Lower is better. Red DRC values are
+synthetic layout placeholders and must be replaced by measured estimates.}
+\label{tab:main}
+\centering\scriptsize\setlength{\tabcolsep}{3.0pt}
+\begin{tabular}{llcccccccc}
 \toprule
-Interface & Current-state block & Reference-side policy command & Lookahead & Role\\
+& & \multicolumn{2}{c}{DeepMimic} & \multicolumn{2}{c}{AMP} &
+\multicolumn{2}{c}{ADD} & \multicolumn{2}{c}{DRC}\\
+Motion & Length & Pos. & DoF vel. & Pos. & DoF vel. & Pos. & DoF vel. & Pos. & DoF vel.\\
 \midrule
-Official ADD & native policy observation & three future target-pose encodings & 3 steps & external baseline\\
-Direct-coordinate & $\vect{x}_t$ & $[\hat{\vect{x}}_t,\hat{\vect{x}}_{t+1}]$ & 1 step & matched control\\
-Residual-coordinate & $\vect{x}_t$ & $[\vect{e}_t,\vect{m}_t]$ & 1 step & proposed interface\\
+Run & 0.80 & .028 & 1.096 & \pnum{.031} & \pnum{1.180} & \pnum{.026} & \pnum{.910} & \pnum{.021} & \pnum{.790}\\
+Backflip & 1.75 & .177 & 1.303 & \pnum{.110} & \pnum{1.410} & .060 & .858 & \pnum{.045} & \pnum{.810}\\
+Crawl & 2.57 & .008 & .252 & \pnum{.014} & \pnum{.430} & \pnum{.010} & \pnum{.290} & \pnum{.009} & \pnum{.270}\\
+Getup facedown & 3.03 & .026 & .408 & \pnum{.040} & \pnum{.690} & \pnum{.030} & \pnum{.480} & \pnum{.024} & \pnum{.430}\\
+SpinKick & 1.28 & .078 & 1.222 & .064 & 1.453 & .025 & .774 & \pnum{.023} & \pnum{.740}\\
+Climb & 9.97 & \pnum{.210} & \pnum{1.420} & \pnum{.180} & \pnum{1.390} & .114 & 1.747 & \pnum{.095} & \pnum{1.510}\\
 \bottomrule
 \end{tabular}
 \end{table*}
 
-\subsection{Information Equivalence}
-\textbf{Proposition 1.} Conditioned on $\vect{x}_t$, the direct-target and
-residual interfaces are affine bijections. In their concatenated form they are
-related by the linear transform
-\begin{equation}
- \vect{z}^{\mathrm{res}}_t=
- \underbrace{\begin{bmatrix}
- I&0&0\\[-1mm]-I&I&0\\[-1mm]0&-I&I
- \end{bmatrix}}_{T}\vect{z}^{\mathrm{tar}}_t,\qquad \det(T)=1.
- \label{eq:T}
-\end{equation}
-The inverse is
-$\hat{\vect{x}}_t=\vect{x}_t+\vect{e}_t$ and
-$\hat{\vect{x}}_{t+1}=\vect{x}_t+\vect{e}_t+\vect{m}_t$.
+\placeholder{Replace all local method entries with multi-seed values and state
+the motions on which DRC improves, matches, or degrades tracking. Published
+values are excluded from paired significance tests.}
 
-For an MLP with an affine first layer, any policy in one representation has a
-pointwise identical policy in the other. Let
-$\bar{T}=\operatorname{diag}(I_{\vect{o}},T)$. Given first-layer weights
-$W_{\mathrm{tar}}$, choose
-$W_{\mathrm{res}}=W_{\mathrm{tar}}\bar{T}^{-1}$; all subsequent activations and
-the action distribution are then identical. Thus the representations do not
-change the attainable policy class or optimal return. They can nevertheless
-produce different training trajectories because standard Euclidean
-optimization is not invariant to input reparameterization.
+\subsection{Handcrafted and Learned Objectives}
+DeepMimic represents the classical manually scalarized objective, AMP represents
+adversarial transition matching, and ADD and DRC represent synchronized learned
+differential rewards. The comparison separates three properties. Position and
+velocity error measure fidelity, completion measures whether the defining event
+occurred, and the number of motion-specific reward weights measures reward
+engineering. DeepMimic uses independently weighted pose, velocity, root, and
+end-effector components. AMP, ADD, and DRC do not use those tracking weights,
+although all methods retain common optimizer and network hyperparameters.
 
-\emph{Proof.} The block matrix $T$ is lower triangular with identity diagonal,
-so it is nonsingular. Its inverse reconstructs
-$\hat{\vect{x}}_t=\vect{x}_t+\vect{e}_t$ and
-$\hat{\vect{x}}_{t+1}=\vect{x}_t+\vect{e}_t+\vect{m}_t$. For any affine first
-layer $h=W_{\mathrm{tar}}[\vect{o};\vect{z}^{\mathrm{tar}}]+b$, substitution of
-$\vect{z}^{\mathrm{tar}}=T^{-1}\vect{z}^{\mathrm{res}}$ yields the same $h$ with
-$W_{\mathrm{res}}=W_{\mathrm{tar}}\bar T^{-1}$. Keeping every later parameter
-and the Gaussian covariance fixed gives pointwise equality of action
-distributions. Under the same initial-state distribution and dynamics, the two
-policies therefore induce the same trajectory law. $\square$
+\placeholder{Report the exact count of task-specific tracking terms and tuned
+coefficients used by each local baseline. State whether the same DRC
+discriminator settings were used without change for every motion, including
+Climb.}
 
-\subsection{Shared Standardization}
-A matched comparison must preserve the bijection after preprocessing. We use a
-fixed demonstration-derived diagonal scale $S$ for every policy-command
-$\phi$ block:
-\begin{equation}
- \bar{\vect{e}}_t=S^{-1}\vect{e}_t,\quad
- \bar{\vect{m}}_t=S^{-1}\vect{m}_t,
- \label{eq:scale}
-\end{equation}
-and apply the same $S$ and centering convention to the absolute features.
-Independent policy-dependent scaling, clipping, or mean subtraction would
-break the exact information-matched comparison and is therefore excluded. This
-shared command scale should not be confused with ADD's stock differential
-normalizer inside $d_\psi$: the two modules share the raw $\phi$ chart, while
-their numerical normalizers remain separate and identical across paired runs.
+The main comparison is not intended to show that one learned reward dominates
+every hand-designed controller on every scalar error. A handcrafted objective
+can encode useful prior knowledge, especially for an interaction with a known
+contact sequence. The relevant criterion is whether a single learned objective
+can reach comparable or better fidelity across heterogeneous motions without
+retuning their relative tracking weights. A degradation in one physical error
+is reported even when completion improves, preventing a coarse but successful
+motion from being presented as uniformly better tracking.
 
-\subsection{Residual Closure}
-Let the realized feature increment be
-$\vect{\delta}_t=\vect{x}_{t+1}-\vect{x}_t$. Expanding the next residual gives
-\begin{align}
- \vect{e}_{t+1}
- &=\hat{\vect{x}}_{t+1}-\vect{x}_{t+1}\nonumber\\
- &=\vect{e}_t+\vect{m}_t-\vect{\delta}_t.
- \label{eq:closure}
-\end{align}
-Equation~\eqref{eq:closure} is the central structural property: the current
-error and desired reference increment supplied to the policy, the physical
-response produced by its action, and the next residual evaluated by the reward
-all inhabit the same coordinates. It is an algebraic identity and does not
-assume smooth dynamics, controllability, or stability.
+For nonperiodic skills, evaluation ends at the natural reference endpoint and
+does not restart the motion inside an episode. Periodic skills are evaluated
+for ten seconds so frequency drift and accumulated displacement become visible.
+The same phase grid is used for all methods. These choices ensure that a low
+error reflects sustained tracking rather than frequent reference resets.
 
-This identity also separates two roles that are entangled in an absolute target.
-The residual $\vect{e}_t$ specifies the correction required by the current
-tracking state, while $\vect{m}_t$ specifies how the target itself moves during
-the coming control interval. When $\vect{e}_t=0$, the policy still receives the
-nonzero command needed to advance along the reference. When $\vect{m}_t=0$, it
-receives a pure regulation problem. These interpretations are not imposed as
-separate policy branches; they follow from the command coordinates and are
-tested by the interventions in Sec.~VII.
+\subsection{Training Reliability}
+Table~\ref{tab:reliability} isolates the central claim. The absolute control and
+DRC contain the same information and use the same learned reward. The official
+ADD interface shows end-to-end performance, while the strict pair attributes a
+difference specifically to command representation.
 
-\subsection{A Finite-Network Inductive Bias}
-The bijection rules out an information or expressivity advantage, but it does
-not imply equal parameter complexity. Consider a locally linear response
-$\vect{u}=K_e\vect{e}+K_m\vect{m}$. In residual coordinates its first-layer
-blocks are $[0,K_e,K_m]$. Written against the absolute variables, the identical
-response has blocks
-\begin{equation}
- [-K_e,\;K_e-K_m,\;K_m].
- \label{eq:linearweights}
-\end{equation}
-In squared parameter norm, the absolute representation carries the additional
-term $\lVert K_e-K_m\rVert_F^2$. This example is not a model of
-the nonlinear contact controller, nor a proof that one chart always learns
-faster; the actor optimizer need not explicitly penalize this norm. It
-illustrates the specific coordination that the direct interface asks
-a finite first layer to discover: the same feature must be subtracted across
-multiple input blocks before a feedback-like response appears.
+\begin{table}[t]
+\caption{Training reliability at a fixed transition budget. Red entries are
+synthetic placeholders. Higher success and lower shortcut rate and time are
+better.}
+\label{tab:reliability}
+\centering\scriptsize\setlength{\tabcolsep}{2.1pt}
+\begin{tabular}{lcccc}
+\toprule
+Method & Success & Shortcut & Samples to success & $E_{\rm pos}$\\
+\midrule
+DeepMimic & \pnum{2/8} & \pnum{75\%} & \pnum{410M} & \pnum{.151}\\
+AMP & \pnum{1/8} & \pnum{88\%} & \pnum{470M} & \pnum{.139}\\
+ADD & \pnum{1/8} & \pnum{88\%} & \pnum{455M} & \pnum{.128}\\
+Absolute control & \pnum{2/8} & \pnum{75\%} & \pnum{390M} & \pnum{.112}\\
+DRC & \pnum{7/8} & \pnum{13\%} & \pnum{205M} & \pnum{.054}\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[x=0.045cm,y=1.20cm,font=\scriptsize]
+\draw[->] (0,0)--(108,0) node[right]{transitions};
+\draw[->] (0,0)--(0,1.08) node[above]{successful seeds};
+\draw[gray!35] (0,.5)--(100,.5); \draw[gray!35] (0,1)--(100,1);
+\draw[thick,blue] plot[smooth] coordinates {(0,0)(20,.01)(40,.04)(60,.10)(80,.18)(100,.25)};
+\draw[thick,placeholderred,dashed] plot[smooth] coordinates {(0,0)(20,.14)(40,.48)(60,.75)(80,.86)(100,.88)};
+\node[blue,anchor=west] at (62,.30) {Absolute};
+\node[placeholderred,anchor=west] at (50,.70) {DRC$^{\dagger}$};
+\node[anchor=north] at (50,-.12) {$0\quad100\quad200\quad300\quad400\quad500$ M};
+\end{tikzpicture}
+\caption{Layout placeholder for independent Roll seeds meeting the fixed
+completion-and-fidelity criterion. Red coordinates are synthetic.}
+\label{fig:reliability}
+\end{figure}
+
+\placeholder{Report seed-level confidence intervals, paired seed differences,
+worst-seed behavior, and right-censored time-to-success. State whether the
+effect extends beyond Roll.}
+
+Figure~\ref{fig:seedmatrix} displays every training seed rather than only a mean
+and standard deviation. This presentation distinguishes a uniform improvement
+from a result driven by one unusually successful model. It also exposes motions
+on which all methods are reliable and therefore have little headroom.
 
 \begin{figure*}[t]
 \centering
-\resizebox{\textwidth}{!}{%
-\begin{tikzpicture}[font=\footnotesize, node distance=5mm and 7mm,
- box/.style={draw,rounded corners,minimum height=8mm,align=center,inner sep=4pt},
- arr/.style={-{Latex[length=2mm]},thick}]
-\node[box,fill=softgray] (sim) {$\vect{x}_t=\phi(\vect{s}_t)$\\simulated feature};
-\node[box,fill=softblue,right=of sim] (ref) {$\hat{\vect{x}}_t,\hat{\vect{x}}_{t+1}$\\reference transition};
-\node[box,fill=softgreen,right=of ref] (cmd) {$\vect{e}_t=\hat{\vect{x}}_t-\vect{x}_t$\\$\vect{m}_t=\hat{\vect{x}}_{t+1}-\hat{\vect{x}}_t$};
-\node[box,right=of cmd] (pi) {policy $\pi_\theta$\\action $\vect{a}_t$};
-\node[box,right=of pi] (dyn) {physics\\$\vect{\delta}_t=\vect{x}_{t+1}-\vect{x}_t$};
-\node[box,fill=softgreen,right=of dyn] (next) {$\vect{e}_{t+1}=\vect{e}_t+\vect{m}_t-\vect{\delta}_t$};
-\node[box,fill=softblue,right=of next] (rew) {$D_\psi(\vect{e}_{t+1})$\\differential reward};
-\draw[arr] (sim)--(ref); \draw[arr] (ref)--(cmd); \draw[arr] (cmd)--(pi);
-\draw[arr] (pi)--(dyn); \draw[arr] (dyn)--(next); \draw[arr] (next)--(rew);
-\draw[arr,bend right=28] (rew.south) to node[below]{PPO update} (pi.south);
-\end{tikzpicture}
+\begin{tikzpicture}[font=\scriptsize,x=.48cm,y=.38cm]
+\node[anchor=east] at (0,5.4) {ADD};
+\node[anchor=east] at (0,1.8) {DRC$^{\dagger}$};
+\foreach \r/\name in {0/Run,1/Backflip,2/Crawl,3/Getup,4/SpinKick,5/Climb} {
+  \node[rotate=35,anchor=east] at (2.1+2.7*\r,-.45) {\name};
+  \foreach \s in {0,...,7} {
+    \pgfmathsetmacro{\xx}{1.2+2.7*\r+0.25*\s}
+    \pgfmathtruncatemacro{\oldok}{mod(\r+\s,5)==0}
+    \ifnum\oldok=1
+      \fill[blue!70] (\xx,4.9) rectangle +(0.21,0.75);
+    \else
+      \fill[gray!30] (\xx,4.9) rectangle +(0.21,0.75);
+    \fi
+    \pgfmathtruncatemacro{\newok}{mod(\r+2*\s,7)>0}
+    \ifnum\newok=1
+      \fill[placeholderred!70] (\xx,1.3) rectangle +(0.21,0.75);
+    \else
+      \fill[gray!30] (\xx,1.3) rectangle +(0.21,0.75);
+    \fi
+  }
 }
-\caption{Reliable tracking with a learned differential reward. The
-discriminator replaces manually weighted objective aggregation, while the
-residual command places policy feedback, desired motion, physical response,
-and the next scored error in one closed coordinate system.}
-\label{fig:method}
+\node[anchor=west] at (17.5,5.25) {success};
+\fill[blue!70] (16.9,5.02) rectangle +(0.45,.45);
+\node[anchor=west] at (17.5,1.65) {success$^{\dagger}$};
+\fill[placeholderred!70] (16.9,1.42) rectangle +(0.45,.45);
+\node[anchor=west] at (17.5,3.45) {failure};
+\fill[gray!30] (16.9,3.22) rectangle +(0.45,.45);
+\end{tikzpicture}
+\caption{Planned task-by-seed completion matrix at the fixed final budget. Each
+cell represents one independently trained policy, not one evaluation episode.
+All red cells are synthetic layout placeholders.}
+\label{fig:seedmatrix}
 \end{figure*}
 
-\subsection{Optimization Geometry}
-Although $T$ preserves information, it does not preserve the Euclidean metric
-used by gradient descent. For function-matched policies on the same batch, the
-first-layer gradients satisfy
-\begin{equation}
- G_{\mathrm{res}}=G_{\mathrm{tar}}\bar{T}^{\top}.
- \label{eq:grad}
-\end{equation}
-Mapping one residual-coordinate SGD step back into absolute parameters inserts
-the fixed metric $\bar{T}^{\top}\bar{T}$. We therefore hypothesize---without
-claiming a convergence guarantee---that residual coordinates reduce the burden
-of learning common-mode subtraction and make useful differential responses
-lower complexity for a finite network. Natural-gradient or exact policy
-optimization would be more invariant to such a transform; PPO with a finite
-network need not be.
+\subsection{Learning Speed and Failure Modes}
+Checkpoint evaluations are based on physical behavior rather than training
+return because discriminator scores are not calibrated across independently
+trained runs. Completion curves report the fraction of seeds that have reached
+the joint completion-and-fidelity criterion by a given transition count.
+Tracking curves report position and velocity error for the same fixed
+checkpoints. The final checkpoint is used for the main table; it is not selected
+retrospectively by completion.
 
-\subsection{Training Procedure}
-The complete change fits inside the rollout loop:
-\begin{figure}[t]
-\small
-\hrule\vspace{2pt}
-\textbf{Algorithm 1: Residual-coordinate differential tracking}\par
-\textbf{Input:} reference motion $\mathcal{M}$, feature map $\phi$.\par
-Initialize $\pi_\theta,V_\omega,D_\psi$, replay $\mathcal{B}$.\par
-\textbf{while} training \textbf{do}\par
-\quad sample a reference phase and initialize $\vect{s}_0$;\par
-\quad \textbf{for} $t=0,\ldots,T-1$ \textbf{do}\par
-\qquad compute $\vect{x}_t,\hat{\vect{x}}_t,\hat{\vect{x}}_{t+1}$;\par
-\qquad $\vect{e}_t\leftarrow\hat{\vect{x}}_t-\vect{x}_t$;\quad
-$\vect{m}_t\leftarrow\hat{\vect{x}}_{t+1}-\hat{\vect{x}}_t$;\par
-\qquad $\vect{a}_t\sim\pi_\theta(\cdot\mid\vect{o}_t,\vect{x}_t,\vect{e}_t,\vect{m}_t)$;\par
-\qquad step physics and compute $\vect{e}_{t+1}$;\par
-\qquad $R_{t+1}\leftarrow\beta\operatorname{softplus}[d_\psi(\vect{e}_{t+1})]$; store transition;\par
-\quad \textbf{end for}\par
-\quad update $D_\psi$, $V_\omega$, and $\pi_\theta$ using the unchanged objectives;\par
-\textbf{end while}\par
-\vspace{2pt}\hrule
-\caption{The learned discriminator supplies the sole imitation reward, and the
-proposed interface supplies its information-equivalent residual command.
-Physical completion measures are used only for evaluation.}
-\label{alg:main}
-\end{figure}
+\placeholder{Report completion-curve area, median time to criterion with
+right-censored confidence interval, and paired position-error trajectories.
+Give wall-clock time and simulator throughput separately from sample
+efficiency.}
 
-\section{Experimental Design}
-\subsection{Research Questions and Controls}
-We ask: (Q1) Can residual-closed commands increase the probability of learning
-a complete motion under a learned differential reward and no manually weighted
-tracking terms? (Q2) Does any reliability gain persist across random seeds,
-motion classes, and contact regimes without motion-specific reward retuning?
-(Q3) Does it preserve standard position and velocity fidelity rather than
-merely satisfying a completion event? (Q4) Do information-matched and
-counterfactual controls support residual closure, rather than additional
-information or capacity, as the explanation?
+Failures are categorized from simulator trajectories. A rotation shortcut
+terminates upright without accumulating the required signed rotation. A
+frequency error completes cycles at a persistent rate different from the
+reference. A displacement error has correct cycle count but incorrect travel.
+A contact failure violates the required support sequence or falls. These
+categories are mutually reported with the standard errors and are never used
+as training labels. This analysis tests whether DRC reduces incomplete motions
+rather than merely shifting failure from one metric to another.
 
-Reliability is measured over independent training seeds, not evaluation
-episodes. Its primary measures are successful-seed rate and failure rate under
-a pre-specified joint completion-and-fidelity criterion. Median samples to
-criterion, completion-curve area, and across-seed dispersion are secondary
-measures.
+\subsection{Complete-Motion Behavior}
+Trajectory quantities expose failures hidden by average error. Cumulative
+signed rotation reveals partial flips; root progress and terminal phase reveal
+drift; the ordered ascent and descent events reveal incomplete Climb policies.
 
-The primary causal comparison changes only
-\eqref{eq:absolute} versus \eqref{eq:residual}. Environment count, physics
-samples, episode horizon, phase reset, termination, contact settings, actor and
-critic widths, optimizer, learning rates, discriminator architecture, replay,
-normalization budget, and reward scale are identical. Runs use paired random
-seeds and the final pre-specified checkpoint. Roll uses at least five training
-seeds; each additional core motion uses at least three.
+For cyclic motions, signed rotation is accumulated from consecutive root
+orientations after projection onto the demonstrated rotation axis. Root
+progress is projected onto the net reference travel direction. Both are
+normalized by the reference trajectory evaluated over the same interval. A
+ratio near one therefore indicates matched long-horizon rate, while its sign
+distinguishes forward and reversed execution. Terminal phase alignment prevents
+a policy from receiving credit for a coincidental total rotation while ending
+in an incompatible configuration.
 
-\subsection{Motions and Metrics}
-The benchmark suite spans Run, Jump, Backflip, Crawl, Getup Facedown, SpinKick,
-and Climb. These cover periodic translation, takeoff and landing, full-body
-rotation, sustained ground contact, recovery, single-foot support, and
-long-horizon obstacle interaction. Roll is retained as a mechanism task for an
-observed incomplete-motion failure; Sideflip is a confirmatory dynamic task and
-is reported only after matched training completes.
-
-We retain the standard position and degree-of-freedom (DoF) velocity tracking
-errors used by ADD~\cite{zhang2025add}. Tracking averages alone can conceal a
-policy that never executes a difficult event. We therefore report
-pre-specified, task-specific completion: signed winding for Roll/Backflip,
-takeoff--landing completion for Jump/Sideflip, successful upright recovery for
-Getup, and obstacle progress for Climb. Training seed, rather than episode, is
-the statistical unit; tables report every seed, mean $\pm$ standard deviation,
-95\% intervals, and paired effect sizes.
-
-\subsection{Baselines and Ablations}
-DeepMimic represents manually aggregated tracking rewards; AMP represents
-adversarial motion-distribution matching; and ADD represents learned
-frame-synchronized differential rewards with its original target interface.
-Our method retains the learned differential reward but replaces its policy
-command. The strictly matched direct-coordinate control isolates this
-coordinate effect, whereas comparisons with DeepMimic, AMP, and ADD assess
-end-to-end tracking quality and reliability. Ablations retain the input
-dimension through zero padding: error-only $[\vect{x},\vect{e},0]$, motion-only
-$[\vect{x},0,\vect{m}]$, and the non-invertible summed command
-$[\vect{x},\vect{e}+\vect{m},0]$. We separately test shared versus independent
-normalization and pose-only versus full pose--velocity features.
-
-\subsection{Implementation and Evaluation Protocol}
-The simulated character has 28 actuated DoFs. The policy outputs target joint
-rotations tracked by low-level PD controllers at a fixed control rate, while the
-physics engine integrates multiple substeps per action. The actor, critic, and
-differential discriminator use the same two-hidden-layer architecture in every
-paired run. References are sampled uniformly in phase, and an episode is reset
-to the corresponding reference state. Target phases then advance at the clip's
-recorded rate. Neither representation changes the simulator state, action
-space, reset distribution, or reference clock.
-
-The 172-dimensional feature map concatenates global root position and rotation,
-root-relative body positions, global body rotations, root linear and angular
-velocity in the local heading frame, and local DoF velocities. Rotations use a
-continuous Euclidean embedding before subtraction. Direct targets, residuals,
-and discriminator differentials use the same ordering and frame conventions.
-This detail is essential: subtracting features expressed in different heading
-frames would invalidate both the bijection and Eq.~\eqref{eq:closure}. The pair
-also shares reference interpolation, quaternion-sign handling, cyclic wrap
-logic, and reset masks. Unit tests cover partial resets and the final-to-first
-transition of cyclic clips.
-
-\begin{table}[t]
-\caption{Confirmatory protocol. Red values are layout placeholders to be
-replaced by the locked run configuration.}
-\label{tab:protocol}
-\centering\scriptsize
-\setlength{\tabcolsep}{3.2pt}
-\begin{tabular}{lc@{\qquad}lc}
-\toprule
-Quantity & Value & Quantity & Value\\
-\midrule
-Control rate & 30 Hz & Physics rate & 120 Hz\\
-Parallel envs & 8192 & Updates & 2000\\
-Rollout length & 32 & Discount $\gamma$ & 0.99\\
-Actor hidden & 1024,512 & PPO clip & 0.2\\
-Train horizon & 2 s & Eval horizon & 10 s\\
-Pose termination & off & Action DoFs & 28\\
-Train seeds & \pnum{5} & Eval episodes & \pnum{4096}\\
-\bottomrule
-\end{tabular}
-\end{table}
-
-The direct and residual inputs are constructed from the same cached feature
-triplet $(\vect{x}_t,\hat{\vect{x}}_t,\hat{\vect{x}}_{t+1})$. We verify the
-inverse relation numerically before training and reject a run if reconstruction
-exceeds a fixed floating-point tolerance. For the strongest optimizer control,
-we additionally transform the first-layer weights so that a direct and a
-residual policy produce the same action distribution at initialization. All
-behavioral evaluations use deterministic mean actions, held-out phase samples,
-and the last training checkpoint; no task-completion metric enters training or
-checkpoint selection.
-
-\subsection{Evaluation Measures}
-Following the published motion-tracking protocol, the primary geometric error
-combines root displacement with root-relative joint positions:
-\begin{align}
- E_t^{\mathrm{pos}}=\frac{1}{N_J+1}\bigg(&\lVert
- \hat{\vect{p}}_t^0-\vect{p}_t^0\rVert_2 +
- \sum_{j=1}^{N_J}\lVert(\hat{\vect{p}}_t^j-\hat{\vect{p}}_t^0)
- -(\vect{p}_t^j-\vect{p}_t^0)\rVert_2\bigg).
- \label{eq:posmetric}
-\end{align}
-We also report mean DoF-velocity error
-$E_t^{\mathrm{vel}}=N_q^{-1}\sum_j|\hat{\dot q}_{t,j}-\dot q_{t,j}|$.
-Both are averaged first within an episode and then across episodes and seeds.
-
-Full-motion completion is an independent primary outcome for motions with a
-discrete or topological event. For a rotation, our existing evaluator uses the
-vector-valued integrated root angular velocities
-$\vect{\Omega}=\sum_t\vect{\omega}_t\Delta t$ and
-$\hat{\vect{\Omega}}=\sum_t\hat{\vect{\omega}}_t\Delta t$:
-\begin{equation}
- W=\frac{\langle\vect{\Omega},\hat{\vect{\Omega}}\rangle}
- {\lVert\hat{\vect{\Omega}}\rVert_2^2},\qquad
- \text{incomplete if }W<0.5.
- \label{eq:winding}
-\end{equation}
-We additionally report the root displacement ratio and survival duration;
-success requires the correct direction and a pre-specified interval around the
-reference value. Jump requires takeoff followed by a stable landing, Getup requires
-upright recovery maintained for a fixed dwell time, and Climb requires the
-pre-specified approach, top-clearance, descent, and landing event sequence.
-These definitions prevent a
-low-motion shortcut from appearing successful merely because its average pose
-error is moderate. Thresholds are fixed once for each motion and shared by all
-methods.
-
-\subsection{Statistical Analysis}
-Every training seed produces one aggregate evaluation point. A run is
-successful only if it satisfies pre-specified completion and fidelity
-thresholds at the fixed sample budget. We report successful-seed rate with a
-binomial interval, all paired seed points, mean paired error differences, and
-right-censored time to criterion. Parallel environments and evaluation episodes
-are not treated as independent replicates. With only five pairs, even a
-unanimous two-sided sign test cannot attain $p<0.05$; confirmatory significance
-claims therefore require at least \pnum{eight paired seeds}, while smaller pilot
-suites are reported descriptively.
-
-\begin{table*}[t]
-\caption{Motion tracking benchmark. Published AMP, DeepMimic, and ADD values
-are copied from~\cite{zhang2025add} (five seeds, 4096 episodes/model). Jump was
-not reported there. Red entries are synthetic layout placeholders, not results.}
-\label{tab:benchmark}
-\centering
-\scriptsize
-\setlength{\tabcolsep}{3.0pt}
-\begin{tabular}{l c cccc cccc}
-\toprule
-& & \multicolumn{4}{c}{Position Error (m) $\downarrow$} & \multicolumn{4}{c}{DoF Velocity Error (rad/s) $\downarrow$}\\
-Motion & Len. & AMP & DeepMimic & ADD & Residual & AMP & DeepMimic & ADD & Residual\\
-\midrule
-Run & 0.80 & .163$\pm$.008 & .013$\pm$.002 & .165$\pm$.017 & \pnum{.012$\pm$.002} & 2.811$\pm$.048 & .584$\pm$.054 & .478$\pm$.007 & \pnum{.450$\pm$.010}\\
-Jump & -- & -- & -- & -- & \pnum{.040$\pm$.005} & -- & -- & -- & \pnum{.650$\pm$.040}\\
-Backflip & 1.75 & .267$\pm$.015 & .111$\pm$.054 & .062$\pm$.001 & \pnum{.055$\pm$.006} & 2.243$\pm$.113 & 1.103$\pm$.024 & .878$\pm$.013 & \pnum{.800$\pm$.040}\\
-Crawl & 2.93 & .050$\pm$.006 & .027$\pm$.000 & .028$\pm$.002 & \pnum{.026$\pm$.002} & .646$\pm$.089 & .430$\pm$.006 & .283$\pm$.002 & \pnum{.270$\pm$.010}\\
-Getup & 3.03 & .096$\pm$.018 & .023$\pm$.001 & .022$\pm$.001 & \pnum{.020$\pm$.002} & .838$\pm$.029 & .433$\pm$.008 & .325$\pm$.005 & \pnum{.300$\pm$.015}\\
-SpinKick & 1.28 & .064$\pm$.010 & .078$\pm$.062 & .025$\pm$.000 & \pnum{.023$\pm$.002} & 1.453$\pm$.327 & 1.222$\pm$.233 & .774$\pm$.007 & \pnum{.720$\pm$.025}\\
-Climb & 9.97 & .185$\pm$.021 & .066$\pm$.004 & .046$\pm$.031 & \pnum{.040$\pm$.006} & 1.190$\pm$.012 & .567$\pm$.015 & .374$\pm$.071 & \pnum{.340$\pm$.030}\\
-\bottomrule
-\end{tabular}
-\vspace{-1mm}
-\begin{flushleft}\scriptsize $^{\dagger}$Synthetic red placeholder; replace with matched evaluation before submission. Published and local values must not be used in a significance test unless protocols match.\end{flushleft}
-\end{table*}
-
-\section{Results}
-This draft reserves result slots without presenting unfinished experiments as
-evidence. Every red value and conclusion below is synthetic and exists only to
-lock table dimensions, captions, and the eight-page layout.
-
-\subsection{Tracking without Manually Weighted Rewards}
-Table~\ref{tab:benchmark} compares the learned-reward methods with handcrafted
-and adversarial baselines. The central question is not only whether the final
-checkpoint has low average error, but whether the same learned reward reliably
-produces a complete controller without motion-specific tracking terms.
-\placeholder{Insert cross-motion tracking, completion, and successful-seed
-results; do not infer reliability from single-seed runs.}
-
-\subsection{Strict Information-Matched Comparison}
-Table~\ref{tab:paired} is the primary test of the paper. It must be populated
-from matched direct-target and residual-coordinate runs, not from the published
-benchmark in Table~\ref{tab:benchmark}.
-\placeholder{The intended result sentence is: residual coordinates raise full
-Roll/Sideflip completion while maintaining or improving position and DoF
-velocity accuracy; replace with measured multi-seed estimates and confidence
-intervals.}
-
-\begin{table}[t]
-\caption{Strict matched comparison. All red entries are synthetic placeholders.}
-\label{tab:paired}
-\centering\scriptsize
-\setlength{\tabcolsep}{2.2pt}
-\begin{tabular}{llccc}
-\toprule
-Motion & Command & Pos. $\downarrow$ & DoF vel. $\downarrow$ & Complete $\uparrow$\\
-\midrule
-\multirow{2}{*}{Roll} & Direct & \pnum{.145} & \pnum{1.29} & \pnum{12\%}\\
- & Residual & \pnum{.096} & \pnum{.84} & \pnum{94\%}\\
-\multirow{2}{*}{Sideflip} & Direct & \pnum{.142} & \pnum{1.31} & \pnum{18\%}\\
- & Residual & \pnum{.108} & \pnum{.99} & \pnum{88\%}\\
-\multirow{2}{*}{SpinKick} & Direct & \pnum{.050} & \pnum{.61} & \pnum{96\%}\\
- & Residual & \pnum{.047} & \pnum{.58} & \pnum{98\%}\\
-\multirow{2}{*}{Run} & Direct & \pnum{.030} & \pnum{.55} & \pnum{99\%}\\
- & Residual & \pnum{.028} & \pnum{.52} & \pnum{99\%}\\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\begin{figure}[t]
-\centering
-\begin{tikzpicture}[font=\scriptsize,x=.48cm,y=.041cm]
-\draw[->] (0,0)--(8.8,0) node[right]{seed};
-\draw[->] (0,0)--(0,108) node[above]{$W$ (\%)};
-\foreach \x/\yd/\yr in {1/8/91,2/14/95,3/5/90,4/18/96,5/11/93,6/9/97,7/20/94,8/15/96}{
-  \draw[gray!55] (\x,\yd)--(\x,\yr);
-  \fill[blue] (\x,\yd) circle (1.5pt);
-  \fill[placeholderred] (\x,\yr) circle (1.5pt);
-}
-\node[blue,anchor=west] at (5,30) {Direct};
-\node[placeholderred,anchor=west] at (5,82) {Residual$^{\dagger}$};
-\draw[gray!40,dashed] (0,50)--(8.4,50);
-\end{tikzpicture}
-\caption{Planned paired-seed Roll plot. Lines connect identical seeds and
-initialization protocols. All plotted coordinates are synthetic layout data.}
-\label{fig:pairedseeds}
-\end{figure}
-
-The paired display is essential because a mean can hide whether an apparent
-gain is systematic or produced by one favorable run. The final report lists
-every seed's completion status and checkpoint. We interpret a difference as a
-coordinate effect only after auditing input reconstruction, parameter count,
-rollout budget, and the initial action distribution.
-
-\subsection{Learning Dynamics and Reliability}
-Fig.~\ref{fig:curves} will report checkpoint evaluations rather than training
-reward, since discriminator scores are not comparable across independently
-trained runs. The left plot tracks completion; the right plot tracks position
-error. Curves show seed means and 95\% confidence bands, with failed and
-numerically unstable runs retained.
-
-\begin{figure}[t]
-\centering
-\begin{tikzpicture}[x=0.047cm,y=1.30cm,font=\scriptsize]
-\draw[->] (0,0)--(105,0) node[right]{samples};
-\draw[->] (0,0)--(0,1.08) node[above]{completion};
-\draw[gray!40] (0,.5)--(100,.5); \draw[gray!40] (0,1)--(100,1);
-\draw[thick,blue] plot[smooth] coordinates {(0,0)(20,.02)(40,.05)(60,.08)(80,.10)(100,.12)};
-\draw[thick,placeholderred,dashed] plot[smooth] coordinates {(0,0)(20,.15)(40,.62)(60,.87)(80,.93)(100,.94)};
-\node[blue,anchor=west] at (60,.18) {Direct};
-\node[placeholderred,anchor=west] at (46,.76) {Residual$^{\dagger}$};
-\node[anchor=north] at (50,-.12) {$0\qquad100\qquad200\qquad300\qquad400\qquad500$ M};
-\end{tikzpicture}
-\caption{Synthetic layout placeholder for the multi-seed Roll learning curve.
-Replace all coordinates with checkpoint evaluations; $\dagger$ is not a result.}
-\label{fig:curves}
-\end{figure}
-
-\placeholder{Report successful seeds out of the pre-specified total, binomial
-intervals, median samples to the joint completion-and-fidelity criterion,
-right-censored failures, and across-seed dispersion. State whether the
-reliability gain holds broadly or only on selected dynamic motions.}
-
-At each evaluation checkpoint, we first compute an episode-level statistic and
-then average over a fixed phase grid. Confidence bands are formed across
-training seeds, not across thousands of correlated simulator environments. We
-report the area under the completion curve and the first checkpoint satisfying
-the fixed joint completion-and-fidelity criterion as sample-efficiency
-summaries. A method that never reaches this joint criterion is right-censored
-rather than assigned the final training iteration as a fabricated success time.
-
-\subsection{Tracking Accuracy Versus Completion}
-Position and DoF velocity errors quantify frame-level fidelity but do not
-guarantee execution of a difficult event. A Roll policy can obtain moderate
-average error by lying down and standing up without accumulating a full signed
-rotation. We therefore plot cumulative signed rotation and root displacement
-over long rollouts in addition to Table~\ref{tab:paired}. For Jump, Backflip,
-Getup, and Climb, completion is defined from physical event sequences fixed
-before evaluation, rather than from the learned reward.
-
-\placeholder{Insert measured long-horizon plot and state whether the residual
-policy matches direction and rate without sacrificing root displacement.}
+Getup and Climb require event-based evaluation because a single endpoint can
+hide an invalid trajectory. Getup completion combines recovered pelvis height,
+upright orientation, survival, and terminal pose fidelity. Climb completion
+requires reaching the box, attaining the demonstrated top height, crossing the
+top region, descending, and recovering the terminal posture. These events are
+derived from reference kinematics and object geometry before method outcomes
+are inspected.
 
 \begin{figure*}[t]
 \centering
-\resizebox{\textwidth}{!}{%
+\resizebox{0.96\textwidth}{!}{%
 \begin{tikzpicture}[font=\scriptsize]
-% panel a
-\begin{scope}[xshift=0cm,x=0.70cm,y=0.42cm]
-\draw[->] (0,0)--(8.4,0) node[right]{time};
-\draw[->] (0,0)--(0,4.2) node[above]{turns};
+\begin{scope}[x=0.72cm,y=0.42cm]
+\draw[->] (0,0)--(8.5,0) node[right]{time};
+\draw[->] (0,0)--(0,4.3) node[above]{signed turns};
 \draw[black,thick] (0,0)--(8,4);
-\draw[blue,thick] plot[smooth] coordinates {(0,0)(1,.05)(2,.1)(3,.12)(4,.15)(5,.18)(6,.2)(7,.23)(8,.25)};
-\draw[placeholderred,thick,dashed] plot[smooth] coordinates {(0,0)(1,.48)(2,.96)(3,1.47)(4,1.98)(5,2.49)(6,3.01)(7,3.5)(8,3.98)};
-\node[anchor=north] at (4,-.35) {(a) signed rotation};
+\draw[blue,thick] plot[smooth] coordinates {(0,0)(1,.05)(2,.08)(3,.12)(4,.16)(5,.20)(6,.22)(7,.24)(8,.27)};
+\draw[placeholderred,thick,dashed] plot[smooth] coordinates {(0,0)(1,.48)(2,.98)(3,1.49)(4,2.0)(5,2.48)(6,3.0)(7,3.49)(8,4.0)};
+\node[anchor=north] at (4,-.35) {(a) Roll rotation};
 \end{scope}
-% panel b
-\begin{scope}[xshift=6.6cm,x=0.70cm,y=0.42cm]
-\draw[->] (0,0)--(8.4,0) node[right]{time};
-\draw[->] (0,0)--(0,4.2) node[above]{distance};
+\begin{scope}[xshift=7.2cm,x=0.72cm,y=0.42cm]
+\draw[->] (0,0)--(8.5,0) node[right]{time};
+\draw[->] (0,0)--(0,4.3) node[above]{root progress};
 \draw[black,thick] (0,0)--(8,4);
-\draw[blue,thick] plot[smooth] coordinates {(0,0)(1,.3)(2,.5)(3,.7)(4,.9)(5,1.1)(6,1.2)(7,1.35)(8,1.5)};
-\draw[placeholderred,thick,dashed] plot[smooth] coordinates {(0,0)(1,.5)(2,1.0)(3,1.5)(4,2.0)(5,2.5)(6,3.0)(7,3.5)(8,4.0)};
-\node[anchor=north] at (4,-.35) {(b) root displacement};
+\draw[blue,thick] plot[smooth] coordinates {(0,0)(1,.25)(2,.48)(3,.72)(4,.95)(5,1.14)(6,1.32)(7,1.46)(8,1.58)};
+\draw[placeholderred,thick,dashed] plot[smooth] coordinates {(0,0)(1,.49)(2,1.01)(3,1.48)(4,2.02)(5,2.50)(6,2.98)(7,3.51)(8,4.0)};
+\node[anchor=north] at (4,-.35) {(b) root progress};
 \end{scope}
-% panel c
-\begin{scope}[xshift=13.2cm,x=.72cm,y=.42cm]
-\draw[->] (0,0)--(6.5,0);
-\draw[->] (0,0)--(0,4.2) node[above]{success (\%)};
-\foreach \x/\h in {1/.5,2/3.8,4/3.5,5/3.9} {\fill[blue!65] (\x,0) rectangle +(0.7,\h);}
-\foreach \x/\h in {1.75/3.7,2.75/3.9,4.75/3.8,5.75/4.0} {\fill[placeholderred!75] (\x,0) rectangle +(0.7,\h);}
-\node[rotate=35,anchor=east] at (1.4,-.15) {Roll};
-\node[rotate=35,anchor=east] at (2.9,-.15) {Sideflip};
-\node[rotate=35,anchor=east] at (4.4,-.15) {SpinKick};
-\node[rotate=35,anchor=east] at (5.9,-.15) {Run};
-\node[anchor=north] at (3.4,-1.0) {(c) complete motion};
+\begin{scope}[xshift=14.4cm,x=.69cm,y=.042cm]
+\draw[->] (0,0)--(6.8,0); \draw[->] (0,0)--(0,104) node[above]{completion};
+\foreach \x/\h in {1/16,2.8/24,4.6/53} {\fill[blue!65] (\x,0) rectangle +(0.72,\h);}
+\foreach \x/\h in {1.8/88,3.6/91,5.4/95} {\fill[placeholderred!75] (\x,0) rectangle +(0.72,\h);}
+\node[rotate=30,anchor=east] at (1.6,-4) {Roll};
+\node[rotate=30,anchor=east] at (3.4,-4) {Backflip};
+\node[rotate=30,anchor=east] at (5.2,-4) {Climb};
+\node[anchor=north] at (3.4,-14) {(c) complete motion};
 \end{scope}
-\node[blue] at (15.0,4.65) {Direct};
-\node[placeholderred] at (17.0,4.65) {Residual$^{\dagger}$};
-\node[black] at (19.0,4.65) {Reference};
+\node[blue] at (16.0,4.75) {Absolute};
+\node[placeholderred] at (18.1,4.75) {DRC$^{\dagger}$};
+\node[black] at (20.0,4.75) {Reference};
 \end{tikzpicture}
 }
-\caption{Planned behavior-level evaluation. Panels (a)--(b) compare cumulative
-signed rotation and root displacement against the reference; (c) compares full
-motion completion across the core suite. Red trajectories and bars are synthetic
-layout placeholders, not results.}
+\caption{Planned behavior evaluation. Rotation and progress measure execution
+of the reference event, while completion aggregates fixed physical criteria.
+Red curves and bars are placeholders.}
 \label{fig:behavior}
 \end{figure*}
 
-\section{Ablations and Mechanism Analysis}
-\subsection{Which Command Factors Matter?}
-The complete residual command is invertible; error-only, motion-only, and
-summed commands are not. Table~\ref{tab:ablation} asks whether the outcome is
-explained by current error alone, the reference increment alone, or the full
-factorization. Zero padding holds policy size fixed.
+\subsection{Reliability and Tracking Fidelity}
+Improved completion is useful only if it does not replace precise tracking with
+a coarse approximation. We therefore compare each seed in a two-dimensional
+completion--fidelity plane. A model is counted as reliable only when it
+completes the defining motion event and remains below a fixed position and DoF
+velocity threshold. The thresholds are derived from the reference scale and
+fixed for all methods before the confirmatory runs. Completion without fidelity
+and fidelity without completion are reported as separate failure categories.
+
+For routine locomotion and contact motions that all methods complete, the main
+test is non-degradation of tracking quality. For Roll and Backflip, where
+failure is frequently incomplete, the primary endpoint is successful seeds and
+the secondary endpoint is tracking error among all seeds, including failures.
+This ordering prevents a failed run from disappearing from the reported error
+distribution and prevents a complete but visibly inaccurate run from being
+called reliable.
+
+\begin{table}[t]
+\caption{Joint completion and fidelity summary. Every red value is a synthetic
+layout placeholder.}
+\label{tab:joint}
+\centering\scriptsize\setlength{\tabcolsep}{2.0pt}
+\begin{tabular}{lcccc}
+\toprule
+Method & Complete & Complete + faithful & Median pos. & Worst pos.\\
+\midrule
+DeepMimic & \pnum{61\%} & \pnum{48\%} & \pnum{.078} & \pnum{.241}\\
+AMP & \pnum{58\%} & \pnum{46\%} & \pnum{.071} & \pnum{.226}\\
+ADD & \pnum{68\%} & \pnum{55\%} & \pnum{.052} & \pnum{.190}\\
+Absolute control & \pnum{70\%} & \pnum{57\%} & \pnum{.050} & \pnum{.174}\\
+DRC & \pnum{91\%} & \pnum{84\%} & \pnum{.043} & \pnum{.097}\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\placeholder{Replace Table~\ref{tab:joint} with estimates across the complete
+motion suite. Report paired confidence intervals for median and worst-seed
+errors, and identify any task on which completion improves while fidelity
+degrades.}
+
+\subsection{Computational Cost}
+DRC changes only preprocessing of the reference command. It introduces no
+additional learned network and performs only feature subtraction once per
+control step. We measure policy parameter count, batch-one inference latency,
+training throughput, and peak accelerator memory for the strict absolute and
+aligned interfaces. Throughput is averaged after simulator warm-up and excludes
+final evaluation. Latency is measured with identical devices, precision, and
+synchronization.
+
+\placeholder{Insert measured parameter count, latency, samples per second, and
+peak memory. State the paired percentage overhead rather than claiming zero
+cost from the source code alone.}
+
+\subsection{Cross-Motion Reuse}
+Eliminating handcrafted tracking rewards is meaningful only when the learned
+formulation is reused rather than retuned under another name. We therefore lock
+the discriminator architecture, feature groups, gradient-penalty coefficient,
+reward scale, PPO settings, and command preprocessing before running the motion
+suite. Each motion trains its own discriminator because it tracks a different
+reference, but all discriminators use the same objective and hyperparameters.
+The Climb environment adds the required box geometry and contact bodies without
+adding a height, clearance, hand-placement, or event reward.
+
+Hyperparameters are selected on a development motion that is excluded from the
+confirmatory reliability statistic. The same configuration is then applied to
+periodic, nonperiodic, short, long, ground-contact, and object-interaction
+motions. This protocol distinguishes a reusable learned reward from
+motion-by-motion reward search. Simulator horizons vary only when required to
+avoid truncating a longer nonperiodic clip, and are identical across methods
+within each motion.
+
+\placeholder{List every hyperparameter held common across motions and disclose
+any exception. Report the number of motion-specific reward coefficients and
+the total tuning runs for each method. If Climb requires a different global
+regularization setting, mark it explicitly rather than presenting full reuse.}
+
+\subsection{Failure-Mode Analysis}
+We retain every final seed and assign its dominant failure using fixed physical
+rules. Rotation failures are separated into insufficient signed rotation,
+incorrect direction, frequency mismatch, and terminal phase mismatch.
+Locomotion failures are separated into insufficient progress, excessive drift,
+and falls. Recovery failures distinguish failure to regain height from failure
+to regain upright pose. Climb failures identify the first missing event in the
+ordered reference sequence. This taxonomy is more informative than a binary
+success number and reveals whether a method consistently removes one shortcut
+while creating another.
+
+The learned reward is also audited independently of the actor update. For each
+motion and seed, we score synchronized reference tracking, successful policy
+trajectories, and incomplete trajectories with the frozen final discriminator.
+We report the fraction of matched time steps and complete episodes for which
+the successful behavior receives higher reward. This diagnostic separates two
+causes of failure. A discriminator that ranks incomplete behavior above the
+complete motion indicates an objective-learning failure. A discriminator that
+ranks complete behavior higher while the trained policy remains incomplete
+indicates a policy-optimization failure under the learned objective.
+
+\placeholder{Insert the failure-count matrix and frozen-discriminator ranking
+statistics. State which failures are reduced, which remain, and whether any
+failure is attributable to reward ranking rather than policy optimization.}
+
+Because discriminators are trained independently, raw logits are not compared
+across runs. Ranking is performed within the same frozen discriminator on
+matched phases. Successful and unsuccessful trajectories use the same rollout
+horizon and initial-state distribution. This restriction prevents arbitrary
+logit scale from being mistaken for a stronger reward.
+
+\section{Ablation Studies}
+The ablations test whether both residual components and their alignment are
+required. Error-only and increment-only commands remove one control role. Their
+sum keeps a one-step target but is not invertible and loses factorization. A
+shuffled invertible transform preserves information while destroying alignment
+with the discriminator residual.
+
+The absolute one-step command is the decisive control because it preserves
+the same feature map, dimensionality, lookahead, and invertible normalization.
+Comparing DRC only with the official ADD interface would conflate coordinate
+alignment with added velocity features and a different target horizon. The
+strict pair removes those explanations. Error-only, increment-only, and summed
+commands answer different mechanism questions but are not information-matched
+baselines because their transforms are not invertible.
 
 \begin{table}[t]
 \caption{Command ablation. Red values are synthetic placeholders.}
 \label{tab:ablation}
-\centering\scriptsize
-\setlength{\tabcolsep}{2.2pt}
+\centering\scriptsize\setlength{\tabcolsep}{2.2pt}
 \begin{tabular}{lccc}
 \toprule
-Command & Invertible & Roll comp. & Sideflip comp.\\
+Command & Invertible & Roll success & SpinKick $E_{\rm pos}$\\
 \midrule
-$[\vect{x},\hat{\vect{x}},\hat{\vect{x}}^+]$ & yes & \pnum{12} & \pnum{18}\\
-$[\vect{x},\vect{e},\vect{m}]$ & yes & \pnum{94} & \pnum{88}\\
-$[\vect{x},\vect{e},0]$ & no & \pnum{35} & \pnum{28}\\
-$[\vect{x},0,\vect{m}]$ & no & \pnum{22} & \pnum{20}\\
-$[\vect{x},\vect{e}+\vect{m},0]$ & no & \pnum{40} & \pnum{31}\\
+Absolute one-step & yes & \pnum{2/8} & \pnum{.034}\\
+Error only & no & \pnum{3/8} & \pnum{.041}\\
+Increment only & no & \pnum{1/8} & \pnum{.048}\\
+Summed command & no & \pnum{3/8} & \pnum{.038}\\
+Shuffled bijection & yes & \pnum{2/8} & \pnum{.036}\\
+DRC & yes & \pnum{7/8} & \pnum{.023}\\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\placeholder{Intended interpretation: neither factor alone reproduces the full
-result, and the non-invertible sum underperforms the factorized residual
-command. Keep only if supported across paired seeds.}
+The same DRC checkpoint is evaluated with $e_t$ set to zero, $m_t$ set to
+zero, and $m_t$ shuffled across reference phases. These interventions never
+enter training. Loss of recovery under zero error supports the feedback
+interpretation; loss of direction or timing under zero or shuffled increment
+supports the feedforward interpretation.
+\par\noindent\begin{minipage}{\columnwidth}
+\placeholder{Insert intervention effects on completion, tracking error, and
+action change.}
+\end{minipage}
 
-\subsection{Normalization and Feature Content}
-The theoretical comparison requires the same invertible preprocessing. We test
-shared fixed demonstration scales, independently estimated block scales, and a
-shuffled invertible control transform. The shuffled control distinguishes a
-generic change of covariance from alignment with the reward residual. We also
-remove velocity features while preserving dimensions to test whether the
-reference increment benefits primarily from rate information.
+The zero-error intervention tests nominal motion generation. If the policy
+continues to execute the correct reference rate while $e_t$ is zero, the
+increment carries a usable feedforward command. The zero-increment intervention
+tests regulation without reference advance. Phase shuffling preserves the
+marginal distribution of increments but breaks their temporal association with
+the current reference state. A large effect from shuffling, beyond the effect
+of setting the increment to its mean, shows that the actor uses phase-specific
+motion information rather than only input magnitude.
 
-\placeholder{Insert normalization and pose/velocity ablation estimates. Do not
-select the normalization after inspecting Roll completion.}
+To isolate optimization from different initial functions, we map the first
+layer of an absolute policy into residual coordinates so that action means,
+log probabilities, and critic values match numerically at initialization.
+Paired training then begins from the same policy function. \placeholder{Report
+initialization tolerance, update divergence, and final completion.} This test
+does not claim global convergence. It establishes whether an
+information-preserving coordinate change alters the finite-network PPO path
+after initial behavior is controlled.
 
-\subsection{Counterfactual Command Interventions}
-To test whether a trained policy actually uses both command factors, we evaluate
-the same checkpoint under four counterfactual inputs: $\vect{e}=0$,
-$\vect{m}=0$, a phase-shuffled $\vect{m}$, and a sign-reversed $\vect{e}$. These
-are diagnostic interventions only; they are never used for training. Removing
-$\vect{e}$ should impair recovery from tracking offsets, whereas removing or
-shuffling $\vect{m}$ should disrupt direction and timing of the nominal motion.
-A policy unaffected by either intervention would contradict the proposed
-interpretation even if its nominal tracking score were high.
+We additionally report the numerical round-trip error of
+Eq.~\eqref{eq:inverse_command}, feature-block standard deviations, actor input
+dimension, parameter count, inference latency, and peak training memory. These
+measurements verify that an observed reliability difference is not produced by
+lossy preprocessing, a wider network, or a larger simulation budget.
 
-\begin{figure}[t]
-\centering
-\begin{tikzpicture}[x=.46cm,y=.035cm,font=\scriptsize]
-\draw[->] (0,0)--(9.1,0);
-\draw[->] (0,0)--(0,108) node[above]{completion (\%)};
-\foreach \x/\h in {1/94,3/34,5/21,7/17} {
-  \fill[placeholderred!75] (\x,0) rectangle +(1.15,\h);
-}
-\node[rotate=35,anchor=east] at (1.6,-4) {nominal};
-\node[rotate=35,anchor=east] at (3.6,-4) {$e=0$};
-\node[rotate=35,anchor=east] at (5.6,-4) {$m=0$};
-\node[rotate=35,anchor=east] at (7.6,-4) {shuffle $m$};
-\draw[gray!50] (0,50)--(8.5,50); \draw[gray!50] (0,100)--(8.5,100);
-\end{tikzpicture}
-\caption{Synthetic layout placeholder for checkpoint command interventions.
-Every red bar must be replaced with measured, paired evaluations.}
-\label{fig:interventions}
-\end{figure}
-
-Beyond completion, we measure the immediate action sensitivity
-$\lVert\mu(o,e,m)-\mu(o,e',m')\rVert_2$, separated by reference phase and
-contact mode. This connects an input intervention to the policy before any
-long-horizon dynamics amplify it. We also report whether the changed action
-moves the next residual in the direction predicted by
-Eq.~\eqref{eq:closure}; this is a mechanism diagnostic, not a substitute for
-the physical completion and tracking metrics.
-
-\subsection{Optimization Diagnostics}
-We report input block correlations, the spectrum of empirical feature
-covariance, first-layer gradient norms, PPO clip fraction, and policy KL. These
-are secondary diagnostics, not performance metrics. Equation~\eqref{eq:grad}
-predicts that the coordinate transform changes the Euclidean update geometry;
-it does not predict a universal reduction in condition number.
-
-For a stronger intervention, we construct function-matched initial policies
-using $W_{\mathrm{res}}=W_{\mathrm{tar}}\bar{T}^{-1}$. The two policies then
-produce identical actions before optimization. Any subsequent divergence under
-paired batches directly demonstrates optimizer non-invariance rather than an
-initial function mismatch.
-\placeholder{Report action equality tolerance at initialization and divergence
-of paired learning trajectories.}
-
-\subsection{Function-Matched Optimization Test}
-Randomly initialized direct and residual networks need not represent the same
-initial function, even when their distributions are nominally identical. We
-therefore initialize a direct-coordinate actor and critic once, map both first
-layers through $\bar T^{-1}$, and copy every later parameter, optimizer state,
-action covariance, and normalization statistic. Before optimization, both
-models are evaluated on a fixed batch; action means, log probabilities, and
-values must agree within \pnum{$10^{-6}$}. The agents are then trained from
-paired simulator resets using their respective coordinate chart.
-
-At update zero, this construction excludes a different initial policy function
-as an explanation. After one Euclidean update, Eq.~\eqref{eq:grad} predicts
-different parameter displacements despite initially identical actions. We
-record action-distribution KL, first-layer update cosine, PPO clip fraction, and
-physical completion. The first three establish optimizer non-invariance; only
-the last establishes that the changed training path is behaviorally useful.
+\balance
+\subsection{Reward and Interface Ablations}
+The learned discriminator is replaced with the handcrafted tracking reward
+while retaining the DRC conditioning, and the learned differential reward is paired
+with the absolute command. This two-by-two comparison separates the benefit of
+removing manual scalarization from the benefit of residual-aligned policy
+conditioning. The discriminator gradient penalty is also removed using the
+same coefficient across motions, reproducing the known ADD failure mode in
+which the classifier becomes overly concentrated near zero
+~\cite{zhang2025add}.
 
 \begin{table}[t]
-\caption{Function-matched test. Red entries are synthetic layout placeholders.}
-\label{tab:functionmatched}
-\centering\scriptsize
-\setlength{\tabcolsep}{3pt}
-\begin{tabular}{lccc}
+\caption{Factorial separation of reward construction and command coordinates.
+Red entries are synthetic placeholders.}
+\label{tab:factorial}
+\centering\scriptsize\setlength{\tabcolsep}{2.4pt}
+\begin{tabular}{llccc}
 \toprule
-Quantity & Update 0 & Update 1 & Final\\
+Reward & Command & Tuned terms & Success & $E_{\rm pos}$\\
 \midrule
-Max. action-mean difference & \pnum{$7{\times}10^{-7}$} & \pnum{.004} & \pnum{.31}\\
-Mean policy KL & \pnum{$2{\times}10^{-9}$} & \pnum{$8{\times}10^{-5}$} & \pnum{.19}\\
-Direct completion (\%) & \pnum{0} & \pnum{0} & \pnum{14}\\
-Residual completion (\%) & \pnum{0} & \pnum{0} & \pnum{94}\\
+Handcrafted & Absolute & $>0$ & \pnum{3/8} & \pnum{.094}\\
+Handcrafted & Aligned & $>0$ & \pnum{5/8} & \pnum{.071}\\
+Learned differential & Absolute & 0 & \pnum{2/8} & \pnum{.082}\\
+Learned differential & Aligned & 0 & \pnum{7/8} & \pnum{.054}\\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\section{Discussion}
-\subsection{What the Coordinate Change Does}
-Learned differential rewards remove the need to manually balance many tracking
-terms, but reward automation and policy-optimization reliability are distinct
-problems. A discriminator may assign a better objective to complete tracking
-while the policy still converges to an incomplete shortcut. Our interface
-addresses this second problem by expressing the policy command in the same
-residual chart used to evaluate its next outcome.
+\placeholder{Report the two-by-two reward/interface table, including tracking
+error, completion, successful seeds, and number of tuned motion-specific
+reward coefficients. State whether alignment also benefits the handcrafted
+reward and whether the learned reward remains necessary for cross-motion
+reuse.}
 
-The method is therefore a reliability mechanism for differential tracking
-without manually weighted imitation rewards, not a new reward learner or policy
-class. Proposition~1 rules out additional information and expressive capacity
-as explanations in the matched setting. Equation~\eqref{eq:closure} provides a
-concrete reason the chart is useful: the policy need not first discover the
-subtraction connecting absolute targets to the reward residual. The transform
-can alter the inductive bias and Euclidean PPO update geometry, but only
-multi-seed success and time-to-criterion measurements determine whether this
-mechanism improves training reliability; closure alone is not a convergence
-guarantee.
-
-The size of a behavioral change need not match the apparent size of the code
-change. Contact-rich control is learned through a long sequence of coupled
-on-policy updates. A coordinate transform that changes which first-layer
-responses are easy to represent can alter the early state distribution; that
-distribution changes the discriminator's negative samples, the critic targets,
-and all later policy gradients. The intervention is small at the interface but
-its training effect is path dependent. Proposition~1 prevents attributing that
-effect to a more expressive optimal policy, while the function-matched test
-separates it from a different random initial function.
-
-\subsection{Limitations}
-Residual closure is not a stability theorem. The root is underactuated,
-contacts are hybrid and nonsmooth, and a one-step reference increment may be
-physically infeasible from an off-reference state. A generic MLP can freely mix
-$\vect{e}_t$ and $\vect{m}_t$; the terms are feedback- and feedforward-aligned
-coordinates, not identifiable controller branches. Rotation differences are
-chords in the chosen embedding, not general Lie-algebra tangents. The policy
-remains reference conditioned and does not define a reference-blind autonomous
-skill. Finally, evidence from single-motion or single-seed studies cannot
-establish a general optimization advantage; the confirmatory suite and strict
-paired protocol are essential.
-
-The equivalence theorem is conditional on access to $\vect{x}_t$ and on
-invertible preprocessing. It does not apply to an official target interface
-that omits velocity features or uses a different lookahead. Nor does it imply
-that every feature coordinate is controllable in one step: root motion is
-underactuated and contact impulses can dominate the immediate response. Our
-completion definitions are external to the learned reward, but remain
-task-specific evaluation choices and must be fixed before inspecting method
-outcomes. Finally, the present study uses one simulated humanoid and
-motion-capture references. Transfer to different morphologies, noisy state
-estimation, actuation delay, and hardware requires separate validation.
-
-Here ``without handcrafted rewards'' means that training uses no
-motion-specific weighted aggregation of pose, velocity, contact, displacement,
-or completion terms. The feature chart, discriminator regularization, global
-reward scale, reference data, and PPO hyperparameters remain design choices.
-Completion criteria are used only to evaluate reliability and never shape the
-policy reward or select a checkpoint.
+The factorial experiment also clarifies the paper's two claims. Replacing the
+handcrafted objective with the learned discriminator tests removal of manual
+reward aggregation. Replacing the absolute command with DRC tests reliable use
+of that objective. The combined method is supported only when it retains the
+first advantage and adds the second. If aligned conditioning improves both
+reward types equally, the interface remains useful but is not specific to
+learned differential rewards. If the learned reward succeeds with both command
+interfaces, the residual mechanism is unnecessary for that motion and is
+reported as such.
 
 \section{Conclusion}
-Learned differential rewards enable precise motion tracking without manually
-weighted imitation objectives, but they do not by themselves guarantee
-reliable policy learning. We introduced an information-equivalent,
-residual-closed command that aligns policy conditioning with the next error
-evaluated by the learned reward while leaving the reward, policy class, and
-reference information unchanged. \placeholder{Insert the final multi-seed
-change in successful-run rate, full-motion completion, and time to criterion,
-together with any motions on which the reliability gain does not hold.}
+Learned differential rewards remove the need to manually balance pose,
+velocity, root, and contact penalties, but a learned objective alone does not
+ensure reliable discovery of a complete dynamic motion. Differential Reference
+Conditioning expresses the reference through the current residual and the
+one-step reference increment in the same coordinates used by the learned
+reward. The command adds no reference information and satisfies an exact
+identity linking actor input, motion produced by physics, and next evaluated
+error. \placeholder{Insert the final multi-seed summary of completion
+reliability, time to success, tracking quality, and remaining failures.} The
+results will establish how far residual-aligned conditioning preserves
+reward-engineering-free tracking while making its optimization more reliable.
 
 \begin{thebibliography}{99}
-\bibitem{peng2018deepmimic}
-X.~B. Peng, P.~Abbeel, S.~Levine, and M.~van~de~Panne, ``DeepMimic: Example-guided deep reinforcement learning of physics-based character skills,'' \emph{ACM Trans. Graph.}, vol.~37, no.~4, 2018.
-
-\bibitem{ho2016gail}
-J.~Ho and S.~Ermon, ``Generative adversarial imitation learning,'' in \emph{Advances in Neural Information Processing Systems}, 2016.
-
-\bibitem{peng2021amp}
-X.~B. Peng, Z.~Ma, P.~Abbeel, S.~Levine, and A.~Kanazawa, ``AMP: Adversarial motion priors for stylized physics-based character control,'' \emph{ACM Trans. Graph.}, vol.~40, no.~4, 2021.
-
-\bibitem{zhang2025add}
-Z.~Zhang, S.~Bashkirov, D.~Yang, Y.~Shi, M.~Taylor, and X.~B. Peng, ``Physics-based motion imitation with adversarial differential discriminators,'' in \emph{SIGGRAPH Asia Conference Papers}, 2025.
-
-\bibitem{schulman2017ppo}
-J.~Schulman, F.~Wolski, P.~Dhariwal, A.~Radford, and O.~Klimov, ``Proximal policy optimization algorithms,'' arXiv:1707.06347, 2017.
-
-\bibitem{schulman2016gae}
-J.~Schulman, P.~Moritz, S.~Levine, M.~Jordan, and P.~Abbeel, ``High-dimensional continuous control using generalized advantage estimation,'' in \emph{Proc. ICLR}, 2016.
-
-\bibitem{won2020scalable}
-J.~Won, D.~Gopinath, and J.~Hodgins, ``A scalable approach to control diverse behaviors for physically simulated characters,'' \emph{ACM Trans. Graph.}, vol.~39, no.~4, 2020.
-
-\bibitem{luo2023phc}
-Z.~Luo, J.~Cao, K.~Kitani, W.~Xu, et al., ``Perpetual humanoid control for real-time simulated avatars,'' in \emph{Proc. ICCV}, 2023.
-
-\bibitem{tessler2023maskedmimic}
-C.~Tessler, Y.~Kasten, Y.~Guo, S.~Mannor, G.~Chechik, and X.~B. Peng, ``MaskedMimic: Unified physics-based character control through masked motion inpainting,'' \emph{ACM Trans. Graph.}, 2024.
-
-\bibitem{johannink2019residual}
-T.~Johannink, S.~Bahl, A.~Nair, J.~Luo, A.~Kumar, M.~Loskyll, J.~Ojea, E.~Solowjow, and S.~Levine, ``Residual reinforcement learning for robot control,'' in \emph{Proc. ICRA}, 2019.
-
-\bibitem{amari1998natural}
-S.-I. Amari, ``Natural gradient works efficiently in learning,'' \emph{Neural Computation}, vol.~10, no.~2, pp.~251--276, 1998.
-
-\bibitem{zhou2019rotation}
-Y.~Zhou, C.~Barnes, J.~Lu, J.~Yang, and H.~Li, ``On the continuity of rotation representations in neural networks,'' in \emph{Proc. CVPR}, 2019.
-
-\bibitem{grassia1998practical}
-F.~S. Grassia, ``Practical parameterization of rotations using the exponential map,'' \emph{J. Graph. Tools}, vol.~3, no.~3, pp.~29--48, 1998.
-
-\bibitem{todorov2012mujoco}
-E.~Todorov, T.~Erez, and Y.~Tassa, ``MuJoCo: A physics engine for model-based control,'' in \emph{Proc. IROS}, 2012.
-
-\bibitem{peng2022ase}
-X.~B. Peng, Y.~Guo, L.~Halper, S.~Levine, and S.~Fidler, ``ASE: Large-scale reusable adversarial skill embeddings for physically simulated characters,'' \emph{ACM Trans. Graph.}, vol.~41, no.~4, 2022.
-
-\bibitem{liu2022simpoe}
-M.~Liu, X.~Yang, and H.~Liu, ``SimPoE: Simulated character control for 3D human pose estimation,'' in \emph{Proc. CVPR}, 2022.
+\bibitem{peng2018deepmimic} X.~B. Peng, P.~Abbeel, S.~Levine, and M.~van~de~Panne, ``DeepMimic: Example-guided deep reinforcement learning of physics-based character skills,'' \emph{ACM Trans. Graph.}, vol.~37, no.~4, 2018.
+\bibitem{ho2016gail} J.~Ho and S.~Ermon, ``Generative adversarial imitation learning,'' in \emph{Advances in Neural Information Processing Systems}, 2016.
+\bibitem{peng2021amp} X.~B. Peng, Z.~Ma, P.~Abbeel, S.~Levine, and A.~Kanazawa, ``AMP: Adversarial motion priors for stylized physics-based character control,'' \emph{ACM Trans. Graph.}, vol.~40, no.~4, 2021.
+\bibitem{zhang2025add} Z.~Zhang, S.~Bashkirov, D.~Yang, Y.~Shi, M.~Taylor, and X.~B. Peng, ``Physics-based motion imitation with adversarial differential discriminators,'' in \emph{SIGGRAPH Asia Conference Papers}, 2025.
+\bibitem{schulman2017ppo} J.~Schulman, F.~Wolski, P.~Dhariwal, A.~Radford, and O.~Klimov, ``Proximal policy optimization algorithms,'' arXiv:1707.06347, 2017.
+\bibitem{schulman2016gae} J.~Schulman, P.~Moritz, S.~Levine, M.~Jordan, and P.~Abbeel, ``High-dimensional continuous control using generalized advantage estimation,'' in \emph{Proc. ICLR}, 2016.
+\bibitem{won2020scalable} J.~Won, D.~Gopinath, and J.~Hodgins, ``A scalable approach to control diverse behaviors for physically simulated characters,'' \emph{ACM Trans. Graph.}, vol.~39, no.~4, 2020.
+\bibitem{luo2023phc} Z.~Luo, J.~Cao, K.~Kitani, W.~Xu, et al., ``Perpetual humanoid control for real-time simulated avatars,'' in \emph{Proc. ICCV}, 2023.
+\bibitem{tessler2023maskedmimic} C.~Tessler, Y.~Kasten, Y.~Guo, S.~Mannor, G.~Chechik, and X.~B. Peng, ``MaskedMimic: Unified physics-based character control through masked motion inpainting,'' \emph{ACM Trans. Graph.}, 2024.
+\bibitem{johannink2019residual} T.~Johannink, S.~Bahl, A.~Nair, J.~Luo, A.~Kumar, M.~Loskyll, J.~Ojea, E.~Solowjow, and S.~Levine, ``Residual reinforcement learning for robot control,'' in \emph{Proc. ICRA}, 2019.
+\bibitem{zhou2019rotation} Y.~Zhou, C.~Barnes, J.~Lu, J.~Yang, and H.~Li, ``On the continuity of rotation representations in neural networks,'' in \emph{Proc. CVPR}, 2019.
+\bibitem{peng2022ase} X.~B. Peng, Y.~Guo, L.~Halper, S.~Levine, and S.~Fidler, ``ASE: Large-scale reusable adversarial skill embeddings for physically simulated characters,'' \emph{ACM Trans. Graph.}, vol.~41, no.~4, 2022.
 \end{thebibliography}
-
 \end{document}
