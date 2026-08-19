@@ -38,14 +38,16 @@
 \pagestyle{empty}
 
 \begin{abstract}
-Physics-based motion tracking is commonly trained with rewards that evaluate
-the difference between a simulated character and a reference motion. Learned
-differential rewards remove much of the manual weighting required by
-handcrafted objectives, but a subtle asymmetry remains: the reward is evaluated
-in residual coordinates while the policy is typically conditioned on absolute
-reference states. We study whether this coordinate choice alone changes
-learning under a finite neural policy and proximal policy optimization. We
-compare two one-step command interfaces containing exactly the same
+High-fidelity physics-based motion tracking traditionally relies on manually
+weighted pose, velocity, root, and contact objectives that must be retuned
+across skills. Learned differential rewards remove this handcrafted
+aggregation by training a discriminator to combine raw tracking errors.
+Eliminating manual reward weighting, however, does not by itself guarantee
+reliable policy learning: optimization can still converge to incomplete
+shortcuts or fail inconsistently across seeds. We study a remaining asymmetry
+at the policy--reward interface. The learned reward evaluates residual
+coordinates, while the policy is typically conditioned on absolute reference
+states. We compare two one-step command interfaces containing exactly the same
 information: an absolute representation
 $[\vect{x}_t,\hat{\vect{x}}_t,\hat{\vect{x}}_{t+1}]$ and a residual
 representation $[\vect{x}_t,\vect{e}_t,\vect{m}_t]$, where
@@ -55,8 +57,9 @@ related by an invertible linear map and therefore induce identical policy
 classes. Only the residual representation, however, closes directly under the
 reward transition:
 $\vect{e}_{t+1}=\vect{e}_t+\vect{m}_t-(\vect{x}_{t+1}-\vect{x}_t)$.
-\placeholder{Insert the final multi-seed result: completion, tracking error,
-and sample-efficiency changes on the confirmatory motion suite.}
+This change adds neither reference information nor manually weighted reward
+terms. \placeholder{Report the final multi-seed change in successful-run rate,
+full-motion completion, time to criterion, and standard tracking error.}
 \end{abstract}
 
 \section{Introduction}
@@ -72,37 +75,47 @@ terms,
 \end{equation}
 where both the component weights $w_i$ and scales $\alpha_i$ are selected by
 hand. Such rewards have enabled impressive skills~\cite{peng2018deepmimic}, but
-their performance can be sensitive to the aggregation of competing tracking
-objectives.
+each new motion may require reconsidering both the included terms and their
+relative scales. This manual aggregation is especially fragile when pose,
+velocity, global displacement, and intermittent contact compete in a highly
+dynamic motion.
 
-Adversarial Differential Discriminators (ADD) replace the manual aggregation
-with a discriminator learned on reference--policy feature differences
-\cite{zhang2025add}. The discriminator receives the ideal zero differential as
-its positive example and policy tracking differentials as negative examples.
-This provides an adaptive nonlinear scalarization while retaining precise,
-frame-synchronized tracking. Yet reward design is only one half of the control
-interface. The policy must also infer an action from its state and the desired
-reference motion. Existing controllers commonly present future target states
-in an absolute form, leaving the first layers of the policy to recover the
-error coordinates used by the reward.
+Adversarial Differential Discriminators (ADD) address this burden by replacing
+the manually weighted sum with a learned nonlinear aggregation of raw tracking
+errors~\cite{zhang2025add}. The discriminator receives one ideal zero
+differential as its positive example and policy tracking differentials as
+negative examples, dynamically balancing objectives while retaining
+frame-synchronized tracking. This is an important step toward motion tracking
+without motion-specific reward weighting. A learned reward, however, specifies
+which outcomes are desirable; it does not ensure that finite-network policy
+optimization will reliably discover the corresponding controller. ADD itself
+reports that Sideflip and Roll can converge to suboptimal behaviors; for
+Sideflip, the policy may remain standing instead of executing the flip
+\cite{zhang2025add}. This illustrates that reward automation and policy-learning
+reliability are distinct problems.
 
-This paper isolates that interface choice. In the strict causal comparison, we
-do not add reference information, change the policy class, shape the reward, or
-introduce an auxiliary objective. Instead, we express the same one-step target
-information in coordinates that close under the learned reward residual. Each
-absolute command can be reconstructed exactly from the residual command and the
-current feature state, and vice versa. The official ADD target interface is
-retained as an external baseline, but it is not used to establish this
-information-equivalence claim because its feature content and lookahead differ.
+We study this remaining reliability problem at the policy--reward interface.
+The differential reward evaluates a residual, whereas the policy is commonly
+asked to infer that residual from absolute reference states. We instead express
+the same one-step target information as the current tracking residual and the
+desired reference increment. Each absolute command can be reconstructed exactly
+from this residual command and the current feature state, and vice versa. The
+learned reward, reference information, policy class, and PPO objective are
+unchanged; no motion-specific completion or manually weighted tracking term is
+introduced. The official ADD target interface is retained as an external
+baseline, but it is not used to establish information equivalence because its
+feature content and lookahead differ.
 
-Our contributions are threefold. First, we formulate absolute and residual
-policy commands as an invertible coordinate intervention, separating
-optimization effects from additional information or capacity. Second, we
-derive an exact residual-transition identity linking the policy command, the
-action-realized feature increment, and the next differential reward. Third, we
-design a strictly paired evaluation spanning locomotion, aerial rotation,
-ground contact, recovery, and long-horizon interaction, with completion
-metrics that expose incomplete motions hidden by average tracking error.
+Our contributions are threefold. First, we identify a reliability gap that
+remains after learned differential rewards remove manual objective aggregation:
+a useful scalar reward can coexist with incomplete or seed-dependent policies.
+Second, we formulate absolute and residual policy commands as an invertible
+coordinate intervention and derive an exact transition linking the current
+error, reference increment, action-realized motion, and next reward residual.
+Third, we evaluate whether this minimal interface change improves training
+reliability across locomotion, aerial rotation, ground contact, recovery, and
+long-horizon interaction, using successful-seed rate, full-motion completion,
+time to criterion, and standard tracking errors.
 
 \begin{figure*}[t]
 \centering
@@ -138,10 +151,12 @@ coordinates under exactly matched information.
 GAIL casts imitation as adversarial occupancy matching~\cite{ho2016gail}.
 AMP learns a reusable motion prior from state transitions and is effective for
 motion style~\cite{peng2021amp}; precise synchronization, however, is not its
-primary objective. ADD instead discriminates tracking differentials and uses a
-single ideal zero vector as the positive example~\cite{zhang2025add}. Our work
-retains that learned reward and asks how the corresponding reference command
-should be presented to the policy.
+primary objective. ADD learns a nonlinear aggregation of frame-synchronized
+tracking differentials from policy errors and a single ideal zero vector,
+substantially reducing manually tuned reward aggregation~\cite{zhang2025add}.
+We do not propose another reward learner. We retain this learned objective and
+study how its command representation affects the reliability with which a
+policy can optimize it.
 
 \textbf{Relative goals and feedback coordinates.}
 Relative goal encodings are common in goal-conditioned reinforcement learning
@@ -179,7 +194,7 @@ $\phi$ extracts root pose, body configuration, and velocities:
 Rotations are represented in a fixed Euclidean embedding, so all differences
 below are taken in a shared feature chart.
 
-\subsection{Learned Differential Reward}
+\subsection{Learned Differential Reward without Manual Aggregation}
 The tracking differential is
 \begin{equation}
  \vect{\Delta}_t=\phi(\hat{\vect{s}}_t)\ominus\phi(\vect{s}_t).
@@ -201,10 +216,12 @@ The policy reward is
  =-\beta\log[1-p_\psi(\vect{\Delta}_t)].
  \label{eq:reward}
 \end{equation}
-Both compared command interfaces share this discriminator, replay,
-regularization, reward scale, and update schedule.
+This discriminator is the sole imitation objective in our method. No
+motion-specific weighted pose, velocity, contact, displacement, or completion
+term is added during training. Both command interfaces share the same
+discriminator, replay, regularization, reward scale, and update schedule.
 
-\section{Residual-Coordinate Policy Commands}
+\section{Residual-Closed Policy Commands}
 \subsection{Two Information-Matched Interfaces}
 The direct-target interface gives the policy
 \begin{equation}
@@ -298,32 +315,6 @@ shared command scale should not be confused with ADD's stock differential
 normalizer inside $d_\psi$: the two modules share the raw $\phi$ chart, while
 their numerical normalizers remain separate and identical across paired runs.
 
-\subsection{Multi-Step Commands}
-The construction extends directly to multiple future frames. For an $H$-step
-target, define
-\begin{equation}
- \vect{m}_{t,k}=\hat{\vect{x}}_{t+k+1}-\hat{\vect{x}}_{t+k},
- \qquad k=0,\ldots,H-1.
- \label{eq:multistep}
-\end{equation}
-The two commands
-\begin{align}
- \vect{z}_{t,H}^{\mathrm{tar}}
-  &=[\vect{x}_t,\hat{\vect{x}}_t,\ldots,\hat{\vect{x}}_{t+H}],\\
- \vect{z}_{t,H}^{\mathrm{res}}
-  &=[\vect{x}_t,\vect{e}_t,\vect{m}_{t,0},\ldots,\vect{m}_{t,H-1}]
- \label{eq:multiz}
-\end{align}
-remain information equivalent because
-$\hat{\vect{x}}_{t+k}=\vect{x}_t+\vect{e}_t+
-\sum_{j=0}^{k-1}\vect{m}_{t,j}$. The transform is block lower triangular with
-identity diagonal. We use $H=1$ in the primary study to isolate the smallest
-closed command and avoid conflating coordinates with extra lookahead. A matched
-$H=3$ experiment tests whether the effect persists at the horizon commonly
-used by an official target interface. Later increments do not change the
-one-step closure; they expose the desired motion beyond the next transition in
-the same chart.
-
 \subsection{Residual Closure}
 Let the realized feature increment be
 $\vect{\delta}_t=\vect{x}_{t+1}-\vect{x}_t$. Expanding the next residual gives
@@ -384,9 +375,10 @@ multiple input blocks before a feedback-like response appears.
 \draw[arr,bend right=28] (rew.south) to node[below]{PPO update} (pi.south);
 \end{tikzpicture}
 }
-\caption{Residual-coordinate control interface. The policy command and the
-post-action differential reward are closed by the exact residual transition.
-The reward, policy class, PPO objective, and reference horizon are unchanged.}
+\caption{Reliable tracking with a learned differential reward. The
+discriminator replaces manually weighted objective aggregation, while the
+residual command places policy feedback, desired motion, physical response,
+and the next scored error in one closed coordinate system.}
 \label{fig:method}
 \end{figure*}
 
@@ -427,17 +419,28 @@ $\vect{m}_t\leftarrow\hat{\vect{x}}_{t+1}-\hat{\vect{x}}_t$;\par
 \quad update $D_\psi$, $V_\omega$, and $\pi_\theta$ using the unchanged objectives;\par
 \textbf{end while}\par
 \vspace{2pt}\hrule
-\caption{The only new operation is the construction of the policy command
-$[\vect{e}_t,\vect{m}_t]$ in the same feature coordinates as the reward.}
+\caption{The learned discriminator supplies the sole imitation reward, and the
+proposed interface supplies its information-equivalent residual command.
+Physical completion measures are used only for evaluation.}
 \label{alg:main}
 \end{figure}
 
 \section{Experimental Design}
 \subsection{Research Questions and Controls}
-We ask: (Q1) Does residual conditioning improve final tracking and full-motion
-completion under strictly matched information? (Q2) Is the effect consistent
-across seeds and motions? (Q3) Do targeted coordinate ablations support the
-residual-closure interpretation?
+We ask: (Q1) Can residual-closed commands increase the probability of learning
+a complete motion under a learned differential reward and no manually weighted
+tracking terms? (Q2) Does any reliability gain persist across random seeds,
+motion classes, and contact regimes without motion-specific reward retuning?
+(Q3) Does it preserve standard position and velocity fidelity rather than
+merely satisfying a completion event? (Q4) Do information-matched and
+counterfactual controls support residual closure, rather than additional
+information or capacity, as the explanation?
+
+Reliability is measured over independent training seeds, not evaluation
+episodes. Its primary measures are successful-seed rate and failure rate under
+a pre-specified joint completion-and-fidelity criterion. Median samples to
+criterion, completion-curve area, and across-seed dispersion are secondary
+measures.
 
 The primary causal comparison changes only
 \eqref{eq:absolute} versus \eqref{eq:residual}. Environment count, physics
@@ -465,11 +468,15 @@ the statistical unit; tables report every seed, mean $\pm$ standard deviation,
 95\% intervals, and paired effect sizes.
 
 \subsection{Baselines and Ablations}
-We compare with a handcrafted DeepMimic-style reward, AMP, and ADD using its
-official target interface. The internal causal controls are the matched
-direct-target and residual-coordinate representations. Ablations retain the
-input dimension through zero padding: error-only $[\vect{x},\vect{e},0]$,
-motion-only $[\vect{x},0,\vect{m}]$, and the non-invertible summed command
+DeepMimic represents manually aggregated tracking rewards; AMP represents
+adversarial motion-distribution matching; and ADD represents learned
+frame-synchronized differential rewards with its original target interface.
+Our method retains the learned differential reward but replaces its policy
+command. The strictly matched direct-coordinate control isolates this
+coordinate effect, whereas comparisons with DeepMimic, AMP, and ADD assess
+end-to-end tracking quality and reliability. Ablations retain the input
+dimension through zero padding: error-only $[\vect{x},\vect{e},0]$, motion-only
+$[\vect{x},0,\vect{m}]$, and the non-invertible summed command
 $[\vect{x},\vect{e}+\vect{m},0]$. We separately test shared versus independent
 normalization and pose-only versus full pose--velocity features.
 
@@ -553,23 +560,23 @@ $\hat{\vect{\Omega}}=\sum_t\hat{\vect{\omega}}_t\Delta t$:
 We additionally report the root displacement ratio and survival duration;
 success requires the correct direction and a pre-specified interval around the
 reference value. Jump requires takeoff followed by a stable landing, Getup requires
-upright recovery maintained for a fixed dwell time, and Climb requires the root
-and feet to clear the final obstacle region. These definitions prevent a
+upright recovery maintained for a fixed dwell time, and Climb requires the
+pre-specified approach, top-clearance, descent, and landing event sequence.
+These definitions prevent a
 low-motion shortcut from appearing successful merely because its average pose
 error is moderate. Thresholds are fixed once for each motion and shared by all
 methods.
 
 \subsection{Statistical Analysis}
-Every training seed produces one aggregate evaluation point. We visualize all
-paired points and report the mean paired difference with a percentile bootstrap
-interval over seeds. We do not treat parallel environments or evaluation
-episodes as independent replicates. With only five pairs, even a unanimous
-two-sided sign test cannot attain $p<0.05$; therefore confirmatory significance
-claims require at least \pnum{eight paired seeds}, while smaller pilot suites are
-reported descriptively. Position and velocity are evaluated jointly with
-completion rather than selectively: a coordinate interface is considered
-successful only when it executes the complete motion without degrading the
-standard tracking measures.
+Every training seed produces one aggregate evaluation point. A run is
+successful only if it satisfies pre-specified completion and fidelity
+thresholds at the fixed sample budget. We report successful-seed rate with a
+binomial interval, all paired seed points, mean paired error differences, and
+right-censored time to criterion. Parallel environments and evaluation episodes
+are not treated as independent replicates. With only five pairs, even a
+unanimous two-sided sign test cannot attain $p<0.05$; confirmatory significance
+claims therefore require at least \pnum{eight paired seeds}, while smaller pilot
+suites are reported descriptively.
 
 \begin{table*}[t]
 \caption{Motion tracking benchmark. Published AMP, DeepMimic, and ADD values
@@ -601,6 +608,14 @@ Climb & 9.97 & .185$\pm$.021 & .066$\pm$.004 & .046$\pm$.031 & \pnum{.040$\pm$.0
 This draft reserves result slots without presenting unfinished experiments as
 evidence. Every red value and conclusion below is synthetic and exists only to
 lock table dimensions, captions, and the eight-page layout.
+
+\subsection{Tracking without Manually Weighted Rewards}
+Table~\ref{tab:benchmark} compares the learned-reward methods with handcrafted
+and adversarial baselines. The central question is not only whether the final
+checkpoint has low average error, but whether the same learned reward reliably
+produces a complete controller without motion-specific tracking terms.
+\placeholder{Insert cross-motion tracking, completion, and successful-seed
+results; do not infer reliability from single-seed runs.}
 
 \subsection{Strict Information-Matched Comparison}
 Table~\ref{tab:paired} is the primary test of the paper. It must be populated
@@ -681,17 +696,18 @@ Replace all coordinates with checkpoint evaluations; $\dagger$ is not a result.}
 \label{fig:curves}
 \end{figure}
 
-\placeholder{Planned reliability statement: residual conditioning succeeds in
-5/5 Roll seeds with a lower median sample-to-completion, whereas the matched
-direct interface succeeds in 1/5. Replace or delete after confirmatory runs.}
+\placeholder{Report successful seeds out of the pre-specified total, binomial
+intervals, median samples to the joint completion-and-fidelity criterion,
+right-censored failures, and across-seed dispersion. State whether the
+reliability gain holds broadly or only on selected dynamic motions.}
 
 At each evaluation checkpoint, we first compute an episode-level statistic and
 then average over a fixed phase grid. Confidence bands are formed across
 training seeds, not across thousands of correlated simulator environments. We
 report the area under the completion curve and the first checkpoint satisfying
-the fixed completion criterion as sample-efficiency summaries. A method that
-never reaches the criterion is right-censored rather than assigned the final
-training iteration as a fabricated success time.
+the fixed joint completion-and-fidelity criterion as sample-efficiency
+summaries. A method that never reaches this joint criterion is right-censored
+rather than assigned the final training iteration as a fabricated success time.
 
 \subsection{Tracking Accuracy Versus Completion}
 Position and DoF velocity errors quantify frame-level fidelity but do not
@@ -879,23 +895,23 @@ Residual completion (\%) & \pnum{0} & \pnum{0} & \pnum{94}\\
 
 \section{Discussion}
 \subsection{What the Coordinate Change Does}
-The proposed interface should be interpreted as a control representation, not
-a new reward or policy architecture. It supplies the policy with the current
-tracking error and reference increment in the same feature chart in which the
-next outcome is scored. Proposition~1 rules out additional information and
-expressive capacity as explanations in the idealized matched setting.
-Equation~\eqref{eq:closure} then provides a concrete reason the chart is useful:
-the policy does not need to discover the subtraction that connects absolute
-targets to the reward residual before it can represent differential feedback.
+Learned differential rewards remove the need to manually balance many tracking
+terms, but reward automation and policy-optimization reliability are distinct
+problems. A discriminator may assign a better objective to complete tracking
+while the policy still converges to an incomplete shortcut. Our interface
+addresses this second problem by expressing the policy command in the same
+residual chart used to evaluate its next outcome.
 
-This distinction matters for learned rewards. A discriminator may provide a
-useful scalar objective while policy optimization still fails to discover a
-controller that executes the full motion. Changing the command chart can alter
-the implicit metric and inductive bias of a finite optimizer without changing
-which policies are representable or which trajectory is globally optimal.
-The contribution is therefore a controlled study of the policy--reward
-interface, rather than a claim that residual coordinates solve exploration in
-general.
+The method is therefore a reliability mechanism for differential tracking
+without manually weighted imitation rewards, not a new reward learner or policy
+class. Proposition~1 rules out additional information and expressive capacity
+as explanations in the matched setting. Equation~\eqref{eq:closure} provides a
+concrete reason the chart is useful: the policy need not first discover the
+subtraction connecting absolute targets to the reward residual. The transform
+can alter the inductive bias and Euclidean PPO update geometry, but only
+multi-seed success and time-to-criterion measurements determine whether this
+mechanism improves training reliability; closure alone is not a convergence
+guarantee.
 
 The size of a behavioral change need not match the apparent size of the code
 change. Contact-rich control is learned through a long sequence of coupled
@@ -930,39 +946,22 @@ outcomes. Finally, the present study uses one simulated humanoid and
 motion-capture references. Transfer to different morphologies, noisy state
 estimation, actuation delay, and hardware requires separate validation.
 
-\subsection{Implications for Robot Learning}
-Many robot-learning systems specify goals in one representation but evaluate
-behavior in another. The present analysis suggests a simple design question:
-can the command be expressed in coordinates that close under the task residual
-without adding information? This principle may apply to end-effector tracking,
-legged-locomotion commands, visual servoing, and model-predictive residuals.
-Those extensions require task-specific feature charts and remain future work.
-
-\subsection{Computational Cost and Reproducibility}
-The command construction uses only feature subtraction and fixed diagonal
-scaling. It adds no learned parameters and requires no additional simulator
-steps. We nevertheless report environment throughput, policy latency, and peak
-memory for both representations. The release will include the feature ordering,
-frozen scales, inverse-transform unit test, paired seed list, final-checkpoint
-evaluator, and scripts that regenerate every table and curve.
-\placeholder{Insert measured throughput, latency, memory, and artifact URL.}
+Here ``without handcrafted rewards'' means that training uses no
+motion-specific weighted aggregation of pose, velocity, contact, displacement,
+or completion terms. The feature chart, discriminator regularization, global
+reward scale, reference data, and PPO hyperparameters remain design choices.
+Completion criteria are used only to evaluate reliability and never shape the
+policy reward or select a checkpoint.
 
 \section{Conclusion}
-We study the coordinate interface between a reference-conditioned policy and a
-learned differential tracking reward. Absolute and residual one-step commands
-contain exactly the same information and support the same policy class, but the
-residual command obeys an exact post-action closure identity with the reward.
-This yields a minimal intervention for testing how representation shapes finite
-policy optimization.
-\placeholder{Replace with the final quantitative conclusion across motions and
-seeds, including any negative or mixed result.}
-
-\section*{Acknowledgment and AI-Use Disclosure}
-This anonymous draft contains no identifying acknowledgment. A generative AI
-assistant was used to help structure and edit prose and LaTeX; all scientific
-claims, equations, citations, and experimental results are to be verified and
-approved by the authors. This disclosure will be updated to match the final
-ICRA policy and actual use.
+Learned differential rewards enable precise motion tracking without manually
+weighted imitation objectives, but they do not by themselves guarantee
+reliable policy learning. We introduced an information-equivalent,
+residual-closed command that aligns policy conditioning with the next error
+evaluated by the learned reward while leaving the reward, policy class, and
+reference information unchanged. \placeholder{Insert the final multi-seed
+change in successful-run rate, full-motion completion, and time to criterion,
+together with any motions on which the reliability gain does not hold.}
 
 \begin{thebibliography}{99}
 \bibitem{peng2018deepmimic}
