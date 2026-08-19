@@ -14,6 +14,7 @@ if str(MIMICKIT) not in sys.path:
     sys.path.insert(0, str(MIMICKIT))
 
 import learning.base_agent as base_agent
+import learning.amp_agent as amp_agent
 import learning.experience_buffer as experience_buffer
 import learning.mp_optimizer as mp_optimizer
 import learning.ppo_agent as ppo_agent
@@ -85,6 +86,45 @@ def test_replay_push_over_capacity_and_round_trip():
     assert torch.equal(restored.get_data("disc_obs"),
                        buffer.get_data("disc_obs"))
     assert torch.equal(restored._sample_buf, buffer._sample_buf)
+
+
+def test_amp_demo_observations_are_filled_in_bounded_chunks():
+    class _DemoEnv:
+        def __init__(self):
+            self.calls = []
+            self.offset = 0
+
+        def fetch_disc_obs_demo(self, n):
+            self.calls.append(n)
+            out = torch.arange(
+                self.offset, self.offset + 2 * n,
+                dtype=torch.float32).view(n, 2)
+            self.offset += 2 * n
+            return out
+
+    class _Recorder:
+        def __init__(self):
+            self.chunks = []
+
+        def record(self, data):
+            self.chunks.append(data.clone())
+
+    agent = object.__new__(amp_agent.AMPAgent)
+    agent._disc_demo_batch_size = 3
+    agent._env = _DemoEnv()
+    agent._disc_obs_norm = _Recorder()
+    agent._exp_buffer = experience_buffer.ExperienceBuffer(
+        buffer_length=5, batch_size=2, device="cpu")
+    agent._exp_buffer.add_buffer(
+        "disc_obs", data_shape=(2,), dtype=torch.float32)
+
+    agent._record_disc_demo_data()
+
+    assert agent._env.calls == [3, 3, 3, 1]
+    expected = torch.arange(20, dtype=torch.float32).view(10, 2)
+    assert torch.equal(
+        agent._exp_buffer.get_data_flat("disc_obs_demo"), expected)
+    assert torch.equal(torch.cat(agent._disc_obs_norm.chunks), expected)
 
 
 def test_full_checkpoint_restores_training_state_and_keeps_model_compatible(

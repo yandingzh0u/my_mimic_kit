@@ -162,6 +162,8 @@ def test_serial_launcher_syntax_and_contract():
     assert "methods=(deepmimic amp add residual)" in text
     assert "--resume_file" in text
     assert "checkpoint.pt" in text
+    assert "checkpoint_reached_budget" in text
+    assert "FAILED_BUDGET_CHECK" in text
     assert "tools/paper_eval/evaluate_checkpoint.py" in text
     assert "torch.cuda.is_available()" in text
     assert "torch.cuda.device_count()" in text

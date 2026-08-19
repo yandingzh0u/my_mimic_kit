@@ -218,6 +218,41 @@ wait_for_existing_training() {
   done
 }
 
+checkpoint_reached_budget() {
+  local checkpoint_file="$1"
+  local target_samples="$2"
+  "$python_bin" - "$checkpoint_file" "$target_samples" <<'PY'
+import sys
+import torch
+
+checkpoint_file = sys.argv[1]
+target_samples = int(sys.argv[2])
+try:
+    checkpoint = torch.load(
+        checkpoint_file,
+        map_location="cpu",
+        weights_only=False,
+        mmap=True,
+    )
+    actual_samples = int(checkpoint["trainer_state"]["sample_count"])
+except Exception as exc:
+    print(
+        f"ERROR: unable to validate checkpoint budget for "
+        f"{checkpoint_file}: {exc}",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+if actual_samples < target_samples:
+    print(
+        f"ERROR: checkpoint {checkpoint_file} contains {actual_samples} "
+        f"samples, below target {target_samples}.",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+PY
+}
+
 run_job() {
   local stage="$1"
   local method="$2"
@@ -253,10 +288,16 @@ run_job() {
   local eval_dir="$out_dir/eval/$eval_name"
   local eval_summary="$eval_dir/summary.json"
   if [[ -f "$done_file" && -s "$eval_summary" ]]; then
-    printf '[%s] SKIP %s/%s/%s (DONE)\n' \
-      "$(date --iso-8601=seconds)" "$stage" "$method" "$motion"
-    append_event "$stage" "$method" "$motion" "SKIPPED_DONE" "$out_dir"
-    return 0
+    if checkpoint_reached_budget "$checkpoint_file" "$max_samples"; then
+      printf '[%s] SKIP %s/%s/%s (DONE)\n' \
+        "$(date --iso-8601=seconds)" "$stage" "$method" "$motion"
+      append_event "$stage" "$method" "$motion" "SKIPPED_DONE" "$out_dir"
+      return 0
+    fi
+    append_event "$stage" "$method" "$motion" "INVALID_DONE" "$out_dir" \
+      "checkpoint below target; resuming"
+    printf '[%s] INVALID DONE %s/%s/%s; checkpoint is below budget, resuming\n' \
+      "$(date --iso-8601=seconds)" "$stage" "$method" "$motion" >&2
   fi
 
   local -a resume_args=()
@@ -305,6 +346,18 @@ run_job() {
     printf 'ERROR: %s/%s/%s exited 0 but required artifacts are missing\n' \
       "$stage" "$method" "$motion" >&2
     return 4
+  fi
+
+  # Isaac Sim can occasionally terminate after printing a Python traceback
+  # while still returning a successful process status during plugin teardown.
+  # Never evaluate or mark a job DONE unless the full training checkpoint
+  # itself proves that the requested physics-sample budget was reached.
+  if ! checkpoint_reached_budget "$checkpoint_file" "$max_samples"; then
+    append_event "$stage" "$method" "$motion" "FAILED_BUDGET_CHECK" \
+      "$out_dir" "checkpoint below target after trainer exit"
+    printf 'ERROR: %s/%s/%s exited before reaching its sample budget\n' \
+      "$stage" "$method" "$motion" >&2
+    return 6
   fi
 
   # Every smoke also loads its checkpoint through the shared evaluator for two

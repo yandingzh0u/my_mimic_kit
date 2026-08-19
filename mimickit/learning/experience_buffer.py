@@ -74,6 +74,9 @@ class ExperienceBuffer():
 
     def get_data_flat(self, name):
         return self._flat_buffers[name]
+
+    def has_buffer(self, name):
+        return name in self._buffers
     
     def set_data(self, name, data):
         assert(data.shape[0] == self._buffer_length)

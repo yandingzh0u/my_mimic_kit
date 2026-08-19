@@ -23,6 +23,13 @@ class AMPAgent(ppo_agent.PPOAgent):
         self._disc_grad_penalty = config["disc_grad_penalty"]
         self._disc_reward_scale = config["disc_reward_scale"]
         self._disc_eval_batch_size = int(config.get("disc_eval_batch_size", 0))
+        # Building all demonstration observations for an 8192-env rollout in
+        # one call creates a second, very large temporary tensor (especially
+        # for AMP's multi-frame discriminator).  Fill the already allocated
+        # rollout buffer in bounded chunks instead.  This changes neither the
+        # sampled distribution nor the discriminator minibatches.
+        self._disc_demo_batch_size = int(
+            config.get("disc_demo_batch_size", 8192))
 
         self._task_reward_weight = config["task_reward_weight"]
         self._disc_reward_weight = config["disc_reward_weight"]
@@ -92,9 +99,25 @@ class AMPAgent(ppo_agent.PPOAgent):
         disc_obs = self._exp_buffer.get_data_flat("disc_obs")
         n = disc_obs.shape[0]
 
-        disc_obs_demo = self._env.fetch_disc_obs_demo(n)
-        self._exp_buffer.set_data_flat("disc_obs_demo", disc_obs_demo)
-        self._disc_obs_norm.record(disc_obs_demo)
+        chunk_size = self._disc_demo_batch_size
+        if (chunk_size <= 0):
+            chunk_size = n
+
+        demo_buffer = None
+        for start in range(0, n, chunk_size):
+            end = min(start + chunk_size, n)
+            disc_obs_demo = self._env.fetch_disc_obs_demo(end - start)
+
+            if (demo_buffer is None):
+                if (not self._exp_buffer.has_buffer("disc_obs_demo")):
+                    self._exp_buffer.add_buffer(
+                        "disc_obs_demo", disc_obs_demo.shape[1:],
+                        disc_obs_demo.dtype)
+                demo_buffer = self._exp_buffer.get_data_flat(
+                    "disc_obs_demo")
+
+            demo_buffer[start:end].copy_(disc_obs_demo)
+            self._disc_obs_norm.record(disc_obs_demo)
         return
 
     def _store_disc_replay_data(self):
