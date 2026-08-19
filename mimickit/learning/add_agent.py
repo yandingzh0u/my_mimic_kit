@@ -87,7 +87,6 @@ class ADDAgent(amp_agent.AMPAgent):
 
         pos_diff = self._pos_diff.clone()
         pos_diff = pos_diff.unsqueeze(dim=0)
-        pos_diff.requires_grad_(True)
         disc_pos_logit = self._model.eval_disc(pos_diff)
         disc_pos_logit = disc_pos_logit.squeeze(-1)
         
@@ -120,12 +119,10 @@ class ADDAgent(amp_agent.AMPAgent):
         disc_neg_grad = disc_neg_grad[0]
         disc_neg_grad_squared = torch.sum(torch.square(disc_neg_grad), dim=-1)
 
-        disc_pos_grad = torch.autograd.grad(disc_pos_logit, pos_diff, grad_outputs=torch.ones_like(disc_pos_logit),
-                                             create_graph=True, retain_graph=True, only_inputs=True)
-        disc_pos_grad = disc_pos_grad[0]
-        disc_pos_grad_squared = torch.sum(torch.square(disc_pos_grad), dim=-1)
-
-        disc_grad_penalty = 0.5 * (torch.mean(disc_neg_grad_squared) + torch.mean(disc_pos_grad_squared))
+        # ADD has only one positive sample (the zero differential), so its
+        # gradient penalty is applied to policy-generated negative samples.
+        # This follows Eq. (9) and Sec. 5 of the published ADD formulation.
+        disc_grad_penalty = torch.mean(disc_neg_grad_squared)
         disc_loss += self._disc_grad_penalty * disc_grad_penalty
         
         disc_neg_acc, disc_pos_acc = self._compute_disc_acc(disc_neg_logit, disc_pos_logit)

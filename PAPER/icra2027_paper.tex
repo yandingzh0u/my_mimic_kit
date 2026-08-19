@@ -356,7 +356,8 @@ in a discriminator replay buffer. PPO~\cite{schulman2017ppo} updates the policy,
 advantages are computed with GAE~\cite{schulman2016gae}, and TD targets update
 the value function. The discriminator is updated with
 Eq.~\eqref{eq:disc_objective}. All three models are initialized and optimized
-jointly in a single training run.
+jointly in a single training run. A fixed $\ell_2$ regularizer on the final
+logit weights is shared across all motions and command representations.
 The action at time $t$ produces $s_{t+1}$; consequently the transition reward
 is evaluated from the synchronized next-frame differential $\Delta_{t+1}$.
 
