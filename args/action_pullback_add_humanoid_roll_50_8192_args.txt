@@ -1,0 +1,12 @@
+--mode train
+--num_envs 8192
+--devices cuda:0
+--engine_config data/engines/isaac_lab_engine.yaml
+--env_config data/envs/action_pullback_add_humanoid_roll_env.yaml
+--agent_config data/agents/action_pullback_add_humanoid_agent.yaml
+--max_samples 13107200
+--out_dir output/action_pullback_add_roll_50_8192_seed0
+--rand_seed 0
+--visualize false
+--save_int_models false
+--logger txt

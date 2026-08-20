@@ -38,6 +38,10 @@ def build_agent(agent_file, env, device):
     elif (agent_name == "RCCI_ADD"):
         import learning.rcci_add_agent as rcci_add_agent
         agent = rcci_add_agent.RCCIADDAgent(config=agent_config, env=env, device=device)
+    elif (agent_name == "ACTION_PULLBACK_ADD"):
+        import learning.action_pullback_add_agent as action_pullback_add_agent
+        agent = action_pullback_add_agent.ActionPullbackADDAgent(
+            config=agent_config, env=env, device=device)
     elif (agent_name == "LCP"):
         import learning.lcp_agent as lcp_agent
         agent = lcp_agent.LCPAgent(config=agent_config, env=env, device=device)
