@@ -1,0 +1,9 @@
+--num_envs 8192
+--engine_config data/engines/isaac_lab_engine.yaml
+--env_config data/envs/anchored_energy_humanoid_roll_env.yaml
+--agent_config data/agents/anchored_energy_add_humanoid_agent.yaml
+--max_samples 524288000
+--out_dir output/anchored_energy_roll_2k_8192_seed0
+--rand_seed 0
+--visualize false
+--save_int_models true

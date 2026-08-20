@@ -140,6 +140,8 @@ def infer_method(
         return "AMP"
     if agent_name == "ADD":
         return "ADD"
+    if agent_name == "ANCHORED_ENERGY_ADD":
+        return "AnchoredEnergy"
     if agent_name in ("RCCI_ADD", "ALIGNED_ADD"):
         return "RCCI" if agent_name == "RCCI_ADD" else "AlignedADD"
     return agent_name or env_name or "unknown"
@@ -497,8 +499,14 @@ def intervene_observation(
     return result
 
 
-def _policy_reward(agent, info, env_reward: torch.Tensor) -> torch.Tensor:
+def _policy_reward(
+    agent, obs, info, env_reward: torch.Tensor
+) -> torch.Tensor:
     """Reconstruct the reward optimized by each method for diagnostics only."""
+
+    if hasattr(agent, "calc_policy_reward_from_transition"):
+        return agent.calc_policy_reward_from_transition(
+            obs=obs, next_info=info, env_reward=env_reward)
 
     if not hasattr(agent, "_calc_disc_rewards") or "disc_obs" not in info:
         return env_reward
@@ -736,7 +744,8 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
                 )
                 action = torch.where(active_before.unsqueeze(-1), action, torch.zeros_like(action))
                 obs, env_reward, done, info = env.step(action)
-                policy_reward = _policy_reward(agent, info, env_reward)
+                policy_reward = _policy_reward(
+                    agent, nominal_obs, info, env_reward)
 
                 sim = _query_sim(env)
                 ref = _query_reference(env)

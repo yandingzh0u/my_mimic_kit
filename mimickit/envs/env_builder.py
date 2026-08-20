@@ -29,6 +29,9 @@ def build_env(env_file, engine_file, num_envs, device, visualize, record_video=F
     elif (env_name == "aligned_add"):
         import envs.aligned_add_env as aligned_add_env
         env = aligned_add_env.AlignedADDEnv(env_config=env_config, engine_config=engine_config, num_envs=num_envs, device=device, visualize=visualize, record_video=record_video)
+    elif (env_name == "anchored_energy"):
+        import envs.anchored_energy_env as anchored_energy_env
+        env = anchored_energy_env.AnchoredEnergyEnv(env_config=env_config, engine_config=engine_config, num_envs=num_envs, device=device, visualize=visualize, record_video=record_video)
     elif (env_name == "rcci_add"):
         import envs.rcci_add_env as rcci_add_env
         env = rcci_add_env.RCCIADDEnv(env_config=env_config, engine_config=engine_config, num_envs=num_envs, device=device, visualize=visualize, record_video=record_video)
