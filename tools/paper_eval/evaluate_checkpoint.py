@@ -497,8 +497,22 @@ def intervene_observation(
     return result
 
 
-def _policy_reward(agent, info, env_reward: torch.Tensor) -> torch.Tensor:
+def _policy_reward(
+    agent,
+    obs: torch.Tensor,
+    info,
+    env_reward: torch.Tensor,
+) -> torch.Tensor:
     """Reconstruct the reward optimized by each method for diagnostics only."""
+
+    transition_reward = getattr(
+        agent, "calc_policy_reward_from_transition", None
+    )
+    if callable(transition_reward):
+        # Transition-conditioned rewards require the raw pre-step observation
+        # together with post-step info. Normalizing or replacing ``obs`` here
+        # would break exact reconstruction of (x_t, x_{t+1}).
+        return transition_reward(obs, info, env_reward)
 
     if not hasattr(agent, "_calc_disc_rewards") or "disc_obs" not in info:
         return env_reward
@@ -736,7 +750,9 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
                 )
                 action = torch.where(active_before.unsqueeze(-1), action, torch.zeros_like(action))
                 obs, env_reward, done, info = env.step(action)
-                policy_reward = _policy_reward(agent, info, env_reward)
+                policy_reward = _policy_reward(
+                    agent, nominal_obs, info, env_reward
+                )
 
                 sim = _query_sim(env)
                 ref = _query_reference(env)

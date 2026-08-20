@@ -1,0 +1,70 @@
+agent_name: "PHASE_TRANSITION_CRITIC"
+
+model:
+  actor_net: "fc_2layers_1024units"
+  actor_init_output_scale: 0.01
+  actor_std_type: "FIXED"
+  action_std: 0.05
+
+  critic_net: "fc_2layers_1024units"
+  disc_net: "fc_2layers_1024units"
+  transition_init_output_scale: 0.01
+
+actor_optimizer:
+  type: "SGD"
+  learning_rate: 1e-4
+
+critic_optimizer:
+  type: "SGD"
+  learning_rate: 1e-4
+
+disc_optimizer:
+  type: "Adam"
+  learning_rate: 1e-4
+  betas: [0.0, 0.9]
+  weight_decay: 0.0
+  grad_clip: 10.0
+
+discount: 0.99
+steps_per_iter: 32
+iters_per_output: 100
+test_episodes: 32
+normalizer_samples: 100000000
+use_mixed_precision: false
+
+actor_epochs: 5
+actor_batch_size: 4
+critic_epochs: 2
+critic_batch_size: 2
+# One epoch covers every fresh rollout transition once.  The critic already
+# evaluates both policy and wrong-phase fakes and applies two second-order GP
+# terms per batch, so duplicating the epoch would over-update it relative to
+# PPO and double the dominant cost.
+disc_epochs: 1
+disc_batch_size: 1
+
+td_lambda: 0.95
+ppo_clip_ratio: 0.2
+norm_adv_clip: 4.0
+action_bound_weight: 10.0
+action_entropy_weight: 0.0
+action_reg_weight: 0.0
+
+disc_buffer_size: 200000
+disc_replay_samples: 1000
+disc_logit_reg: 0.0
+disc_grad_penalty: 10.0
+disc_reward_scale: 2.0
+disc_eval_batch_size: 8192
+
+transition_gp_target: 1.0
+# Null selects sqrt(2 * phi_dim), matching the RMS scale of the two residual
+# blocks without a motion-specific tuned constant.
+transition_reward_tau: null
+transition_input_clip: 10.0
+transition_private_seed: 918273
+phase_shuffle_min_distance: 0.1
+phase_shuffle_min_rms: 0.001
+
+task_reward_weight: 0.0
+disc_reward_weight: 1.0

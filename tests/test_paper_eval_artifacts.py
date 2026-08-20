@@ -12,6 +12,7 @@ from tools.paper_eval.aggregate_results import (
 )
 from tools.paper_eval.evaluate_checkpoint import (
     _input_geometry_blocks,
+    _policy_reward,
     infer_checkpoint_metadata,
     intervene_observation,
     parse_training_log,
@@ -89,6 +90,32 @@ def test_residual_command_interventions_modify_only_declared_block(layout, condi
 def test_nonresidual_method_rejects_interventions():
     with pytest.raises(ValueError, match="requires a residual"):
         intervene_observation(torch.zeros(2, 4), "zero_e", "none", 0, 0)
+
+
+def test_policy_reward_prefers_exact_transition_reconstruction():
+    class TransitionRewardAgent:
+        def __init__(self):
+            self.call = None
+
+        def calc_policy_reward_from_transition(self, obs, info, env_reward):
+            self.call = (obs, info, env_reward)
+            return env_reward + 7.0
+
+        def _calc_disc_rewards(self, *_args, **_kwargs):
+            raise AssertionError("legacy context-free reward must not be used")
+
+    agent = TransitionRewardAgent()
+    obs = torch.tensor([[1.0, 2.0]])
+    info = {
+        "disc_obs": torch.tensor([[3.0]]),
+        "disc_obs_demo": torch.tensor([[4.0]]),
+    }
+    env_reward = torch.tensor([0.5])
+    result = _policy_reward(agent, obs, info, env_reward)
+    assert torch.equal(result, torch.tensor([7.5]))
+    assert agent.call[0] is obs
+    assert agent.call[1] is info
+    assert agent.call[2] is env_reward
 
 
 def test_input_geometry_reports_rank_condition_and_paired_correlation():

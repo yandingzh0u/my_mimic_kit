@@ -80,7 +80,15 @@ class MPOptimizer():
         if (optimizer_type == "SGD"):
             optimizer = torch.optim.SGD(param_list, lr, momentum=0.9, weight_decay=weight_decay)
         elif (optimizer_type == "Adam"):
-            optimizer = torch.optim.AdamW(param_list, lr, weight_decay=weight_decay)
+            betas = config.get("betas", (0.9, 0.999))
+            if (not isinstance(betas, (list, tuple)) or len(betas) != 2):
+                raise ValueError("Adam betas must contain exactly two values")
+            betas = (float(betas[0]), float(betas[1]))
+            if (not 0.0 <= betas[0] < 1.0
+                    or not 0.0 <= betas[1] < 1.0):
+                raise ValueError("Adam betas must lie in [0, 1)")
+            optimizer = torch.optim.AdamW(
+                param_list, lr, betas=betas, weight_decay=weight_decay)
         else:
             assert(False), "Unsupported optimizer type: " + optimizer_type
         return optimizer

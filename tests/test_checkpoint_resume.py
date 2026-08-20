@@ -67,6 +67,25 @@ def _config():
     }
 
 
+def test_mp_optimizer_accepts_explicit_adam_betas():
+    parameter = torch.nn.Parameter(torch.tensor([1.0]))
+    optimizer = mp_optimizer.MPOptimizer(
+        {
+            "type": "Adam",
+            "learning_rate": 1e-3,
+            "betas": [0.0, 0.9],
+        },
+        [parameter],
+    )
+    assert optimizer._optimizer.param_groups[0]["betas"] == (0.0, 0.9)
+
+    with pytest.raises(ValueError, match="exactly two"):
+        mp_optimizer.MPOptimizer(
+            {"type": "Adam", "learning_rate": 1e-3, "betas": [0.9]},
+            [parameter],
+        )
+
+
 def test_replay_push_over_capacity_and_round_trip():
     buffer = experience_buffer.ExperienceBuffer(
         buffer_length=5, batch_size=1, device="cpu")
