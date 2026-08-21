@@ -1,0 +1,304 @@
+Setting seed: 0.0
+Building aligned_add env
+[INFO][AppLauncher]: Using device: cuda:0
+[INFO][AppLauncher]: Loading experience file: /home/y/IsaacLab/apps/isaaclab.python.headless.kit
+Loading user config located at: '/home/y/miniconda3/envs/env_isaaclab/lib/python3.11/site-packages/isaacsim/kit/data/Kit/Isaac-Sim/5.1/user.config.json'
+[Info] [carb] Logging to file: /home/y/miniconda3/envs/env_isaaclab/lib/python3.11/site-packages/isaacsim/kit/logs/Kit/Isaac-Sim/5.1/kit_20260821_190017.log
+2026-08-21T11:00:17Z [2ms] [Warning] [omni.ext.plugin] [ext: isaaclab_contrib] Extensions config 'extension.toml' doesn't exist '/home/y/IsaacLab/source/isaaclab_contrib' or '/home/y/IsaacLab/source/isaaclab_contrib/config'
+2026-08-21T11:00:17Z [72ms] [Warning] [omni.usd_config.extension] Enable omni.materialx.libs extension to use MaterialX
+2026-08-21T11:00:17Z [407ms] [Warning] [carb] Acquiring non optional plugin interface which is not listed as dependency: [omni::physx::IPhysxBenchmarks v1.0] (plugin: <default plugin>), by client: omni.physics.physx.plugin. Add it to CARB_PLUGIN_IMPL_DEPS() macro of a client.
+2026-08-21T11:00:17Z [551ms] [Warning] [omni.isaac.dynamic_control] omni.isaac.dynamic_control is deprecated as of Isaac Sim 4.5. No action is needed from end-users.
+2026-08-21T11:00:19Z [1,949ms] [Warning] [gpu.foundation.plugin] Skipping unsupported non-NVIDIA GPU: Intel(R) UHD Graphics 770 (ADL-S GT1)
+2026-08-21T11:00:19Z [1,950ms] [Warning] [gpu.foundation.plugin] Skipping unsupported non-NVIDIA GPU: Intel(R) UHD Graphics 770 (ADL-S GT1)
+
+|---------------------------------------------------------------------------------------------|
+| Driver Version: 580.173.02    | Graphics API: Vulkan
+|=============================================================================================|
+| GPU | Name                             | Active | LDA | GPU Memory | Vendor-ID | LUID       |
+|     |                                  |        |     |            | Device-ID | UUID       |
+|     |                                  |        |     |            | Bus-ID    |            |
+|---------------------------------------------------------------------------------------------|
+| 0   | NVIDIA GeForce RTX 5080          | Yes: 0 |     | 16303   MB | 10de      | 0          |
+|     |                                  |        |     |            | 2c02      | e16ebef7.. |
+|     |                                  |        |     |            | 1         |            |
+|---------------------------------------------------------------------------------------------|
+| 1   | Intel(R) UHD Graphics 770 (ADL.. |        |     | 48013   MB | 8086      | 0          |
+|     |                                  |        |     |            | 4680      | 86808046.. |
+|     |                                  |        |     |            | 0         |            |
+|=============================================================================================|
+| OS: 22.04.5 LTS (Jammy Jellyfish) ubuntu, Version: 22.04.5, Kernel: 6.8.0-136-generic
+| XServer Vendor: The X.Org Foundation, XServer Version: 12101004 (1.21.1.4)
+| Processor: 12th Gen Intel(R) Core(TM) i9-12900K
+| Bare Metal Cores: 16 | Bare Metal Logical Cores: 32
+| Available Cores:  24 
+|---------------------------------------------------------------------------------------------|
+| Total Memory (MB): 64017 | Free Memory: 51990
+| Total Page/Swap (MB): 2047 | Free Page/Swap: 2015
+|---------------------------------------------------------------------------------------------|
+2026-08-21T11:00:19Z [2,267ms] [Warning] [gpu.foundation.plugin] CPU performance profile is set to powersave. This profile sets the CPU to the lowest frequency reducing performance.
+2026-08-21T11:00:19Z [2,269ms] [Warning] [gpu.foundation.plugin] PCIe link width current (1) and maximum (16) for device 0 don't match.
+2026-08-21T11:00:19Z [2,269ms] [Warning] [gpu.foundation.plugin] IOMMU is enabled.
+2026-08-21T11:00:19Z [2,269ms] [Warning] [gpu.foundation.plugin] Detected IOMMU is enabled. Running CUDA peer-to-peer bandwidth and latency validation.
+Unidirectional P2P=Enabled Bandwidth (P2P Writes) Matrix (GB/s)
+   D\D     0 
+     0 818.92 
+P2P=Enabled Latency (P2P Writes) Matrix (us)
+   GPU     0 
+     0   2.33 
+
+   CPU     0 
+     0   1.61 
+[INFO] IsaacLab logging to file: /tmp/isaaclab_2026-08-21_19-00-19.log
+Building 1/64 envsBuilding 2/64 envsBuilding 3/64 envsBuilding 4/64 envsBuilding 5/64 envsBuilding 6/64 envsBuilding 7/64 envsBuilding 8/64 envsBuilding 9/64 envsBuilding 10/64 envsBuilding 11/64 envsBuilding 12/64 envsBuilding 13/64 envsBuilding 14/64 envsBuilding 15/64 envsBuilding 16/64 envsBuilding 17/64 envsBuilding 18/64 envsBuilding 19/64 envsBuilding 20/64 envsBuilding 21/64 envsBuilding 22/64 envsBuilding 23/64 envsBuilding 24/64 envsBuilding 25/64 envsBuilding 26/64 envsBuilding 27/64 envsBuilding 28/64 envsBuilding 29/64 envsBuilding 30/64 envsBuilding 31/64 envsBuilding 32/64 envsBuilding 33/64 envsBuilding 34/64 envsBuilding 35/64 envsBuilding 36/64 envsBuilding 37/64 envsBuilding 38/64 envsBuilding 39/64 envsBuilding 40/64 envsBuilding 41/64 envsBuilding 42/64 envsBuilding 43/64 envsBuilding 44/64 envsBuilding 45/64 envsBuilding 46/64 envsBuilding 47/64 envsBuilding 48/64 envsBuilding 49/64 envsBuilding 50/64 envsBuilding 51/64 envsBuilding 52/64 envsBuilding 53/64 envsBuilding 54/64 envsBuilding 55/64 envsBuilding 56/64 envsBuilding 57/64 envsBuilding 58/64 envsBuilding 59/64 envsBuilding 60/64 envsBuilding 61/64 envsBuilding 62/64 envsBuilding 63/64 envsBuilding 64/64 envs
+
+Loading 1/1 motion files: data/motions/humanoid/humanoid_roll.pkl
+Loaded motion file: data/motions/humanoid/humanoid_roll.pkl
+Loaded 1 motions with a total length of 2.000s.
+Building Obj:0 in 64/64 envs
+Initializing simulation...
+Char 0 properties
+	DoFs: 28
+	Mass: 50.050 kg
+
+Building RAY_ORDINAL_ALIGNED_ADD agent
+/home/y/miniconda3/envs/env_isaaclab/lib/python3.11/site-packages/requests/__init__.py:113: RequestsDependencyWarning: urllib3 (2.6.3) or chardet (7.4.3)/charset_normalizer (3.3.2) doesn't match a supported version!
+  warnings.warn(
+Total parameter count: 2760222
+Logging data to output/ray_ordinal_aligned_add/roll_smoke_seed0/log.txt
+-------------------------------------------------
+|                   Iteration |               0 |
+|                   Wall_Time |        0.000876 |
+|                     Samples |            2048 |
+|                 Test_Return |               0 |
+|                Train_Return |               0 |
+|                 Critic_Loss |             317 |
+|            Critic_Grad_Norm |             336 |
+|                  Actor_Loss |          -0.031 |
+|                   Clip_Frac |           0.641 |
+|                   Imp_Ratio |            1.08 |
+|           Action_Bound_Loss |               0 |
+|             Actor_Grad_Norm |              22 |
+|                   Policy_Kl |           0.165 |
+|      Action_Mean_Update_Rms |         0.00542 |
+|      Action_Mean_Bound_Frac |               0 |
+| Actor_First_Layer_Grad_Norm |            2.29 |
+|                   Disc_Loss |            7.09 |
+|          Disc_Ray_Objective |           0.372 |
+|      Disc_Absolute_Pos_Loss |           0.693 |
+|      Disc_Absolute_Neg_Loss |           0.164 |
+|      Disc_Ordinal_Near_Loss |           0.308 |
+|       Disc_Ordinal_Far_Loss |           0.322 |
+|           Disc_Grad_Penalty |            2.49 |
+|             Disc_Logit_Loss |             174 |
+|                Disc_Pos_Acc |            0.75 |
+|                Disc_Neg_Acc |           0.948 |
+|   Disc_Order_Anchor_Ray_Acc |           0.948 |
+|      Disc_Order_Ray_Neg_Acc |           0.948 |
+|         Disc_Order_Full_Acc |           0.948 |
+|           Disc_Anchor_Logit |         0.00123 |
+|              Disc_Ray_Logit |           -1.55 |
+|              Disc_Neg_Logit |           -3.06 |
+|         Disc_Gap_Anchor_Ray |            1.55 |
+|            Disc_Gap_Ray_Neg |            1.51 |
+|         Disc_Gap_Anchor_Neg |            3.06 |
+|         Disc_Ray_Alpha_Mean |             0.5 |
+|          Disc_Ray_Alpha_Std |            0.29 |
+|          Disc_Ray_Alpha_Min |         0.00334 |
+|          Disc_Ray_Alpha_Max |           0.997 |
+|        Disc_Param_Grad_Norm |              16 |
+|                    Adv_Mean |            23.4 |
+|                     Adv_Std |            12.1 |
+|            Disc_Reward_Mean |            2.62 |
+|             Disc_Reward_Std |            2.32 |
+|                    Exp_Prob |               1 |
+-------------------------------------------------
+-------------------------------------------------
+|                   Iteration |               1 |
+|                   Wall_Time |         0.00113 |
+|                     Samples |            4096 |
+|                 Test_Return |               0 |
+|                Train_Return |               0 |
+|                 Critic_Loss |              18 |
+|            Critic_Grad_Norm |             104 |
+|                  Actor_Loss |           0.118 |
+|                   Clip_Frac |           0.842 |
+|                   Imp_Ratio |           0.871 |
+|           Action_Bound_Loss |               0 |
+|             Actor_Grad_Norm |              28 |
+|                   Policy_Kl |            1.63 |
+|      Action_Mean_Update_Rms |          0.0171 |
+|      Action_Mean_Bound_Frac |               0 |
+| Actor_First_Layer_Grad_Norm |            3.31 |
+|                   Disc_Loss |            5.04 |
+|          Disc_Ray_Objective |           0.326 |
+|      Disc_Absolute_Pos_Loss |           0.688 |
+|      Disc_Absolute_Neg_Loss |          0.0712 |
+|      Disc_Ordinal_Near_Loss |            0.25 |
+|       Disc_Ordinal_Far_Loss |           0.297 |
+|           Disc_Grad_Penalty |            1.49 |
+|             Disc_Logit_Loss |             173 |
+|                Disc_Pos_Acc |               1 |
+|                Disc_Neg_Acc |               1 |
+|   Disc_Order_Anchor_Ray_Acc |               1 |
+|      Disc_Order_Ray_Neg_Acc |               1 |
+|         Disc_Order_Full_Acc |               1 |
+|           Disc_Anchor_Logit |         0.00995 |
+|              Disc_Ray_Logit |           -1.52 |
+|              Disc_Neg_Logit |           -2.83 |
+|         Disc_Gap_Anchor_Ray |            1.53 |
+|            Disc_Gap_Ray_Neg |            1.31 |
+|         Disc_Gap_Anchor_Neg |            2.84 |
+|         Disc_Ray_Alpha_Mean |           0.502 |
+|          Disc_Ray_Alpha_Std |           0.291 |
+|          Disc_Ray_Alpha_Min |         0.00377 |
+|          Disc_Ray_Alpha_Max |           0.997 |
+|        Disc_Param_Grad_Norm |            6.71 |
+|                    Adv_Mean |           -2.07 |
+|                     Adv_Std |            5.62 |
+|            Disc_Reward_Mean |           0.157 |
+|             Disc_Reward_Std |           0.118 |
+|                    Exp_Prob |               1 |
+-------------------------------------------------
+-------------------------------------------------
+|                   Iteration |               2 |
+|                   Wall_Time |         0.00137 |
+|                     Samples |            6144 |
+|                 Test_Return |               0 |
+|                Train_Return |               0 |
+|                 Critic_Loss |            3.23 |
+|            Critic_Grad_Norm |            27.3 |
+|                  Actor_Loss |          0.0803 |
+|                   Clip_Frac |           0.819 |
+|                   Imp_Ratio |           0.986 |
+|           Action_Bound_Loss |               0 |
+|             Actor_Grad_Norm |            26.9 |
+|                   Policy_Kl |            1.33 |
+|      Action_Mean_Update_Rms |          0.0154 |
+|      Action_Mean_Bound_Frac |               0 |
+| Actor_First_Layer_Grad_Norm |            2.77 |
+|                   Disc_Loss |            4.41 |
+|          Disc_Ray_Objective |           0.314 |
+|      Disc_Absolute_Pos_Loss |           0.684 |
+|      Disc_Absolute_Neg_Loss |            0.06 |
+|      Disc_Ordinal_Near_Loss |            0.22 |
+|       Disc_Ordinal_Far_Loss |           0.294 |
+|           Disc_Grad_Penalty |            1.19 |
+|             Disc_Logit_Loss |             171 |
+|                Disc_Pos_Acc |               1 |
+|                Disc_Neg_Acc |               1 |
+|   Disc_Order_Anchor_Ray_Acc |               1 |
+|      Disc_Order_Ray_Neg_Acc |               1 |
+|         Disc_Order_Full_Acc |               1 |
+|           Disc_Anchor_Logit |          0.0193 |
+|              Disc_Ray_Logit |           -1.66 |
+|              Disc_Neg_Logit |           -2.99 |
+|         Disc_Gap_Anchor_Ray |            1.68 |
+|            Disc_Gap_Ray_Neg |            1.32 |
+|         Disc_Gap_Anchor_Neg |               3 |
+|         Disc_Ray_Alpha_Mean |           0.507 |
+|          Disc_Ray_Alpha_Std |           0.288 |
+|          Disc_Ray_Alpha_Min |         0.00343 |
+|          Disc_Ray_Alpha_Max |           0.997 |
+|        Disc_Param_Grad_Norm |            4.13 |
+|                    Adv_Mean |           -0.74 |
+|                     Adv_Std |            2.56 |
+|            Disc_Reward_Mean |           0.121 |
+|             Disc_Reward_Std |          0.0879 |
+|                    Exp_Prob |               1 |
+-------------------------------------------------
+-------------------------------------------------
+|                   Iteration |               3 |
+|                   Wall_Time |          0.0016 |
+|                     Samples |            8192 |
+|                 Test_Return |               0 |
+|                Train_Return |               0 |
+|                 Critic_Loss |            2.46 |
+|            Critic_Grad_Norm |            28.9 |
+|                  Actor_Loss |        -0.00108 |
+|                   Clip_Frac |            0.73 |
+|                   Imp_Ratio |           0.993 |
+|           Action_Bound_Loss |               0 |
+|             Actor_Grad_Norm |            23.9 |
+|                   Policy_Kl |           0.394 |
+|      Action_Mean_Update_Rms |         0.00839 |
+|      Action_Mean_Bound_Frac |               0 |
+| Actor_First_Layer_Grad_Norm |            2.35 |
+|                   Disc_Loss |            4.12 |
+|          Disc_Ray_Objective |           0.311 |
+|      Disc_Absolute_Pos_Loss |           0.679 |
+|      Disc_Absolute_Neg_Loss |          0.0565 |
+|      Disc_Ordinal_Near_Loss |           0.209 |
+|       Disc_Ordinal_Far_Loss |           0.298 |
+|           Disc_Grad_Penalty |            1.06 |
+|             Disc_Logit_Loss |             170 |
+|                Disc_Pos_Acc |               1 |
+|                Disc_Neg_Acc |               1 |
+|   Disc_Order_Anchor_Ray_Acc |               1 |
+|      Disc_Order_Ray_Neg_Acc |               1 |
+|         Disc_Order_Full_Acc |               1 |
+|           Disc_Anchor_Logit |          0.0286 |
+|              Disc_Ray_Logit |           -1.68 |
+|              Disc_Neg_Logit |           -2.96 |
+|         Disc_Gap_Anchor_Ray |            1.71 |
+|            Disc_Gap_Ray_Neg |            1.28 |
+|         Disc_Gap_Anchor_Neg |            2.99 |
+|         Disc_Ray_Alpha_Mean |           0.502 |
+|          Disc_Ray_Alpha_Std |           0.289 |
+|          Disc_Ray_Alpha_Min |         0.00538 |
+|          Disc_Ray_Alpha_Max |           0.996 |
+|        Disc_Param_Grad_Norm |            3.43 |
+|                    Adv_Mean |           -1.43 |
+|                     Adv_Std |            1.97 |
+|            Disc_Reward_Mean |           0.115 |
+|             Disc_Reward_Std |          0.0541 |
+|                    Exp_Prob |               1 |
+-------------------------------------------------
+-------------------------------------------------
+|                   Iteration |               4 |
+|                   Wall_Time |         0.00224 |
+|                     Samples |           10240 |
+|                 Test_Return |               0 |
+|                Train_Return |               0 |
+|                 Critic_Loss |            1.81 |
+|            Critic_Grad_Norm |            18.4 |
+|                  Actor_Loss |           0.172 |
+|                   Clip_Frac |           0.837 |
+|                   Imp_Ratio |           0.842 |
+|           Action_Bound_Loss |               0 |
+|             Actor_Grad_Norm |            32.2 |
+|                   Policy_Kl |            17.5 |
+|      Action_Mean_Update_Rms |          0.0559 |
+|      Action_Mean_Bound_Frac |               0 |
+| Actor_First_Layer_Grad_Norm |            0.53 |
+|                   Disc_Loss |            3.98 |
+|          Disc_Ray_Objective |           0.309 |
+|      Disc_Absolute_Pos_Loss |           0.674 |
+|      Disc_Absolute_Neg_Loss |          0.0565 |
+|      Disc_Ordinal_Near_Loss |           0.203 |
+|       Disc_Ordinal_Far_Loss |           0.302 |
+|           Disc_Grad_Penalty |           0.993 |
+|             Disc_Logit_Loss |             169 |
+|                Disc_Pos_Acc |               1 |
+|                Disc_Neg_Acc |               1 |
+|   Disc_Order_Anchor_Ray_Acc |               1 |
+|      Disc_Order_Ray_Neg_Acc |               1 |
+|         Disc_Order_Full_Acc |               1 |
+|           Disc_Anchor_Logit |           0.038 |
+|              Disc_Ray_Logit |           -1.71 |
+|              Disc_Neg_Logit |           -2.97 |
+|         Disc_Gap_Anchor_Ray |            1.74 |
+|            Disc_Gap_Ray_Neg |            1.26 |
+|         Disc_Gap_Anchor_Neg |            3.01 |
+|         Disc_Ray_Alpha_Mean |           0.497 |
+|          Disc_Ray_Alpha_Std |            0.29 |
+|          Disc_Ray_Alpha_Min |         0.00331 |
+|          Disc_Ray_Alpha_Max |           0.997 |
+|        Disc_Param_Grad_Norm |             3.2 |
+|                    Adv_Mean |          -0.947 |
+|                     Adv_Std |            1.55 |
+|            Disc_Reward_Mean |           0.118 |
+|             Disc_Reward_Std |          0.0632 |
+|                    Exp_Prob |               1 |
+-------------------------------------------------
+2026-08-21T11:00:34Z [17,237ms] [Warning] [omni.physx.plugin] USD stage detach not called, holding a loose ptr to a stage!
+2026-08-21T11:00:34Z [17,582ms] [Warning] [carb] Recursive unloadAllPlugins() detected!
