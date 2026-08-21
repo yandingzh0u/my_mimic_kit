@@ -35,9 +35,9 @@ def build_agent(agent_file, env, device):
     elif (agent_name == "ALIGNED_ADD"):
         import learning.aligned_add_agent as aligned_add_agent
         agent = aligned_add_agent.AlignedADDAgent(config=agent_config, env=env, device=device)
-    elif (agent_name == "HINGE_SN_ALIGNED_ADD"):
-        import learning.hinge_sn_aligned_add_agent as hinge_sn_aligned_add_agent
-        agent = hinge_sn_aligned_add_agent.HingeSNAlignedADDAgent(
+    elif (agent_name == "RELATIVE_LOGISTIC_ALIGNED_ADD"):
+        import learning.relative_logistic_aligned_add_agent as relative_agent
+        agent = relative_agent.RelativeLogisticAlignedADDAgent(
             config=agent_config, env=env, device=device)
     elif (agent_name == "RCCI_ADD"):
         import learning.rcci_add_agent as rcci_add_agent

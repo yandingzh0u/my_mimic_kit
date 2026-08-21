@@ -1,0 +1,9 @@
+--num_envs 4096
+--engine_config data/engines/isaac_lab_engine.yaml
+--env_config data/envs/aligned_add_humanoid_roll_env.yaml
+--agent_config data/agents/relative_logistic_aligned_add_humanoid_agent.yaml
+--max_samples 1310720000
+--out_dir output/relative_logistic_aligned_add/roll_10k_4096_seed0
+--rand_seed 0
+--visualize false
+--save_int_models true
