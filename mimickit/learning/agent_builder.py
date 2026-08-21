@@ -35,6 +35,10 @@ def build_agent(agent_file, env, device):
     elif (agent_name == "ALIGNED_ADD"):
         import learning.aligned_add_agent as aligned_add_agent
         agent = aligned_add_agent.AlignedADDAgent(config=agent_config, env=env, device=device)
+    elif (agent_name == "RAY_ORDINAL_ALIGNED_ADD"):
+        import learning.ray_ordinal_aligned_add_agent as ray_ordinal_agent
+        agent = ray_ordinal_agent.RayOrdinalAlignedADDAgent(
+            config=agent_config, env=env, device=device)
     elif (agent_name == "RCCI_ADD"):
         import learning.rcci_add_agent as rcci_add_agent
         agent = rcci_add_agent.RCCIADDAgent(config=agent_config, env=env, device=device)
