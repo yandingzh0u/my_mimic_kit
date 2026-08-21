@@ -2,7 +2,10 @@
 
 .vs/
 __pycache__/
-output/
+# Keep models/checkpoints local; track training log.txt for push/repro.
+output/**
+!output/**/
+!output/**/log.txt
 .vscode/
 wandb/
 PAPER/*.aux
