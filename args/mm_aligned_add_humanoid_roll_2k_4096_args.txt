@@ -1,0 +1,9 @@
+--num_envs 4096
+--engine_config data/engines/isaac_lab_engine.yaml
+--env_config data/envs/mm_aligned_add_humanoid_roll_env.yaml
+--agent_config data/agents/mm_aligned_add_humanoid_agent.yaml
+--max_samples 262144000
+--out_dir output/mm_aligned_add/roll_300_4096_seed0
+--rand_seed 0
+--visualize false
+--save_int_models true
