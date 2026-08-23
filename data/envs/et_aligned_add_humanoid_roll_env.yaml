@@ -1,4 +1,4 @@
-env_name: "lexmm_aligned_add"
+env_name: "et_aligned_add"
 
 char_file: "data/assets/humanoid/humanoid.xml"
 camera_mode: "track"
