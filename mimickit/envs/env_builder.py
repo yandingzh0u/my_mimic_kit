@@ -32,6 +32,9 @@ def build_env(env_file, engine_file, num_envs, device, visualize, record_video=F
     elif (env_name == "mm_aligned_add"):
         import envs.mm_aligned_add_env as mm_aligned_add_env
         env = mm_aligned_add_env.MMAlignedADDEnv(env_config=env_config, engine_config=engine_config, num_envs=num_envs, device=device, visualize=visualize, record_video=record_video)
+    elif (env_name == "lexmm_aligned_add"):
+        import envs.mm_aligned_add_env as mm_aligned_add_env
+        env = mm_aligned_add_env.MMAlignedADDEnv(env_config=env_config, engine_config=engine_config, num_envs=num_envs, device=device, visualize=visualize, record_video=record_video)
     elif (env_name == "rcci_add"):
         import envs.rcci_add_env as rcci_add_env
         env = rcci_add_env.RCCIADDEnv(env_config=env_config, engine_config=engine_config, num_envs=num_envs, device=device, visualize=visualize, record_video=record_video)

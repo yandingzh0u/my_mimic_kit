@@ -1,0 +1,9 @@
+--num_envs 4096
+--engine_config data/engines/isaac_lab_engine.yaml
+--env_config data/envs/lexmm_aligned_add_humanoid_roll_env.yaml
+--agent_config data/agents/lexmm_aligned_add_humanoid_smoke_agent.yaml
+--max_samples 393216
+--out_dir output/lexmm_aligned_add/roll_smoke4096_seed0
+--rand_seed 0
+--visualize false
+--save_int_models true
