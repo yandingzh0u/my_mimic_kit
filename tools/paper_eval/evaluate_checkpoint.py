@@ -3,7 +3,7 @@
 
 The evaluator deliberately measures physical simulator/reference states rather
 than reusing a method's training reward or its online diagnostic accumulator.
-This gives DeepMimic, AMP, ADD, and RCCI exactly the same episode protocol and
+This gives DeepMimic, AMP, ADD, and MARO exactly the same episode protocol and
 metric implementation.  A run writes three auditable artifacts:
 
 ``summary.json``
@@ -64,7 +64,7 @@ START_MODES = ("phase0", "random", "grid")
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Evaluate one DeepMimic/AMP/ADD/RCCI checkpoint under a "
+        description="Evaluate one DeepMimic/AMP/ADD/MARO checkpoint under a "
         "shared physical protocol."
     )
     parser.add_argument("--model-file", required=True)
@@ -140,9 +140,30 @@ def infer_method(
         return "AMP"
     if agent_name == "ADD":
         return "ADD"
+    if agent_name == "MARO":
+        return "MARO"
     if agent_name in ("RCCI_ADD", "ALIGNED_ADD"):
         return "RCCI" if agent_name == "RCCI_ADD" else "AlignedADD"
     return agent_name or env_name or "unknown"
+
+
+def reward_diagnostic_label(method: str) -> str:
+    """Name the reward diagnostic without overstating MARO's base reward.
+
+    MARO's optimized reward depends on rollout-level phase utilities and
+    occupancy.  A single evaluation transition can reconstruct only the
+    inherited, unweighted learned reward.
+    """
+    if str(method).strip().lower() == "maro":
+        return "base_learned_unweighted"
+    return "optimized_policy"
+
+
+def reward_diagnostic_episode_key(method: str) -> str:
+    """Preserve the established artifact key except for MARO diagnostics."""
+    if reward_diagnostic_label(method) == "base_learned_unweighted":
+        return "base_learned_unweighted_reward_mean"
+    return "policy_reward_mean"
 
 
 def infer_motion(env_config: Mapping[str, Any]) -> str:
@@ -286,6 +307,19 @@ def distribution_stats(values: np.ndarray) -> dict[str, Any]:
         max=float(np.max(finite)),
     )
     return result
+
+
+def summarize_reward_diagnostics(
+    method: str,
+    environment_reward: np.ndarray,
+    base_reward_diagnostic: np.ndarray,
+) -> dict[str, Any]:
+    """Build accurately named reward summaries for one evaluation method."""
+    diagnostic_name = reward_diagnostic_label(method)
+    return {
+        "environment": distribution_stats(environment_reward),
+        diagnostic_name: distribution_stats(base_reward_diagnostic),
+    }
 
 
 def _query_reference(env) -> dict[str, torch.Tensor]:
@@ -498,7 +532,12 @@ def intervene_observation(
 
 
 def _policy_reward(agent, info, env_reward: torch.Tensor) -> torch.Tensor:
-    """Reconstruct the reward optimized by each method for diagnostics only."""
+    """Reconstruct the per-transition base reward for diagnostics only.
+
+    For MARO this deliberately excludes rollout-level phase scalarization and
+    must be reported as ``base_learned_unweighted``, not as its optimized PPO
+    reward.
+    """
 
     if not hasattr(agent, "_calc_disc_rewards") or "disc_obs" not in info:
         return env_reward
@@ -662,7 +701,9 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
             for name in TRACKING_ERROR_NAMES
         }
         env_reward_sum = torch.zeros(num_envs, device=args.device)
-        policy_reward_sum = torch.zeros(num_envs, device=args.device)
+        reward_diagnostic_sum = torch.zeros(num_envs, device=args.device)
+        reward_diagnostic_name = reward_diagnostic_label(method)
+        reward_episode_key = reward_diagnostic_episode_key(method)
         action_delta_sum = torch.zeros(num_envs, device=args.device)
 
         sim0 = _query_sim(env)
@@ -736,7 +777,7 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
                 )
                 action = torch.where(active_before.unsqueeze(-1), action, torch.zeros_like(action))
                 obs, env_reward, done, info = env.step(action)
-                policy_reward = _policy_reward(agent, info, env_reward)
+                reward_diagnostic = _policy_reward(agent, info, env_reward)
 
                 sim = _query_sim(env)
                 ref = _query_reference(env)
@@ -759,7 +800,7 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
                 active_float = active_before.float()
                 step_count += active_float
                 env_reward_sum += env_reward * active_float
-                policy_reward_sum += policy_reward * active_float
+                reward_diagnostic_sum += reward_diagnostic * active_float
                 for name, value in errors.items():
                     error_sum[name] += value * active_float
 
@@ -928,8 +969,8 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
             "env_reward_mean": _to_numpy(
                 _mean_per_episode(env_reward_sum, step_count)
             ),
-            "policy_reward_mean": _to_numpy(
-                _mean_per_episode(policy_reward_sum, step_count)
+            reward_episode_key: _to_numpy(
+                _mean_per_episode(reward_diagnostic_sum, step_count)
             ),
             "action_intervention_l2_mean": _to_numpy(
                 _mean_per_episode(action_delta_sum, step_count)
@@ -977,6 +1018,9 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
                 "motion": motion_name,
                 "representation": representation,
                 "condition": args.condition,
+                **({"reward_diagnostic": reward_diagnostic_name}
+                   if reward_diagnostic_name == "base_learned_unweighted"
+                   else {}),
                 "seed": args.seed,
                 "model_file": str(model_file),
                 "model_sha256": sha256_file(model_file),
@@ -1015,14 +1059,11 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
                     name: distribution_stats(episode_arrays[name])
                     for name in behavior
                 },
-                "reward": {
-                    "environment": distribution_stats(
-                        episode_arrays["env_reward_mean"]
-                    ),
-                    "optimized_policy": distribution_stats(
-                        episode_arrays["policy_reward_mean"]
-                    ),
-                },
+                "reward": summarize_reward_diagnostics(
+                    method,
+                    episode_arrays["env_reward_mean"],
+                    episode_arrays[reward_episode_key],
+                ),
                 "intervention": {
                     "action_l2": distribution_stats(
                         episode_arrays["action_intervention_l2_mean"]

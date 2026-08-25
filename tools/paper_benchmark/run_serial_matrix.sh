@@ -19,10 +19,11 @@ wait_for_gpu=true
 run_smoke=true
 run_scale_smoke=true
 run_formal=true
+method_filter=""
 
 usage() {
   printf '%s\n' \
-    "Usage: $0 [--smoke-only|--scale-smoke-only|--formal-only] [--no-wait] [--python PATH]" \
+    "Usage: $0 [--smoke-only|--scale-smoke-only|--formal-only] [--method NAME] [--no-wait] [--python PATH]" \
     "" \
     "Environment:" \
     "  MIMICKIT_PYTHON   Python executable (default: env_isaaclab Python)" \
@@ -48,6 +49,14 @@ while (($# > 0)); do
       ;;
     --no-wait)
       wait_for_gpu=false
+      ;;
+    --method)
+      shift
+      if (($# == 0)); then
+        printf 'ERROR: --method requires a method name\n' >&2
+        exit 2
+      fi
+      method_filter="$1"
       ;;
     --python)
       shift
@@ -77,28 +86,44 @@ if [[ ! -x "$python_bin" ]]; then
   exit 2
 fi
 
-methods=(deepmimic amp add residual)
+methods=(deepmimic amp add maro)
 motions=(run backflip crawl getup_facedown spinkick climb)
+
+run_methods=("${methods[@]}")
+if [[ -n "$method_filter" ]]; then
+  method_known=false
+  for method in "${run_methods[@]}"; do
+    if [[ "$method" == "$method_filter" ]]; then
+      method_known=true
+      break
+    fi
+  done
+  if [[ "$method_known" != true ]]; then
+    printf 'ERROR: unsupported method filter: %s\n' "$method_filter" >&2
+    exit 2
+  fi
+  run_methods=("$method_filter")
+fi
 
 declare -A arg_files=(
   [deepmimic]="args/paper_benchmark/deepmimic_2k_8192_args.txt"
   [amp]="args/paper_benchmark/amp_2k_8192_args.txt"
   [add]="args/paper_benchmark/add_2k_8192_args.txt"
-  [residual]="args/paper_benchmark/residual_2k_8192_args.txt"
+  [maro]="args/paper_benchmark/maro_2k_8192_args.txt"
 )
 
 declare -A agent_files=(
   [deepmimic]="data/agents/deepmimic_humanoid_ppo_agent.yaml"
   [amp]="data/agents/amp_humanoid_agent.yaml"
   [add]="data/agents/add_humanoid_agent.yaml"
-  [residual]="data/agents/rcci_add_humanoid_agent.yaml"
+  [maro]="data/agents/maro_humanoid_agent.yaml"
 )
 
 smoke_envs=64
 steps_per_iter=32
 smoke_iters=2
 scale_smoke_envs=8192
-scale_smoke_iters=1
+scale_smoke_iters=3
 formal_envs=8192
 formal_iters=2000
 smoke_samples=$((smoke_envs * steps_per_iter * smoke_iters))
@@ -154,7 +179,7 @@ write_plan() {
 
 preflight() {
   local method motion env_config
-  for method in "${methods[@]}"; do
+  for method in "${run_methods[@]}"; do
     [[ -f "${arg_files[$method]}" ]] || {
       printf 'ERROR: missing arg file: %s\n' "${arg_files[$method]}" >&2
       return 1
@@ -221,12 +246,32 @@ wait_for_existing_training() {
 checkpoint_reached_budget() {
   local checkpoint_file="$1"
   local target_samples="$2"
-  "$python_bin" - "$checkpoint_file" "$target_samples" <<'PY'
+  local env_config="$3"
+  local agent_config="$4"
+  local engine_config="$5"
+  "$python_bin" - "$checkpoint_file" "$target_samples" \
+    "$env_config" "$agent_config" "$engine_config" <<'PY'
+import hashlib
 import sys
 import torch
 
 checkpoint_file = sys.argv[1]
 target_samples = int(sys.argv[2])
+config_files = {
+    "env_config_sha256": sys.argv[3],
+    "agent_config_sha256": sys.argv[4],
+    "engine_config_sha256": sys.argv[5],
+}
+
+
+def file_sha256(filename):
+    digest = hashlib.sha256()
+    with open(filename, "rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 try:
     checkpoint = torch.load(
         checkpoint_file,
@@ -235,10 +280,24 @@ try:
         mmap=True,
     )
     actual_samples = int(checkpoint["trainer_state"]["sample_count"])
+    saved_context = checkpoint["metadata"]["checkpoint_context"]
+    expected_context = {
+        key: file_sha256(filename)
+        for key, filename in config_files.items()
+    }
 except Exception as exc:
     print(
         f"ERROR: unable to validate checkpoint budget for "
         f"{checkpoint_file}: {exc}",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+if saved_context != expected_context:
+    print(
+        f"ERROR: checkpoint {checkpoint_file} was produced by different "
+        f"configuration files; saved={saved_context}, "
+        f"expected={expected_context}.",
         file=sys.stderr,
     )
     raise SystemExit(1)
@@ -288,7 +347,9 @@ run_job() {
   local eval_dir="$out_dir/eval/$eval_name"
   local eval_summary="$eval_dir/summary.json"
   if [[ -f "$done_file" && -s "$eval_summary" ]]; then
-    if checkpoint_reached_budget "$checkpoint_file" "$max_samples"; then
+    if checkpoint_reached_budget "$checkpoint_file" "$max_samples" \
+      "$env_config" "${agent_files[$method]}" \
+      data/engines/isaac_lab_engine.yaml; then
       printf '[%s] SKIP %s/%s/%s (DONE)\n' \
         "$(date --iso-8601=seconds)" "$stage" "$method" "$motion"
       append_event "$stage" "$method" "$motion" "SKIPPED_DONE" "$out_dir"
@@ -352,7 +413,9 @@ run_job() {
   # while still returning a successful process status during plugin teardown.
   # Never evaluate or mark a job DONE unless the full training checkpoint
   # itself proves that the requested physics-sample budget was reached.
-  if ! checkpoint_reached_budget "$checkpoint_file" "$max_samples"; then
+  if ! checkpoint_reached_budget "$checkpoint_file" "$max_samples" \
+    "$env_config" "${agent_files[$method]}" \
+    data/engines/isaac_lab_engine.yaml; then
     append_event "$stage" "$method" "$motion" "FAILED_BUDGET_CHECK" \
       "$out_dir" "checkpoint below target after trainer exit"
     printf 'ERROR: %s/%s/%s exited before reaching its sample budget\n' \
@@ -430,6 +493,40 @@ run_job() {
     "$(date --iso-8601=seconds)" "$stage" "$method" "$motion"
 }
 
+run_job_with_retries() {
+  local stage="$1"
+  local method="$2"
+  local motion="$3"
+  local max_attempts=2
+  if [[ "$stage" == "formal" ]]; then
+    max_attempts=4
+  fi
+
+  local attempt=1
+  local rc=0
+  while ((attempt <= max_attempts)); do
+    if run_job "$@"; then
+      return 0
+    else
+      rc=$?
+    fi
+
+    if ((attempt == max_attempts)); then
+      append_event "$stage" "$method" "$motion" "RETRIES_EXHAUSTED" \
+        "output" "attempts=$max_attempts,exit=$rc"
+      return "$rc"
+    fi
+
+    append_event "$stage" "$method" "$motion" "RETRYING" "output" \
+      "attempt=$attempt,exit=$rc"
+    printf '[%s] RETRY %s/%s/%s after exit %s (attempt %s/%s)\n' \
+      "$(date --iso-8601=seconds)" "$stage" "$method" "$motion" \
+      "$rc" "$((attempt + 1))" "$max_attempts" >&2
+    attempt=$((attempt + 1))
+    sleep 10
+  done
+}
+
 run_stage() {
   local stage="$1"
   local num_envs="$2"
@@ -438,9 +535,9 @@ run_stage() {
   local root="$5"
   local method motion
 
-  for method in "${methods[@]}"; do
+  for method in "${run_methods[@]}"; do
     for motion in "${motions[@]}"; do
-      run_job "$stage" "$method" "$motion" "$num_envs" "$max_samples" \
+      run_job_with_retries "$stage" "$method" "$motion" "$num_envs" "$max_samples" \
         "$save_int_models" "$root"
     done
   done
@@ -452,23 +549,31 @@ wait_for_existing_training
 
 printf 'Campaign plan: %s\n' "$plan_file"
 printf 'Event log:    %s\n' "$events_file"
-printf 'Formal budget: %d methods x %d motions x %d samples = %d samples\n' \
-  "${#methods[@]}" "${#motions[@]}" "$formal_samples" \
-  $(( ${#methods[@]} * ${#motions[@]} * formal_samples ))
+printf 'Selected formal budget: %d methods x %d motions x %d samples = %d samples\n' \
+  "${#run_methods[@]}" "${#motions[@]}" "$formal_samples" \
+  $(( ${#run_methods[@]} * ${#motions[@]} * formal_samples ))
 printf '%s\n' \
-  'ETA warning: current 8192-env runs take about 2.2 h each; 24 formal jobs' \
-  'need at least ~52 h and AMP/Climb can extend the campaign to 2--3 days.'
+  "ETA warning: the selected campaign contains $((${#run_methods[@]} * ${#motions[@]})) formal jobs;" \
+  'current 8192-env runs take about 2.2 h each, while Climb can take longer.'
 
 if [[ "$run_smoke" == true ]]; then
   run_stage "smoke" "$smoke_envs" "$smoke_samples" false "$smoke_root"
 fi
 
 if [[ "$run_scale_smoke" == true ]]; then
-  # Run is sufficient here: this stage validates 8192-env simulator memory,
-  # the 262144-sample on-policy rollout, and AMP/ADD's 200000-slot replay cap.
-  for method in "${methods[@]}"; do
-    run_job "scale_smoke" "$method" "run" "$scale_smoke_envs" \
-      "$scale_smoke_samples" false "$scale_smoke_root"
+  for method in "${run_methods[@]}"; do
+    scale_motions=(run)
+    # MARO additionally exercises a clamped nonperiodic clip and the static
+    # Climb object because these are the cases with highly nonuniform phase
+    # occupancy.  Three production-size updates catch numerical divergence
+    # that a 64-env structural smoke cannot diagnose faithfully.
+    if [[ "$method" == "maro" ]]; then
+      scale_motions=(run getup_facedown climb)
+    fi
+    for motion in "${scale_motions[@]}"; do
+      run_job_with_retries "scale_smoke" "$method" "$motion" \
+        "$scale_smoke_envs" "$scale_smoke_samples" false "$scale_smoke_root"
+    done
   done
 fi
 

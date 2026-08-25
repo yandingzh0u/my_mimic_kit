@@ -18,7 +18,7 @@ import envs.deepmimic_env as deepmimic_env  # noqa: E402
 import envs.static_objects_env as static_objects_env  # noqa: E402
 
 
-METHODS = ("deepmimic", "amp", "add", "residual")
+METHODS = ("deepmimic", "amp", "add", "maro")
 MOTIONS = (
     "run",
     "backflip",
@@ -31,7 +31,7 @@ ENV_NAMES = {
     "deepmimic": "deepmimic",
     "amp": "amp",
     "add": "add",
-    "residual": "rcci_add",
+    "maro": "maro",
 }
 MOTION_FILES = {
     "run": "humanoid_run.pkl",
@@ -129,7 +129,7 @@ def test_method_specific_interfaces_are_locked():
         _, deepmimic = load_env("deepmimic", motion)
         _, amp = load_env("amp", motion)
         _, add = load_env("add", motion)
-        _, residual = load_env("residual", motion)
+        _, maro = load_env("maro", motion)
 
         assert deepmimic["enable_tar_obs"] is True
         assert deepmimic["tar_obs_steps"] == [1, 2, 3]
@@ -138,10 +138,11 @@ def test_method_specific_interfaces_are_locked():
         assert add["enable_tar_obs"] is True
         assert add["tar_obs_steps"] == [1, 2, 3]
         assert add["num_disc_obs_steps"] == 1
-        assert residual["enable_tar_obs"] is False
-        assert residual["num_disc_obs_steps"] == 1
-        assert residual["rcci_representation"] == "residual"
-        assert residual["rcci_command_step"] == 1
+        assert maro["enable_phase_obs"] is False
+        assert maro["enable_tar_obs"] is True
+        assert maro["tar_obs_steps"] == [1, 2, 3]
+        assert maro["num_disc_obs_steps"] == 1
+        assert "aligned_command_step" not in maro
 
 
 @pytest.mark.parametrize("method", METHODS)
@@ -159,10 +160,12 @@ def test_serial_launcher_syntax_and_contract():
     subprocess.run(["bash", "-n", str(script)], check=True)
     text = script.read_text()
     assert "motions=(run backflip crawl getup_facedown spinkick climb)" in text
-    assert "methods=(deepmimic amp add residual)" in text
+    assert "methods=(deepmimic amp add maro)" in text
     assert "--resume_file" in text
     assert "checkpoint.pt" in text
     assert "checkpoint_reached_budget" in text
+    assert 'checkpoint["metadata"]["checkpoint_context"]' in text
+    assert "saved_context != expected_context" in text
     assert "FAILED_BUDGET_CHECK" in text
     assert "tools/paper_eval/evaluate_checkpoint.py" in text
     assert "torch.cuda.is_available()" in text
@@ -179,8 +182,11 @@ def test_serial_launcher_syntax_and_contract():
     assert "climbing_box.xml" in text
     assert "climbing_box.usd" in text
     assert "run_stage \"smoke\"" in text
-    assert 'run_job "scale_smoke"' in text
+    assert 'run_job_with_retries "scale_smoke"' in text
     assert "scale_smoke_envs=8192" in text
-    assert "scale_smoke_iters=1" in text
+    assert "scale_smoke_iters=3" in text
+    assert "scale_motions=(run getup_facedown climb)" in text
     assert "run_stage \"formal\"" in text
+    assert "run_job_with_retries" in text
+    assert "--method" in text
     assert "jump" not in text.lower()

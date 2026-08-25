@@ -41,6 +41,9 @@ def build_agent(agent_file, env, device):
     elif (agent_name == "ET_ALIGNED_ADD"):
         import learning.et_aligned_add_agent as et_aligned_add_agent
         agent = et_aligned_add_agent.ETAlignedADDAgent(config=agent_config, env=env, device=device)
+    elif (agent_name == "MARO"):
+        import learning.maro_agent as maro_agent
+        agent = maro_agent.MAROAgent(config=agent_config, env=env, device=device)
     elif (agent_name == "RCCI_ADD"):
         import learning.rcci_add_agent as rcci_add_agent
         agent = rcci_add_agent.RCCIADDAgent(config=agent_config, env=env, device=device)

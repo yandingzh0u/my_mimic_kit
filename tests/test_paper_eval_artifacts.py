@@ -15,6 +15,9 @@ from tools.paper_eval.evaluate_checkpoint import (
     infer_checkpoint_metadata,
     intervene_observation,
     parse_training_log,
+    reward_diagnostic_episode_key,
+    reward_diagnostic_label,
+    summarize_reward_diagnostics,
 )
 from tools.paper_eval.input_geometry import InputGeometryAccumulator
 
@@ -53,6 +56,24 @@ def test_checkpoint_metadata_matches_intermediate_model_iteration(tmp_path):
     metadata = infer_checkpoint_metadata(model)
     assert metadata["iteration"] == 100
     assert metadata["samples"] == 1234
+
+
+def test_maro_reward_diagnostic_is_never_labeled_as_optimized_policy():
+    assert reward_diagnostic_label("MARO") == "base_learned_unweighted"
+    assert reward_diagnostic_episode_key("MARO") == (
+        "base_learned_unweighted_reward_mean")
+    metrics = summarize_reward_diagnostics(
+        "maro", np.asarray([1.0, 2.0]), np.asarray([0.25, 0.5]))
+    assert set(metrics) == {"environment", "base_learned_unweighted"}
+    assert "optimized_policy" not in metrics
+
+
+def test_non_maro_reward_diagnostic_retains_optimized_policy_label():
+    assert reward_diagnostic_label("ADD") == "optimized_policy"
+    assert reward_diagnostic_episode_key("ADD") == "policy_reward_mean"
+    metrics = summarize_reward_diagnostics(
+        "ADD", np.asarray([1.0]), np.asarray([0.5]))
+    assert set(metrics) == {"environment", "optimized_policy"}
 
 
 @pytest.mark.parametrize("layout", ["aligned", "rcci_residual"])

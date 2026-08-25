@@ -584,7 +584,8 @@ class BaseAgent(torch.nn.Module):
         test_eps = test_info["num_eps"]
         test_eps = mp_util.reduce_sum(test_eps)
 
-        self._logger.log("Test_Return", test_return, collection="0_Main")
+        train_return_key, test_return_key = self._get_return_log_keys()
+        self._logger.log(test_return_key, test_return, collection="0_Main")
         self._logger.log("Test_Episode_Length", test_ep_len, collection="0_Main", quiet=True)
         self._logger.log("Test_Episodes", test_eps, collection="1_Info", quiet=True)
 
@@ -593,7 +594,7 @@ class BaseAgent(torch.nn.Module):
         train_eps = train_info.pop("num_eps")
         train_eps = mp_util.reduce_sum(train_eps)
 
-        self._logger.log("Train_Return", train_return, collection="0_Main")
+        self._logger.log(train_return_key, train_return, collection="0_Main")
         self._logger.log("Train_Episode_Length", train_ep_len, collection="0_Main", quiet=True)
         self._logger.log("Train_Episodes", train_eps, collection="1_Info", quiet=True)
 
@@ -619,6 +620,10 @@ class BaseAgent(torch.nn.Module):
             self._logger.log("Obs_Norm_Std", obs_norm_std, quiet=True)
         
         return
+
+    def _get_return_log_keys(self):
+        """Return logger keys for environment rewards tracked during stepping."""
+        return "Train_Return", "Test_Return"
     
     def _compute_action_bound_loss(self, norm_a_dist):
         loss = None
