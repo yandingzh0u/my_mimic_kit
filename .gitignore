@@ -2,7 +2,15 @@
 
 .vs/
 __pycache__/
-output/
+# Keep large experiment artifacts out of Git, but track auditable logs and
+# compact evaluation summaries by default.
+output/*
+output/**/*
+!output/**/
+!output/**/log.txt
+!output/**/console.log
+!output/**/train_metrics.jsonl
+!output/**/summary.json
 .vscode/
 wandb/
 PAPER/*.aux

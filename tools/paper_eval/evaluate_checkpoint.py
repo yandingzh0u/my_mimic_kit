@@ -3,7 +3,7 @@
 
 The evaluator deliberately measures physical simulator/reference states rather
 than reusing a method's training reward or its online diagnostic accumulator.
-This gives DeepMimic, AMP, ADD, and MARO exactly the same episode protocol and
+This gives DeepMimic, AMP, ADD, and PLOT exactly the same episode protocol and
 metric implementation.  A run writes three auditable artifacts:
 
 ``summary.json``
@@ -64,7 +64,7 @@ START_MODES = ("phase0", "random", "grid")
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Evaluate one DeepMimic/AMP/ADD/MARO checkpoint under a "
+        description="Evaluate one DeepMimic/AMP/ADD/PLOT checkpoint under a "
         "shared physical protocol."
     )
     parser.add_argument("--model-file", required=True)
@@ -140,27 +140,27 @@ def infer_method(
         return "AMP"
     if agent_name == "ADD":
         return "ADD"
-    if agent_name == "MARO":
-        return "MARO"
+    if agent_name == "PLOT":
+        return "PLOT"
     if agent_name in ("RCCI_ADD", "ALIGNED_ADD"):
         return "RCCI" if agent_name == "RCCI_ADD" else "AlignedADD"
     return agent_name or env_name or "unknown"
 
 
 def reward_diagnostic_label(method: str) -> str:
-    """Name the reward diagnostic without overstating MARO's base reward.
+    """Name the reward diagnostic without overstating PLOT's base reward.
 
-    MARO's optimized reward depends on rollout-level phase utilities and
+    PLOT's optimized reward depends on rollout-level phase utilities and
     occupancy.  A single evaluation transition can reconstruct only the
     inherited, unweighted learned reward.
     """
-    if str(method).strip().lower() == "maro":
+    if str(method).strip().lower() == "plot":
         return "base_learned_unweighted"
     return "optimized_policy"
 
 
 def reward_diagnostic_episode_key(method: str) -> str:
-    """Preserve the established artifact key except for MARO diagnostics."""
+    """Preserve the established artifact key except for PLOT diagnostics."""
     if reward_diagnostic_label(method) == "base_learned_unweighted":
         return "base_learned_unweighted_reward_mean"
     return "policy_reward_mean"
@@ -534,7 +534,7 @@ def intervene_observation(
 def _policy_reward(agent, info, env_reward: torch.Tensor) -> torch.Tensor:
     """Reconstruct the per-transition base reward for diagnostics only.
 
-    For MARO this deliberately excludes rollout-level phase scalarization and
+    For PLOT this deliberately excludes rollout-level phase scalarization and
     must be reported as ``base_learned_unweighted``, not as its optimized PPO
     reward.
     """

@@ -20,10 +20,11 @@ run_smoke=true
 run_scale_smoke=true
 run_formal=true
 method_filter=""
+motion_filters=()
 
 usage() {
   printf '%s\n' \
-    "Usage: $0 [--smoke-only|--scale-smoke-only|--formal-only] [--method NAME] [--no-wait] [--python PATH]" \
+    "Usage: $0 [--smoke-only|--scale-smoke-only|--formal-only] [--method NAME] [--motion NAME ...] [--no-wait] [--python PATH]" \
     "" \
     "Environment:" \
     "  MIMICKIT_PYTHON   Python executable (default: env_isaaclab Python)" \
@@ -58,6 +59,14 @@ while (($# > 0)); do
       fi
       method_filter="$1"
       ;;
+    --motion)
+      shift
+      if (($# == 0)); then
+        printf 'ERROR: --motion requires a motion name\n' >&2
+        exit 2
+      fi
+      motion_filters+=("$1")
+      ;;
     --python)
       shift
       if (($# == 0)); then
@@ -86,7 +95,7 @@ if [[ ! -x "$python_bin" ]]; then
   exit 2
 fi
 
-methods=(deepmimic amp add maro)
+methods=(deepmimic amp add plot)
 motions=(run backflip crawl getup_facedown spinkick climb)
 
 run_methods=("${methods[@]}")
@@ -105,18 +114,47 @@ if [[ -n "$method_filter" ]]; then
   run_methods=("$method_filter")
 fi
 
+run_motions=("${motions[@]}")
+if ((${#motion_filters[@]} > 0)); then
+  run_motions=()
+  for requested_motion in "${motion_filters[@]}"; do
+    motion_known=false
+    for motion in "${motions[@]}"; do
+      if [[ "$motion" == "$requested_motion" ]]; then
+        motion_known=true
+        break
+      fi
+    done
+    if [[ "$motion_known" != true ]]; then
+      printf 'ERROR: unsupported motion filter: %s\n' "$requested_motion" >&2
+      exit 2
+    fi
+
+    motion_duplicate=false
+    for motion in "${run_motions[@]}"; do
+      if [[ "$motion" == "$requested_motion" ]]; then
+        motion_duplicate=true
+        break
+      fi
+    done
+    if [[ "$motion_duplicate" != true ]]; then
+      run_motions+=("$requested_motion")
+    fi
+  done
+fi
+
 declare -A arg_files=(
   [deepmimic]="args/paper_benchmark/deepmimic_2k_8192_args.txt"
   [amp]="args/paper_benchmark/amp_2k_8192_args.txt"
   [add]="args/paper_benchmark/add_2k_8192_args.txt"
-  [maro]="args/paper_benchmark/maro_2k_8192_args.txt"
+  [plot]="args/paper_benchmark/plot_2k_8192_args.txt"
 )
 
 declare -A agent_files=(
   [deepmimic]="data/agents/deepmimic_humanoid_ppo_agent.yaml"
   [amp]="data/agents/amp_humanoid_agent.yaml"
   [add]="data/agents/add_humanoid_agent.yaml"
-  [maro]="data/agents/maro_humanoid_agent.yaml"
+  [plot]="data/agents/plot_humanoid_agent.yaml"
 )
 
 smoke_envs=64
@@ -166,8 +204,8 @@ write_plan() {
   printf 'order\tmethod\tmotion\tenv_config\tformal_output\n' > "$plan_file"
   local order=0
   local method motion env_config out_dir
-  for method in "${methods[@]}"; do
-    for motion in "${motions[@]}"; do
+  for method in "${run_methods[@]}"; do
+    for motion in "${run_motions[@]}"; do
       order=$((order + 1))
       env_config="data/envs/paper_benchmark/${method}_${motion}_env.yaml"
       out_dir="$campaign_root/${method}_${motion}_2k_8192_seed${seed}"
@@ -188,7 +226,7 @@ preflight() {
       printf 'ERROR: missing agent file: %s\n' "${agent_files[$method]}" >&2
       return 1
     }
-    for motion in "${motions[@]}"; do
+    for motion in "${run_motions[@]}"; do
       env_config="data/envs/paper_benchmark/${method}_${motion}_env.yaml"
       [[ -f "$env_config" ]] || {
         printf 'ERROR: missing env config: %s\n' "$env_config" >&2
@@ -536,7 +574,7 @@ run_stage() {
   local method motion
 
   for method in "${run_methods[@]}"; do
-    for motion in "${motions[@]}"; do
+    for motion in "${run_motions[@]}"; do
       run_job_with_retries "$stage" "$method" "$motion" "$num_envs" "$max_samples" \
         "$save_int_models" "$root"
     done
@@ -550,10 +588,10 @@ wait_for_existing_training
 printf 'Campaign plan: %s\n' "$plan_file"
 printf 'Event log:    %s\n' "$events_file"
 printf 'Selected formal budget: %d methods x %d motions x %d samples = %d samples\n' \
-  "${#run_methods[@]}" "${#motions[@]}" "$formal_samples" \
-  $(( ${#run_methods[@]} * ${#motions[@]} * formal_samples ))
+  "${#run_methods[@]}" "${#run_motions[@]}" "$formal_samples" \
+  $(( ${#run_methods[@]} * ${#run_motions[@]} * formal_samples ))
 printf '%s\n' \
-  "ETA warning: the selected campaign contains $((${#run_methods[@]} * ${#motions[@]})) formal jobs;" \
+  "ETA warning: the selected campaign contains $((${#run_methods[@]} * ${#run_motions[@]})) formal jobs;" \
   'current 8192-env runs take about 2.2 h each, while Climb can take longer.'
 
 if [[ "$run_smoke" == true ]]; then
@@ -563,14 +601,23 @@ fi
 if [[ "$run_scale_smoke" == true ]]; then
   for method in "${run_methods[@]}"; do
     scale_motions=(run)
-    # MARO additionally exercises a clamped nonperiodic clip and the static
-    # Climb object because these are the cases with highly nonuniform phase
-    # occupancy.  Three production-size updates catch numerical divergence
-    # that a 64-env structural smoke cannot diagnose faithfully.
-    if [[ "$method" == "maro" ]]; then
-      scale_motions=(run getup_facedown climb)
+    # Every selected PLOT motion receives three production-size updates before
+    # the formal queue starts.  This checks the phase statistics and replay
+    # path under the exact 8192-environment allocation used by long training.
+    if [[ "$method" == "plot" ]]; then
+      scale_motions=("${run_motions[@]}")
     fi
     for motion in "${scale_motions[@]}"; do
+      motion_selected=false
+      for requested_motion in "${run_motions[@]}"; do
+        if [[ "$motion" == "$requested_motion" ]]; then
+          motion_selected=true
+          break
+        fi
+      done
+      if [[ "$motion_selected" != true ]]; then
+        continue
+      fi
       run_job_with_retries "scale_smoke" "$method" "$motion" \
         "$scale_smoke_envs" "$scale_smoke_samples" false "$scale_smoke_root"
     done

@@ -1,0 +1,41 @@
+# Locked paper benchmark configuration: PLOT / Run
+env_name: "plot"
+motion_name: "run"
+
+char_file: "data/assets/humanoid/humanoid.xml"
+camera_mode: "track"
+
+episode_length: 2.0
+global_obs: true
+root_height_obs: true
+pose_termination: false
+pose_termination_dist: 1.0
+enable_phase_obs: false
+enable_tar_obs: true
+num_phase_encoding: 4
+tar_obs_steps: [1, 2, 3]
+num_disc_obs_steps: 1
+plot_num_phases: 24
+rand_reset: true
+log_tracking_error: true
+
+ref_char_offset: [2.0, 0.0, 0.0]
+init_pose: [0, 0, 0.882416, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1.5708, 0, 0, 0, -1.5708, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+enable_early_termination: true
+key_bodies: ["head", "right_hand", "left_hand", "right_foot", "left_foot"]
+contact_bodies: ["right_foot", "left_foot"]
+
+motion_file: "data/motions/humanoid/humanoid_run.pkl"
+
+# Diagnostics only. PLOT's policy reward contains no handcrafted term.
+reward_pose_w: 0.5
+reward_vel_w: 0.1
+reward_root_pose_w: 0.15
+reward_root_vel_w: 0.1
+reward_key_pos_w: 0.15
+reward_pose_scale: 0.25
+reward_vel_scale: 0.01
+reward_root_pose_scale: 5.0
+reward_root_vel_scale: 1.0
+reward_key_pos_scale: 10.0

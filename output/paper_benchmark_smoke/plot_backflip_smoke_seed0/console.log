@@ -1,0 +1,188 @@
+[2026-08-25T10:05:38+08:00] COMMAND /home/y/miniconda3/envs/env_isaaclab/bin/python mimickit/run.py --arg_file args/paper_benchmark/plot_2k_8192_args.txt --env_config data/envs/paper_benchmark/plot_backflip_env.yaml --out_dir output/paper_benchmark_smoke/plot_backflip_smoke_seed0 --num_envs 64 --max_samples 4096 --rand_seed 0 --save_int_models false
+Setting seed: 0.0
+Building plot env
+[INFO][AppLauncher]: Using device: cuda:0
+[INFO][AppLauncher]: Loading experience file: /home/y/IsaacLab/apps/isaaclab.python.headless.kit
+Loading user config located at: '/home/y/miniconda3/envs/env_isaaclab/lib/python3.11/site-packages/isaacsim/kit/data/Kit/Isaac-Sim/5.1/user.config.json'
+[Info] [carb] Logging to file: /home/y/miniconda3/envs/env_isaaclab/lib/python3.11/site-packages/isaacsim/kit/logs/Kit/Isaac-Sim/5.1/kit_20260825_100539.log
+2026-08-25T02:05:39Z [2ms] [Warning] [omni.ext.plugin] [ext: isaaclab_contrib] Extensions config 'extension.toml' doesn't exist '/home/y/IsaacLab/source/isaaclab_contrib' or '/home/y/IsaacLab/source/isaaclab_contrib/config'
+2026-08-25T02:05:39Z [67ms] [Warning] [omni.usd_config.extension] Enable omni.materialx.libs extension to use MaterialX
+2026-08-25T02:05:40Z [409ms] [Warning] [carb] Acquiring non optional plugin interface which is not listed as dependency: [omni::physx::IPhysxBenchmarks v1.0] (plugin: <default plugin>), by client: omni.physics.physx.plugin. Add it to CARB_PLUGIN_IMPL_DEPS() macro of a client.
+2026-08-25T02:05:40Z [552ms] [Warning] [omni.isaac.dynamic_control] omni.isaac.dynamic_control is deprecated as of Isaac Sim 4.5. No action is needed from end-users.
+2026-08-25T02:05:41Z [1,828ms] [Warning] [gpu.foundation.plugin] Skipping unsupported non-NVIDIA GPU: Intel(R) UHD Graphics 770 (ADL-S GT1)
+2026-08-25T02:05:41Z [1,828ms] [Warning] [gpu.foundation.plugin] Skipping unsupported non-NVIDIA GPU: Intel(R) UHD Graphics 770 (ADL-S GT1)
+
+|---------------------------------------------------------------------------------------------|
+| Driver Version: 580.173.02    | Graphics API: Vulkan
+|=============================================================================================|
+| GPU | Name                             | Active | LDA | GPU Memory | Vendor-ID | LUID       |
+|     |                                  |        |     |            | Device-ID | UUID       |
+|     |                                  |        |     |            | Bus-ID    |            |
+|---------------------------------------------------------------------------------------------|
+| 0   | NVIDIA GeForce RTX 5080          | Yes: 0 |     | 16303   MB | 10de      | 0          |
+|     |                                  |        |     |            | 2c02      | e16ebef7.. |
+|     |                                  |        |     |            | 1         |            |
+|---------------------------------------------------------------------------------------------|
+| 1   | Intel(R) UHD Graphics 770 (ADL.. |        |     | 48013   MB | 8086      | 0          |
+|     |                                  |        |     |            | 4680      | 86808046.. |
+|     |                                  |        |     |            | 0         |            |
+|=============================================================================================|
+| OS: 22.04.5 LTS (Jammy Jellyfish) ubuntu, Version: 22.04.5, Kernel: 6.8.0-136-generic
+| XServer Vendor: The X.Org Foundation, XServer Version: 12101004 (1.21.1.4)
+| Processor: 12th Gen Intel(R) Core(TM) i9-12900K
+| Bare Metal Cores: 16 | Bare Metal Logical Cores: 32
+| Available Cores:  24 
+|---------------------------------------------------------------------------------------------|
+| Total Memory (MB): 64017 | Free Memory: 50710
+| Total Page/Swap (MB): 2047 | Free Page/Swap: 2015
+|---------------------------------------------------------------------------------------------|
+2026-08-25T02:05:41Z [2,074ms] [Warning] [gpu.foundation.plugin] CPU performance profile is set to powersave. This profile sets the CPU to the lowest frequency reducing performance.
+2026-08-25T02:05:41Z [2,076ms] [Warning] [gpu.foundation.plugin] PCIe link width current (1) and maximum (16) for device 0 don't match.
+2026-08-25T02:05:41Z [2,076ms] [Warning] [gpu.foundation.plugin] IOMMU is enabled.
+2026-08-25T02:05:41Z [2,076ms] [Warning] [gpu.foundation.plugin] Detected IOMMU is enabled. Running CUDA peer-to-peer bandwidth and latency validation.
+Unidirectional P2P=Enabled Bandwidth (P2P Writes) Matrix (GB/s)
+   D\D     0 
+     0 817.21 
+P2P=Enabled Latency (P2P Writes) Matrix (us)
+   GPU     0 
+     0   2.31 
+
+   CPU     0 
+     0   3.02 
+[INFO] IsaacLab logging to file: /tmp/isaaclab_2026-08-25_10-05-41.log
+Building 1/64 envsBuilding 2/64 envsBuilding 3/64 envsBuilding 4/64 envsBuilding 5/64 envsBuilding 6/64 envsBuilding 7/64 envsBuilding 8/64 envsBuilding 9/64 envsBuilding 10/64 envsBuilding 11/64 envsBuilding 12/64 envsBuilding 13/64 envsBuilding 14/64 envsBuilding 15/64 envsBuilding 16/64 envsBuilding 17/64 envsBuilding 18/64 envsBuilding 19/64 envsBuilding 20/64 envsBuilding 21/64 envsBuilding 22/64 envsBuilding 23/64 envsBuilding 24/64 envsBuilding 25/64 envsBuilding 26/64 envsBuilding 27/64 envsBuilding 28/64 envsBuilding 29/64 envsBuilding 30/64 envsBuilding 31/64 envsBuilding 32/64 envsBuilding 33/64 envsBuilding 34/64 envsBuilding 35/64 envsBuilding 36/64 envsBuilding 37/64 envsBuilding 38/64 envsBuilding 39/64 envsBuilding 40/64 envsBuilding 41/64 envsBuilding 42/64 envsBuilding 43/64 envsBuilding 44/64 envsBuilding 45/64 envsBuilding 46/64 envsBuilding 47/64 envsBuilding 48/64 envsBuilding 49/64 envsBuilding 50/64 envsBuilding 51/64 envsBuilding 52/64 envsBuilding 53/64 envsBuilding 54/64 envsBuilding 55/64 envsBuilding 56/64 envsBuilding 57/64 envsBuilding 58/64 envsBuilding 59/64 envsBuilding 60/64 envsBuilding 61/64 envsBuilding 62/64 envsBuilding 63/64 envsBuilding 64/64 envs
+
+Loading 1/1 motion files: data/motions/humanoid/humanoid_backflip.pkl
+Loaded motion file: data/motions/humanoid/humanoid_backflip.pkl
+Loaded 1 motions with a total length of 1.750s.
+Building Obj:0 in 64/64 envs
+Initializing simulation...
+Char 0 properties
+	DoFs: 28
+	Mass: 50.050 kg
+
+Building PLOT agent
+/home/y/miniconda3/envs/env_isaaclab/lib/python3.11/site-packages/requests/__init__.py:113: RequestsDependencyWarning: urllib3 (2.6.3) or chardet (7.4.3)/charset_normalizer (3.3.2) doesn't match a supported version!
+  warnings.warn(
+Total parameter count: 2719262
+Logging data to output/paper_benchmark_smoke/plot_backflip_smoke_seed0/log.txt
+----------------------------------------------------------------------
+|                                        Iteration |               0 |
+|                                        Wall_Time |         0.00175 |
+|                                          Samples |            2048 |
+|                     Plot_Environment_Test_Return |               0 |
+|                    Plot_Environment_Train_Return |               0 |
+|                                      Critic_Loss |        1.61e+03 |
+|                                 Critic_Grad_Norm |        1.08e+03 |
+|                                       Actor_Loss |           -0.01 |
+|                                        Clip_Frac |            0.53 |
+|                                        Imp_Ratio |               1 |
+|                                Action_Bound_Loss |               0 |
+|                                  Actor_Grad_Norm |            19.2 |
+|                                        Policy_Kl |          0.0843 |
+|                           Action_Mean_Update_Rms |         0.00388 |
+|                           Action_Mean_Bound_Frac |               0 |
+|                      Actor_First_Layer_Grad_Norm |            2.53 |
+|                                        Disc_Loss |            6.51 |
+|                                Disc_Grad_Penalty |            2.22 |
+|                                  Disc_Logit_Loss |             153 |
+|                                     Disc_Pos_Acc |           0.688 |
+|                                     Disc_Neg_Acc |           0.908 |
+|                                   Disc_Pos_Logit |         0.00188 |
+|                                   Disc_Neg_Logit |           -4.75 |
+|                             Disc_Param_Grad_Norm |            18.9 |
+|                                         Adv_Mean |            40.9 |
+|                                          Adv_Std |              37 |
+|                                 Disc_Reward_Mean |            9.47 |
+|                                  Disc_Reward_Std |            4.21 |
+|                        Plot_Weighted_Reward_Mean |            5.72 |
+|                         Plot_Weighted_Reward_Std |            12.1 |
+|                    Plot_Ppo_Consumed_Reward_Mean |            5.72 |
+|                     Plot_Ppo_Consumed_Reward_Std |            12.1 |
+| Plot_Ppo_Consumed_Discounted_Rollout_Return_Mean |             158 |
+|  Plot_Ppo_Consumed_Discounted_Rollout_Return_Std |              59 |
+|                           Plot_Phase_Utility_Min |            2.31 |
+|                          Plot_Phase_Utility_Mean |            4.76 |
+|                           Plot_Phase_Utility_Max |            9.21 |
+|                       Plot_Phase_Utility_Softmin |            3.55 |
+|                             Plot_Phase_Count_Min |              13 |
+|                             Plot_Phase_Count_Max |              65 |
+|                      Plot_Phase_Missing_Fraction |               0 |
+|                          Plot_Reward_Weight_Mean |               1 |
+|                           Plot_Reward_Weight_Std |            2.21 |
+|                           Plot_Reward_Weight_Max |            10.6 |
+|                             Plot_Probability_Max |           0.181 |
+|                           Plot_Probability_Ratio |        4.04e+05 |
+|                   Plot_Adversarial_Density_Ratio |        4.97e+05 |
+|                         Plot_Probability_Entropy |            2.61 |
+|              Plot_Probability_Normalized_Entropy |            0.66 |
+|               Plot_Probability_Effective_Support |            13.6 |
+|                    Plot_Probability_Argmax_Phase |               3 |
+|                    Plot_Adversarial_Argmax_Phase |               3 |
+|                                        Plot_Beta |             1.9 |
+|                                  Plot_Num_Phases |              52 |
+|                             Plot_Num_Phases_Auto |               0 |
+|                          Plot_Occupancy_Anchored |               1 |
+|                                         Exp_Prob |               1 |
+----------------------------------------------------------------------
+----------------------------------------------------------------------
+|                                        Iteration |               1 |
+|                                        Wall_Time |         0.00252 |
+|                                          Samples |            4096 |
+|                     Plot_Environment_Test_Return |               0 |
+|                    Plot_Environment_Train_Return |               0 |
+|                                      Critic_Loss |        1.04e+03 |
+|                                 Critic_Grad_Norm |             630 |
+|                                       Actor_Loss |        -0.00848 |
+|                                        Clip_Frac |           0.647 |
+|                                        Imp_Ratio |            1.01 |
+|                                Action_Bound_Loss |               0 |
+|                                  Actor_Grad_Norm |            18.3 |
+|                                        Policy_Kl |            0.27 |
+|                           Action_Mean_Update_Rms |         0.00695 |
+|                           Action_Mean_Bound_Frac |               0 |
+|                      Actor_First_Layer_Grad_Norm |            1.73 |
+|                                        Disc_Loss |            4.87 |
+|                                Disc_Grad_Penalty |            1.48 |
+|                                  Disc_Logit_Loss |             151 |
+|                                     Disc_Pos_Acc |               1 |
+|                                     Disc_Neg_Acc |               1 |
+|                                   Disc_Pos_Logit |          0.0206 |
+|                                   Disc_Neg_Logit |           -2.36 |
+|                             Disc_Param_Grad_Norm |            6.64 |
+|                                         Adv_Mean |           -18.9 |
+|                                          Adv_Std |            44.2 |
+|                                 Disc_Reward_Mean |           0.255 |
+|                                  Disc_Reward_Std |           0.212 |
+|                        Plot_Weighted_Reward_Mean |           0.238 |
+|                         Plot_Weighted_Reward_Std |           0.178 |
+|                    Plot_Ppo_Consumed_Reward_Mean |           0.238 |
+|                     Plot_Ppo_Consumed_Reward_Std |           0.178 |
+| Plot_Ppo_Consumed_Discounted_Rollout_Return_Mean |             6.6 |
+|  Plot_Ppo_Consumed_Discounted_Rollout_Return_Std |            1.47 |
+|                           Plot_Phase_Utility_Min |          0.0229 |
+|                          Plot_Phase_Utility_Mean |           0.132 |
+|                           Plot_Phase_Utility_Max |           0.326 |
+|                       Plot_Phase_Utility_Softmin |           0.123 |
+|                             Plot_Phase_Count_Min |              18 |
+|                             Plot_Phase_Count_Max |              59 |
+|                      Plot_Phase_Missing_Fraction |               0 |
+|                          Plot_Reward_Weight_Mean |               1 |
+|                           Plot_Reward_Weight_Std |           0.126 |
+|                           Plot_Reward_Weight_Max |            1.21 |
+|                             Plot_Probability_Max |           0.032 |
+|                           Plot_Probability_Ratio |            5.35 |
+|                   Plot_Adversarial_Density_Ratio |            1.78 |
+|                         Plot_Probability_Entropy |            3.89 |
+|              Plot_Probability_Normalized_Entropy |           0.984 |
+|               Plot_Probability_Effective_Support |            48.9 |
+|                    Plot_Probability_Argmax_Phase |              28 |
+|                    Plot_Adversarial_Argmax_Phase |              31 |
+|                                        Plot_Beta |             1.9 |
+|                                  Plot_Num_Phases |              52 |
+|                             Plot_Num_Phases_Auto |               0 |
+|                          Plot_Occupancy_Anchored |               1 |
+|                                         Exp_Prob |               1 |
+----------------------------------------------------------------------
+2026-08-25T02:05:57Z [18,187ms] [Warning] [omni.physx.plugin] USD stage detach not called, holding a loose ptr to a stage!
+2026-08-25T02:05:58Z [18,579ms] [Warning] [carb] Recursive unloadAllPlugins() detected!
