@@ -109,6 +109,31 @@ def test_extreme_occupancy_does_not_amplify_equal_utility():
     assert torch.allclose(density, torch.ones_like(density), atol=1e-6)
 
 
+def test_reference_uniform_prior_is_separate_from_behavior_occupancy():
+    utility = torch.zeros(3)
+    occupancy = torch.tensor([1.0, 10.0, 100.0])
+    probability = plot_agent.compute_phase_probabilities(
+        utility, occupancy, beta=1.9, phase_prior="reference_uniform")
+    density = plot_agent.compute_phase_density(
+        utility, occupancy, beta=1.9, phase_prior="reference_uniform")
+    normalized_occupancy = occupancy / occupancy.sum()
+    assert torch.allclose(probability, torch.full((3,), 1.0 / 3.0))
+    assert torch.allclose(
+        density, probability / normalized_occupancy, atol=1e-6)
+
+
+def test_density_cap_preserves_mass_and_bounds_importance_ratio():
+    utility = torch.tensor([0.0, 0.5, 1.0])
+    occupancy = torch.tensor([1.0, 10.0, 100.0])
+    probability = plot_agent.compute_phase_probabilities(
+        utility, occupancy, beta=1.9, phase_prior="reference_uniform",
+        density_cap=4.0)
+    normalized_occupancy = occupancy / occupancy.sum()
+    density = probability / normalized_occupancy
+    assert torch.allclose(probability.sum(), torch.tensor(1.0), atol=1e-6)
+    assert torch.max(density) <= 4.0 + 1e-5
+
+
 def test_empty_phase_is_masked_without_nan_or_infinite_sample_weight():
     utility = torch.tensor([0.2, 0.0, 0.8])
     counts = torch.tensor([5.0, 0.0, 3.0])

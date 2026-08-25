@@ -27,8 +27,53 @@ def _normalize_phase_occupancy(phase_occupancy, reference):
     return phase_occupancy / total
 
 
-def compute_phase_density(phase_utility, phase_occupancy, beta):
-    """Return the log-stable adversarial density p/rho on observed phases."""
+def _build_phase_prior(phase_occupancy, phase_prior):
+    if phase_prior == "occupancy":
+        return phase_occupancy
+    if phase_prior == "reference_uniform":
+        present = phase_occupancy > 0.0
+        prior = torch.zeros_like(phase_occupancy)
+        prior[present] = 1.0 / torch.sum(present).to(
+            dtype=phase_occupancy.dtype)
+        return prior
+    raise ValueError(
+        "plot_phase_prior must be 'occupancy' or 'reference_uniform'")
+
+
+def _project_probability_to_density_cap(probability, phase_occupancy,
+                                        density_cap):
+    if density_cap is None:
+        return probability
+    density_cap = float(density_cap)
+    if density_cap < 1.0:
+        raise ValueError("plot_weight_max must be at least 1")
+
+    capacity = density_cap * phase_occupancy
+    if torch.sum(capacity) < 1.0 - 1e-6:
+        raise ValueError("density cap is infeasible on the observed support")
+
+    lower = torch.zeros((), device=probability.device,
+                        dtype=probability.dtype)
+    upper = torch.ones_like(lower)
+    for _ in range(32):
+        mass = torch.sum(torch.minimum(upper * probability, capacity))
+        if mass >= 1.0:
+            break
+        upper = 2.0 * upper
+    for _ in range(48):
+        middle = 0.5 * (lower + upper)
+        mass = torch.sum(torch.minimum(middle * probability, capacity))
+        if mass < 1.0:
+            lower = middle
+        else:
+            upper = middle
+    projected = torch.minimum(upper * probability, capacity)
+    return projected / torch.sum(projected)
+
+
+def compute_phase_density(phase_utility, phase_occupancy, beta,
+                          phase_prior="occupancy", density_cap=None):
+    """Return p/rho for an explicit objective prior and behavior occupancy."""
     phase_utility = phase_utility.reshape(-1)
     if not torch.all(torch.isfinite(phase_utility)):
         raise ValueError("phase_utility must be finite")
@@ -40,28 +85,40 @@ def compute_phase_density(phase_utility, phase_occupancy, beta):
     if beta <= 0.0:
         raise ValueError("plot_beta must be positive")
 
-    present = phase_occupancy > 0.0
-    log_normalizer = torch.logsumexp(
-        torch.log(phase_occupancy[present])
-        - float(beta) * phase_utility[present], dim=0)
-    density = torch.zeros_like(phase_utility)
-    density[present] = torch.exp(
-        -float(beta) * phase_utility[present] - log_normalizer)
+    probability = compute_phase_probabilities(
+        phase_utility, phase_occupancy, beta,
+        phase_prior=phase_prior, density_cap=density_cap)
+    density = probability / torch.clamp_min(
+        phase_occupancy, torch.finfo(phase_occupancy.dtype).tiny)
     return density
 
 
-def compute_phase_probabilities(phase_utility, phase_occupancy, beta):
-    """Solve the occupancy-anchored entropy-regularized inner problem."""
+def compute_phase_probabilities(phase_utility, phase_occupancy, beta,
+                                phase_prior="occupancy", density_cap=None):
+    """Solve the entropy-regularized inner problem around a named prior."""
     phase_utility = phase_utility.reshape(-1)
     phase_occupancy = _normalize_phase_occupancy(
         phase_occupancy, phase_utility)
-    density = compute_phase_density(
-        phase_utility, phase_occupancy, beta)
-    return phase_occupancy * density
+    if not torch.all(torch.isfinite(phase_utility)):
+        raise ValueError("phase_utility must be finite")
+    if beta <= 0.0:
+        raise ValueError("plot_beta must be positive")
+    prior = _build_phase_prior(phase_occupancy, phase_prior)
+    present = phase_occupancy > 0.0
+    log_normalizer = torch.logsumexp(
+        torch.log(prior[present])
+        - float(beta) * phase_utility[present], dim=0)
+    probability = torch.zeros_like(phase_utility)
+    probability[present] = torch.exp(
+        torch.log(prior[present])
+        - float(beta) * phase_utility[present] - log_normalizer)
+    return _project_probability_to_density_cap(
+        probability, phase_occupancy, density_cap)
 
 
-def compute_entropic_softmin(phase_utility, phase_occupancy, beta):
-    """Return the occupancy-anchored entropic phase utility."""
+def compute_entropic_softmin(phase_utility, phase_occupancy, beta,
+                            phase_prior="occupancy"):
+    """Return the entropic phase utility around an explicit prior."""
     phase_utility = phase_utility.reshape(-1)
     phase_occupancy = _normalize_phase_occupancy(
         phase_occupancy, phase_utility)
@@ -71,8 +128,9 @@ def compute_entropic_softmin(phase_utility, phase_occupancy, beta):
     if beta <= 0.0:
         raise ValueError("plot_beta must be positive")
 
+    prior = _build_phase_prior(phase_occupancy, phase_prior)
     present = phase_occupancy > 0.0
-    log_terms = (torch.log(phase_occupancy[present])
+    log_terms = (torch.log(prior[present])
                  - float(beta) * phase_utility[present])
     return -torch.logsumexp(log_terms, dim=0) / float(beta)
 
@@ -117,13 +175,22 @@ class PLOTAgent(add_agent.ADDAgent):
     def _load_params(self, config):
         super()._load_params(config)
         phase_prior = str(config.get("plot_phase_prior", ""))
-        if phase_prior != "occupancy":
+        if phase_prior not in ("occupancy", "reference_uniform"):
             raise ValueError(
-                "plot_phase_prior must be 'occupancy' for PLOT")
+                "plot_phase_prior must be 'occupancy' or "
+                "'reference_uniform'")
         self._plot_phase_prior = phase_prior
         self._plot_beta = float(config["plot_beta"])
         if self._plot_beta <= 0.0:
             raise ValueError("plot_beta must be positive")
+        self._plot_weight_max = config.get("plot_weight_max", None)
+        if self._plot_weight_max is not None:
+            self._plot_weight_max = float(self._plot_weight_max)
+            if self._plot_weight_max < 1.0:
+                raise ValueError("plot_weight_max must be at least 1")
+        self._plot_nominal_mix = float(config.get("plot_nominal_mix", 1.0))
+        if not 0.0 <= self._plot_nominal_mix <= 1.0:
+            raise ValueError("plot_nominal_mix must lie in [0, 1]")
         return
 
     def _record_data_post_step(self, next_obs, r, done, next_info):
@@ -157,12 +224,18 @@ class PLOTAgent(add_agent.ADDAgent):
         phase_occupancy = phase_counts / torch.sum(phase_counts)
 
         phase_probability = compute_phase_probabilities(
-            phase_utility, phase_occupancy, self._plot_beta)
+            phase_utility, phase_occupancy, self._plot_beta,
+            phase_prior=self._plot_phase_prior,
+            density_cap=self._plot_weight_max)
         phase_density = compute_phase_density(
-            phase_utility, phase_occupancy, self._plot_beta)
+            phase_utility, phase_occupancy, self._plot_beta,
+            phase_prior=self._plot_phase_prior,
+            density_cap=self._plot_weight_max)
         # Use the closed-form density directly instead of dividing two small
         # probabilities.  This is exactly p_j/rho_j on the observed support.
-        phase_weights = phase_density[phase_idx]
+        robust_weights = phase_density[phase_idx]
+        phase_weights = (1.0 + self._plot_nominal_mix
+                         * (robust_weights - 1.0))
         if not torch.all(torch.isfinite(phase_weights)):
             raise FloatingPointError("PLOT produced non-finite phase weights")
         weighted_disc_r = disc_r * phase_weights
@@ -202,7 +275,8 @@ class PLOTAgent(add_agent.ADDAgent):
         density_ratio = (torch.max(observed_density)
                          / torch.min(observed_density))
         softmin = compute_entropic_softmin(
-            phase_utility, phase_occupancy, self._plot_beta)
+            phase_utility, phase_occupancy, self._plot_beta,
+            phase_prior=self._plot_phase_prior)
 
         info = {
             "disc_reward_mean": disc_reward_mean,
@@ -238,11 +312,14 @@ class PLOTAgent(add_agent.ADDAgent):
             "plot_adversarial_argmax_phase": (
                 one_based_phase_argmax(phase_density).float()),
             "plot_beta": torch.tensor(self._plot_beta, device=self._device),
+            "plot_nominal_mix": torch.tensor(
+                self._plot_nominal_mix, device=self._device),
             "plot_num_phases": torch.tensor(
                 self._plot_num_phases, device=self._device),
             "plot_num_phases_auto": torch.tensor(
                 float(self._plot_num_phases_is_auto), device=self._device),
-            "plot_occupancy_anchored": torch.ones(
-                (), device=self._device),
+            "plot_occupancy_anchored": torch.tensor(
+                float(self._plot_phase_prior == "occupancy"),
+                device=self._device),
         }
         return info
