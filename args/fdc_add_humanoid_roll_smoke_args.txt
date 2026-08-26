@@ -1,9 +1,0 @@
---num_envs 64
---engine_config data/engines/isaac_lab_engine.yaml
---env_config data/envs/aligned_add_humanoid_roll_env.yaml
---agent_config data/agents/aligned_add_humanoid_agent.yaml
---max_samples 10240
---out_dir output/fdc_add_roll_smoke_seed0
---rand_seed 0
---visualize false
---save_int_models false

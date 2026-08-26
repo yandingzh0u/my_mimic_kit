@@ -32,21 +32,9 @@ def build_agent(agent_file, env, device):
     elif (agent_name == "ADD"):
         import learning.add_agent as add_agent
         agent = add_agent.ADDAgent(config=agent_config, env=env, device=device)
-    elif (agent_name == "ALIGNED_ADD"):
-        import learning.aligned_add_agent as aligned_add_agent
-        agent = aligned_add_agent.AlignedADDAgent(config=agent_config, env=env, device=device)
-    elif (agent_name == "MM_ALIGNED_ADD"):
-        import learning.mm_aligned_add_agent as mm_aligned_add_agent
-        agent = mm_aligned_add_agent.MMAlignedADDAgent(config=agent_config, env=env, device=device)
-    elif (agent_name == "ET_ALIGNED_ADD"):
-        import learning.et_aligned_add_agent as et_aligned_add_agent
-        agent = et_aligned_add_agent.ETAlignedADDAgent(config=agent_config, env=env, device=device)
     elif (agent_name == "PLOT"):
         import learning.plot_agent as plot_agent
         agent = plot_agent.PLOTAgent(config=agent_config, env=env, device=device)
-    elif (agent_name == "RCCI_ADD"):
-        import learning.rcci_add_agent as rcci_add_agent
-        agent = rcci_add_agent.RCCIADDAgent(config=agent_config, env=env, device=device)
     elif (agent_name == "LCP"):
         import learning.lcp_agent as lcp_agent
         agent = lcp_agent.LCPAgent(config=agent_config, env=env, device=device)
