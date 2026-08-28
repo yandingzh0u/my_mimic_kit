@@ -12,7 +12,10 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mimickit"))
 
 from envs.add_env import build_disc_error_groups
-from learning.add_agent import calc_influence_allocation_loss
+from learning.add_agent import (
+    calc_influence_allocation_loss,
+    calc_unscaled_disc_reward,
+)
 from learning.add_model import ADDModel
 
 
@@ -33,7 +36,7 @@ class _Env:
         return self._action
 
 
-def _config(geometry="add", spectral_norm=False):
+def _config(geometry="add"):
     return {
         "actor_net": "fc_2layers_128units",
         "actor_init_output_scale": 0.01,
@@ -42,7 +45,6 @@ def _config(geometry="add", spectral_norm=False):
         "critic_net": "fc_2layers_128units",
         "disc_net": "fc_2layers_128units",
         "disc_geometry": geometry,
-        "disc_spectral_norm": spectral_norm,
     }
 
 
@@ -57,15 +59,14 @@ def test_discriminator_geometry_shapes(geometry, input_dim):
     assert model.eval_disc(diff, context).shape == (7, 1)
 
 
-def test_spectral_normalization_only_wraps_hidden_linear_layers():
-    model = ADDModel(_config(spectral_norm=True), _Env())
+def test_discriminator_uses_original_unparametrized_add_layers():
+    model = ADDModel(_config(), _Env())
     hidden = [
         layer for layer in model._disc_layers.modules()
         if isinstance(layer, torch.nn.Linear)
     ]
     assert len(hidden) == 2
-    assert all(hasattr(layer, "parametrizations") for layer in hidden)
-    assert all("weight" in layer.parametrizations for layer in hidden)
+    assert all(not hasattr(layer, "parametrizations") for layer in hidden)
     assert not hasattr(model._disc_logits, "parametrizations")
 
 
@@ -108,14 +109,29 @@ def test_signed_allocation_loss_uses_margin_targets_and_factual_gain():
     assert target.grad is None
 
 
-def test_gadd_config_has_one_new_path_and_no_gradient_penalty():
+def test_reward_space_allocation_rejects_saturated_logit_gain():
+    factual_logit = torch.tensor(-35.0)
+    counterfactual_logit = torch.full((7,), -29.0)
+    positive_logit = torch.tensor(5.18)
+    factual_reward = calc_unscaled_disc_reward(factual_logit)
+    gains = calc_unscaled_disc_reward(counterfactual_logit) - factual_reward
+    margin = calc_unscaled_disc_reward(positive_logit) - factual_reward
+    target = torch.full((7,), 1.0 / 7.0)
+    loss, desired = calc_influence_allocation_loss(gains, margin, target)
+
+    assert torch.all(gains < 1e-10)
+    assert torch.all(desired > 0.7)
+    assert loss > 1.8
+
+
+def test_gadd_config_keeps_original_gp_and_only_adds_allocation():
     path = ROOT / "data" / "agents" / "gadd_humanoid_agent.yaml"
     with path.open() as stream:
         config = yaml.safe_load(stream)
     assert config["disc_geometry"] == "add"
-    assert config["disc_spectral_norm"] is True
+    assert "disc_spectral_norm" not in config
     assert config["disc_influence_allocation"] is True
-    assert config["disc_grad_penalty"] == 0
+    assert config["disc_grad_penalty"] == 2
 
 
 def test_failed_metric_configs_are_removed():

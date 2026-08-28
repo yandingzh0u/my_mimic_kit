@@ -9,8 +9,6 @@ import util.torch_util as torch_util
 class ADDModel(amp_model.AMPModel):
     def __init__(self, config, env):
         self._disc_geometry = config.get("disc_geometry", "add")
-        self._disc_spectral_norm = bool(
-            config.get("disc_spectral_norm", False))
         if self._disc_geometry not in {"add", "ref_concat"}:
             raise ValueError(
                 "Unsupported ADD discriminator geometry: {}".format(
@@ -48,30 +46,9 @@ class ADDModel(amp_model.AMPModel):
         input_dict = {"disc_obs": disc_input_space}
         self._disc_layers, _ = net_builder.build_net(
             config["disc_net"], input_dict, activation=self._activation)
-        if self._disc_spectral_norm:
-            for layer in self._disc_layers.modules():
-                if isinstance(layer, torch.nn.Linear):
-                    torch.nn.utils.parametrizations.spectral_norm(layer)
 
         layers_out_size = torch_util.calc_layers_out_size(self._disc_layers)
         self._disc_logits = torch.nn.Linear(layers_out_size, 1)
         torch.nn.init.uniform_(self._disc_logits.weight, -1.0, 1.0)
         torch.nn.init.zeros_(self._disc_logits.bias)
         return
-
-    def get_disc_scale_stats(self):
-        with torch.no_grad():
-            hidden_fro_sq = torch.zeros(
-                (), device=self._disc_logits.weight.device)
-            hidden_layers = 0
-            for layer in self._disc_layers.modules():
-                if isinstance(layer, torch.nn.Linear):
-                    hidden_fro_sq += torch.sum(torch.square(layer.weight))
-                    hidden_layers += 1
-            return {
-                "disc_hidden_fro_norm": torch.sqrt(hidden_fro_sq),
-                "disc_hidden_linear_layers": torch.tensor(
-                    float(hidden_layers), device=self._disc_logits.weight.device),
-                "disc_output_weight_norm": torch.linalg.vector_norm(
-                    self._disc_logits.weight),
-            }
