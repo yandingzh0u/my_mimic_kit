@@ -33,7 +33,7 @@ class _Env:
         return self._action
 
 
-def _config(geometry="add"):
+def _config(geometry="add", spectral_norm=False):
     return {
         "actor_net": "fc_2layers_128units",
         "actor_init_output_scale": 0.01,
@@ -42,6 +42,7 @@ def _config(geometry="add"):
         "critic_net": "fc_2layers_128units",
         "disc_net": "fc_2layers_128units",
         "disc_geometry": geometry,
+        "disc_spectral_norm": spectral_norm,
     }
 
 
@@ -83,15 +84,26 @@ def test_calibrated_group_balanced_gp_preserves_isotropic_scale():
                           torch.full_like(dims, weights[0] / dims[0]))
 
 
-def test_gadd_config_is_calibrated_group_balanced_gp():
+def test_full_spectral_norm_covers_hidden_and_output_layers():
+    model = ADDModel(_config(spectral_norm=True), _Env())
+    hidden = [
+        layer for layer in model._disc_layers.modules()
+        if isinstance(layer, torch.nn.Linear)
+    ]
+    assert len(hidden) == 2
+    for layer in hidden + [model._disc_logits]:
+        assert torch.nn.utils.parametrize.is_parametrized(layer, "weight")
+
+
+def test_gadd_config_is_scale_only_full_sn():
     path = ROOT / "data" / "agents" / "gadd_humanoid_agent.yaml"
     with path.open() as stream:
         config = yaml.safe_load(stream)
     assert config["disc_geometry"] == "add"
-    assert config["disc_group_balanced_gp"] is True
-    assert "disc_spectral_norm" not in config
+    assert config["disc_spectral_norm"] is True
+    assert "disc_group_balanced_gp" not in config
     assert "disc_influence_allocation" not in config
-    assert config["disc_grad_penalty"] == 2
+    assert config["disc_grad_penalty"] == 0
 
 
 def test_failed_metric_configs_are_removed():

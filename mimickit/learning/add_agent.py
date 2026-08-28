@@ -44,12 +44,15 @@ class ADDAgent(amp_agent.AMPAgent):
     def _build_model(self, config):
         model_config = dict(config["model"])
         model_config["disc_geometry"] = self._disc_geometry
+        model_config["disc_spectral_norm"] = self._disc_spectral_norm
         self._model = add_model.ADDModel(model_config, self._env)
         return
 
     def _load_params(self, config):
         super()._load_params(config)
         self._disc_geometry = config.get("disc_geometry", "add")
+        self._disc_spectral_norm = bool(
+            config.get("disc_spectral_norm", False))
         self._use_group_balanced_gp = bool(
             config.get("disc_group_balanced_gp", False))
         if self._disc_geometry not in {"add", "ref_concat"}:
