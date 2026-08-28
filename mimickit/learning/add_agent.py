@@ -1,4 +1,3 @@
-import numpy as np
 import torch
 
 import learning.amp_agent as amp_agent
@@ -7,66 +6,32 @@ import util.torch_util as torch_util
 import learning.diff_normalizer as diff_normalizer
 import learning.normalizer as normalizer
 
-
-def calc_influence_allocation_loss(gains, margin, target):
-    desired_gain = margin.detach() * target.detach()
-    loss = 0.5 * torch.sum(torch.square(gains - desired_gain))
-    return loss, desired_gain
-
-
 def calc_unscaled_disc_reward(logits):
     probability = torch.sigmoid(logits)
     return -torch.log(torch.clamp_min(1 - probability, 0.0001))
 
 
 class ADDAgent(amp_agent.AMPAgent):
-    _ALLOC_EPS = 1e-6
-
     def __init__(self, config, env, device):
         super().__init__(config, env, device)
-
         self._pos_diff = self._build_pos_diff()
-        self._disc_error_groups = tuple()
-        self._disc_group_indices = tuple()
-        if self._use_influence_allocation:
-            self._disc_error_groups = self._env.get_disc_error_groups()
-            self._disc_group_indices = tuple(
-                torch.tensor(indices, device=self._device, dtype=torch.long)
-                for _, indices in self._disc_error_groups)
-            num_groups = len(self._disc_error_groups)
-            self.register_buffer(
-                "_alloc_initial_error",
-                torch.zeros(num_groups, device=self._device))
-            self.register_buffer(
-                "_alloc_baseline_ready",
-                torch.zeros((), device=self._device, dtype=torch.bool))
-            self._alloc_current_error = torch.zeros(
-                num_groups, device=self._device)
-            self._alloc_target = torch.full(
-                (num_groups,), 1.0 / num_groups, device=self._device)
         return
     
     def _build_model(self, config):
         model_config = dict(config["model"])
         model_config["disc_geometry"] = self._disc_geometry
+        model_config["disc_spectral_norm"] = self._disc_spectral_norm
         self._model = add_model.ADDModel(model_config, self._env)
         return
 
     def _load_params(self, config):
         super()._load_params(config)
         self._disc_geometry = config.get("disc_geometry", "add")
-        self._use_influence_allocation = bool(
-            config.get("disc_influence_allocation", False))
+        self._disc_spectral_norm = bool(
+            config.get("disc_spectral_norm", False))
         if self._disc_geometry not in {"add", "ref_concat"}:
             raise ValueError(
                 "disc_geometry must be 'add' or 'ref_concat'")
-        if self._use_influence_allocation:
-            if self._disc_geometry != "add":
-                raise ValueError(
-                    "Influence allocation requires the direct ADD geometry")
-            if self._disc_grad_penalty <= 0:
-                raise ValueError(
-                    "Influence allocation requires the ADD gradient penalty")
         return
     
     def _build_pos_diff(self):
@@ -139,10 +104,6 @@ class ADDAgent(amp_agent.AMPAgent):
         disc_r = self._calc_disc_rewards(norm_obs_diff, norm_context)
         disc_reward_std, disc_reward_mean = torch.std_mean(disc_r)
 
-        alloc_info = {}
-        if self._use_influence_allocation:
-            alloc_info = self._update_allocation_target(obs_diff)
-
         r = self._task_reward_weight * task_r + self._disc_reward_weight * disc_r
         self._exp_buffer.set_data_flat("reward", r)
         
@@ -155,39 +116,7 @@ class ADDAgent(amp_agent.AMPAgent):
             "disc_reward_mean": disc_reward_mean,
             "disc_reward_std": disc_reward_std
         }
-        info.update(alloc_info)
         return info
-
-    def _update_allocation_target(self, raw_diff):
-        with torch.no_grad():
-            errors = []
-            for indices in self._disc_group_indices:
-                group_diff = torch.index_select(raw_diff, -1, indices)
-                errors.append(torch.sqrt(torch.mean(torch.square(group_diff))))
-            errors = torch.stack(errors)
-
-            if not bool(self._alloc_baseline_ready.item()):
-                self._alloc_initial_error.copy_(
-                    torch.clamp_min(errors, self._ALLOC_EPS))
-                self._alloc_baseline_ready.fill_(True)
-
-            ratios = errors / torch.clamp_min(
-                self._alloc_initial_error, self._ALLOC_EPS)
-            target = ratios / torch.clamp_min(
-                torch.sum(ratios), self._ALLOC_EPS)
-            self._alloc_current_error = errors.detach()
-            self._alloc_target = target.detach()
-
-            info = {}
-            for group_id, (name, _) in enumerate(self._disc_error_groups):
-                info["alloc_error_{}".format(name)] = errors[group_id]
-                info["alloc_error_ratio_{}".format(name)] = ratios[group_id]
-                info["alloc_target_{}".format(name)] = target[group_id]
-            info["alloc_target_entropy"] = -torch.sum(
-                target * torch.log(torch.clamp_min(target, self._ALLOC_EPS)))
-            info["alloc_target_max"] = torch.max(target)
-            info["alloc_target_min"] = torch.min(target)
-            return info
     
     def _compute_disc_loss(self, batch):
         disc_obs = batch["disc_obs"]
@@ -215,7 +144,8 @@ class ADDAgent(amp_agent.AMPAgent):
             disc_pos_logit = self._model.eval_disc(pos_diff, norm_context)
             disc_pos_logit = disc_pos_logit.squeeze(-1)
 
-        norm_diff_obs.requires_grad_(True)
+        if self._disc_grad_penalty > 0:
+            norm_diff_obs.requires_grad_(True)
         disc_neg_logit = self._model.eval_disc(
             norm_diff_obs, norm_context)
         disc_neg_logit = disc_neg_logit.squeeze(-1)
@@ -230,23 +160,17 @@ class ADDAgent(amp_agent.AMPAgent):
         disc_logit_reg_loss = self._disc_logit_reg * disc_logit_loss
         disc_loss = disc_cls_loss + disc_logit_reg_loss
 
-        disc_neg_grad = torch.autograd.grad(
-            disc_neg_logit, norm_diff_obs,
-            grad_outputs=torch.ones_like(disc_neg_logit),
-            create_graph=True, retain_graph=True, only_inputs=True)[0]
-        disc_grad_penalty = torch.mean(torch.sum(
-            torch.square(disc_neg_grad), dim=-1))
-        disc_loss = (disc_loss
-                     + self._disc_grad_penalty * disc_grad_penalty)
-
-        if self._use_influence_allocation:
-            allocation_info = self._compute_influence_allocation(
-                norm_diff_obs[:current_count],
-                disc_neg_logit[:current_count], disc_pos_logit)
-            allocation_loss = allocation_info["alloc_loss"]
-            disc_loss = disc_loss + allocation_loss
+        if self._disc_grad_penalty > 0:
+            disc_neg_grad = torch.autograd.grad(
+                disc_neg_logit, norm_diff_obs,
+                grad_outputs=torch.ones_like(disc_neg_logit),
+                create_graph=True, retain_graph=True, only_inputs=True)[0]
+            disc_grad_penalty = torch.mean(torch.sum(
+                torch.square(disc_neg_grad), dim=-1))
+            disc_loss = (disc_loss
+                         + self._disc_grad_penalty * disc_grad_penalty)
         else:
-            allocation_info = {}
+            disc_grad_penalty = torch.zeros((), device=self._device)
         
         disc_neg_acc, disc_pos_acc = self._compute_disc_acc(disc_neg_logit, disc_pos_logit)
         disc_pos_logit_mean = torch.mean(disc_pos_logit)
@@ -263,71 +187,7 @@ class ADDAgent(amp_agent.AMPAgent):
             "disc_pos_logit": disc_pos_logit_mean.detach(),
             "disc_neg_logit": disc_neg_logit_mean.detach()
         }
-        disc_info.update(allocation_info)
         return disc_info
-
-    def _compute_influence_allocation(self, current_norm_diff,
-                                      current_logit, pos_logit):
-        target = self._alloc_target
-        factual_reward = calc_unscaled_disc_reward(current_logit)
-        positive_reward = calc_unscaled_disc_reward(pos_logit)
-        margin = (torch.mean(positive_reward.detach())
-                  - torch.mean(factual_reward.detach()))
-        reward_gains = []
-        logit_gains = []
-        counterfactual_reward_means = []
-        negative_fractions = []
-        for group_id, indices in enumerate(self._disc_group_indices):
-            counterfactual = current_norm_diff.clone()
-            counterfactual.index_fill_(-1, indices, 0.0)
-            counterfactual_logit = self._model.eval_disc(
-                counterfactual).squeeze(-1)
-            counterfactual_reward = calc_unscaled_disc_reward(
-                counterfactual_logit)
-            sample_reward_gain = counterfactual_reward - factual_reward
-            reward_gains.append(torch.mean(sample_reward_gain))
-            logit_gains.append(torch.mean(
-                counterfactual_logit - current_logit))
-            counterfactual_reward_means.append(torch.mean(
-                counterfactual_reward))
-            negative_fractions.append(torch.mean(
-                (sample_reward_gain < 0).to(dtype=torch.float32)))
-
-        reward_gains = torch.stack(reward_gains)
-        logit_gains = torch.stack(logit_gains)
-        counterfactual_reward_means = torch.stack(
-            counterfactual_reward_means)
-        negative_fractions = torch.stack(negative_fractions)
-        allocation_loss, desired_gain = calc_influence_allocation_loss(
-            reward_gains, margin, target)
-        residual = reward_gains - desired_gain
-        info = {
-            "alloc_loss": allocation_loss,
-            "alloc_reward_margin": margin.detach(),
-            "alloc_reward_factual_mean": torch.mean(
-                factual_reward).detach(),
-            "alloc_reward_positive_mean": torch.mean(
-                positive_reward).detach(),
-            "alloc_reward_gain_sum": torch.sum(reward_gains).detach(),
-            "alloc_reward_desired_gain_sum": torch.sum(
-                desired_gain).detach(),
-            "alloc_reward_gain_residual_rms": torch.sqrt(
-                torch.mean(torch.square(residual))).detach(),
-            "alloc_reward_negative_fraction": torch.mean(
-                negative_fractions).detach(),
-        }
-        for group_id, (name, _) in enumerate(self._disc_error_groups):
-            info["alloc_reward_gain_{}".format(name)] = \
-                reward_gains[group_id].detach()
-            info["alloc_reward_desired_gain_{}".format(name)] = \
-                desired_gain[group_id].detach()
-            info["alloc_reward_negative_fraction_{}".format(name)] = \
-                negative_fractions[group_id].detach()
-            info["alloc_counterfactual_reward_{}".format(name)] = \
-                counterfactual_reward_means[group_id].detach()
-            info["alloc_logit_gain_{}".format(name)] = \
-                logit_gains[group_id].detach()
-        return info
 
     def _calc_disc_rewards(self, norm_diff_obs, norm_context=None):
         with torch.no_grad():

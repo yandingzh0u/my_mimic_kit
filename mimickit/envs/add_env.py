@@ -98,56 +98,6 @@ class ADDEnv(amp_env.AMPEnv):
         deepmimic_env.DeepMimicEnv._update_done(self)
         return
 
-    def get_disc_error_groups(self):
-        char_id = self._get_char_id()
-        num_joints = self._kin_char_model.get_num_joints()
-        num_bodies = self._engine.get_obj_num_bodies(char_id)
-        num_dofs = self._engine.get_obj_num_dofs(char_id)
-        total_dim = int(self.get_disc_obs_space().shape[0])
-        return build_disc_error_groups(
-            self._num_disc_obs_steps, num_joints, num_bodies, num_dofs,
-            total_dim)
-
-
-def build_disc_error_groups(num_steps, num_joints, num_bodies, num_dofs,
-                            total_dim):
-    frame_dims = {
-        "root_pos": 3,
-        "root_rot": 6,
-        "body_rot": 6 * (num_joints - 1),
-        "body_pos": 3 * num_bodies,
-        "root_vel": 3,
-        "root_ang_vel": 3,
-        "dof_vel": num_dofs,
-    }
-    frame_offsets = {}
-    offset = 0
-    for name, dim in frame_dims.items():
-        frame_offsets[name] = (offset, offset + dim)
-        offset += dim
-
-    frame_dim = offset
-    if total_dim != num_steps * frame_dim:
-        raise ValueError(
-            "ADD differential layout mismatch: expected {}, got {}".format(
-                num_steps * frame_dim, total_dim))
-
-    # Keep the paper-facing order independent of the flattened observation
-    # order. Each semantic group includes the same block from every history
-    # frame.
-    group_order = (
-        "root_pos", "root_rot", "body_pos", "body_rot",
-        "root_vel", "root_ang_vel", "dof_vel")
-    groups = []
-    for name in group_order:
-        begin, end = frame_offsets[name]
-        indices = []
-        for step in range(num_steps):
-            step_offset = step * frame_dim
-            indices.extend(range(step_offset + begin, step_offset + end))
-        groups.append((name, tuple(indices)))
-    return tuple(groups)
-
 @torch.jit.script
 def compute_pos_obs(root_pos, root_rot, joint_rot, body_pos, global_obs):
     # type: (Tensor, Tensor, Tensor, Tensor, bool) -> Tensor
