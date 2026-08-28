@@ -11,6 +11,8 @@ class ADDModel(amp_model.AMPModel):
         self._disc_geometry = config.get("disc_geometry", "add")
         self._disc_spectral_norm = bool(
             config.get("disc_spectral_norm", False))
+        self._disc_group_balanced_metric = bool(
+            config.get("disc_group_balanced_metric", False))
         if self._disc_geometry not in {"add", "ref_concat"}:
             raise ValueError(
                 "Unsupported ADD discriminator geometry: {}".format(
@@ -27,6 +29,8 @@ class ADDModel(amp_model.AMPModel):
         return self._disc_logits(h)
 
     def build_disc_input(self, diff, context=None):
+        if self._disc_group_balanced_metric:
+            diff = diff * self._disc_metric_scale
         if self._disc_geometry == "add":
             return diff
         if self._disc_geometry == "ref_concat":
@@ -38,6 +42,19 @@ class ADDModel(amp_model.AMPModel):
     def _build_disc(self, config, env):
         disc_obs_space = env.get_disc_obs_space()
         self._disc_obs_dim = int(np.prod(disc_obs_space.shape))
+        if self._disc_group_balanced_metric:
+            if self._disc_geometry != "add":
+                raise ValueError(
+                    "Group-balanced metric requires direct ADD geometry")
+            groups = env.get_disc_error_groups()
+            dims = torch.tensor(
+                [len(indices) for _, indices in groups], dtype=torch.float32)
+            calibration_dim = torch.sum(torch.square(dims)) / torch.sum(dims)
+            scale = torch.ones(self._disc_obs_dim, dtype=torch.float32)
+            for group_id, (_, indices) in enumerate(groups):
+                scale[list(indices)] = torch.sqrt(
+                    calibration_dim / dims[group_id])
+            self.register_buffer("_disc_metric_scale", scale)
 
         input_dim = self._disc_obs_dim
         if self._disc_geometry == "ref_concat":

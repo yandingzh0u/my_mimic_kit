@@ -1,6 +1,7 @@
 agent_name: "ADD"
 disc_geometry: "add"
 disc_spectral_norm: true
+disc_group_balanced_metric: true
 
 model:
   actor_net: "fc_2layers_1024units"

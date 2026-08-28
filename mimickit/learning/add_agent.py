@@ -29,7 +29,7 @@ class ADDAgent(amp_agent.AMPAgent):
         self._disc_error_groups = tuple()
         self._disc_group_indices = tuple()
         self._disc_group_weights = torch.empty(0, device=self._device)
-        if self._use_group_balanced_gp:
+        if self._use_group_balanced_gp or self._use_group_balanced_metric:
             self._disc_error_groups = self._env.get_disc_error_groups()
             self._disc_group_indices = tuple(
                 torch.tensor(indices, device=self._device, dtype=torch.long)
@@ -45,6 +45,8 @@ class ADDAgent(amp_agent.AMPAgent):
         model_config = dict(config["model"])
         model_config["disc_geometry"] = self._disc_geometry
         model_config["disc_spectral_norm"] = self._disc_spectral_norm
+        model_config["disc_group_balanced_metric"] = \
+            self._use_group_balanced_metric
         self._model = add_model.ADDModel(model_config, self._env)
         return
 
@@ -53,6 +55,8 @@ class ADDAgent(amp_agent.AMPAgent):
         self._disc_geometry = config.get("disc_geometry", "add")
         self._disc_spectral_norm = bool(
             config.get("disc_spectral_norm", False))
+        self._use_group_balanced_metric = bool(
+            config.get("disc_group_balanced_metric", False))
         self._use_group_balanced_gp = bool(
             config.get("disc_group_balanced_gp", False))
         if self._disc_geometry not in {"add", "ref_concat"}:
@@ -65,6 +69,16 @@ class ADDAgent(amp_agent.AMPAgent):
             if self._disc_grad_penalty <= 0:
                 raise ValueError(
                     "Group-balanced GP requires a positive GP coefficient")
+        if self._use_group_balanced_metric:
+            if self._disc_geometry != "add":
+                raise ValueError(
+                    "Group-balanced metric requires direct ADD geometry")
+            if not self._disc_spectral_norm:
+                raise ValueError(
+                    "Group-balanced metric requires full spectral normalization")
+            if self._use_group_balanced_gp or self._disc_grad_penalty > 0:
+                raise ValueError(
+                    "Metric-aware Full SN does not use gradient penalty")
         return
     
     def _build_pos_diff(self):
@@ -239,6 +253,12 @@ class ADDAgent(amp_agent.AMPAgent):
                     group_gp_weighted[group_id].detach()
                 disc_info["disc_gp_fraction_{}".format(name)] = \
                     group_gp_weighted[group_id].detach() / weighted_total
+        if self._use_group_balanced_metric:
+            for group_id, (name, _) in enumerate(self._disc_error_groups):
+                metric_scale = torch.rsqrt(
+                    self._disc_group_weights[group_id])
+                disc_info["disc_metric_scale_{}".format(name)] = \
+                    metric_scale.detach().clone()
         return disc_info
 
     def _calc_disc_rewards(self, norm_diff_obs, norm_context=None):
