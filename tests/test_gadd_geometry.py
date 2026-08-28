@@ -11,6 +11,8 @@ import yaml
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mimickit"))
 
+from envs.add_env import build_disc_error_groups
+from learning.add_agent import calc_influence_allocation_loss
 from learning.add_model import ADDModel
 
 
@@ -31,7 +33,7 @@ class _Env:
         return self._action
 
 
-def _config(geometry):
+def _config(geometry="add", spectral_norm=False):
     return {
         "actor_net": "fc_2layers_128units",
         "actor_init_output_scale": 0.01,
@@ -39,16 +41,13 @@ def _config(geometry):
         "action_std": 0.05,
         "critic_net": "fc_2layers_128units",
         "disc_net": "fc_2layers_128units",
-        "metric_net": "fc_2layers_128units",
         "disc_geometry": geometry,
-        "metric_max": 5.0,
+        "disc_spectral_norm": spectral_norm,
     }
 
 
 @pytest.mark.parametrize(
-    "geometry,input_dim",
-    [("add", 12), ("ref_concat", 24),
-     ("global_metric", 12), ("conditioned_metric", 12)])
+    "geometry,input_dim", [("add", 12), ("ref_concat", 24)])
 def test_discriminator_geometry_shapes(geometry, input_dim):
     model = ADDModel(_config(geometry), _Env())
     diff = torch.randn(7, 12)
@@ -58,35 +57,70 @@ def test_discriminator_geometry_shapes(geometry, input_dim):
     assert model.eval_disc(diff, context).shape == (7, 1)
 
 
-@pytest.mark.parametrize("geometry", ["global_metric", "conditioned_metric"])
-def test_metric_is_positive_bounded_and_unit_mean(geometry):
-    model = ADDModel(_config(geometry), _Env())
-    context = torch.randn(19, 12)
-    weights = model.calc_metric_weights(context)
-    assert torch.all(weights >= 0.2 - 1e-6)
-    assert torch.all(weights <= 5.0 + 1e-6)
-    assert torch.allclose(
-        weights.mean(dim=-1), torch.ones_like(weights.mean(dim=-1)),
-        atol=1e-6)
+def test_spectral_normalization_only_wraps_hidden_linear_layers():
+    model = ADDModel(_config(spectral_norm=True), _Env())
+    hidden = [
+        layer for layer in model._disc_layers.modules()
+        if isinstance(layer, torch.nn.Linear)
+    ]
+    assert len(hidden) == 2
+    assert all(hasattr(layer, "parametrizations") for layer in hidden)
+    assert all("weight" in layer.parametrizations for layer in hidden)
+    assert not hasattr(model._disc_logits, "parametrizations")
 
 
-def test_conditioned_metric_preserves_zero_positive_sample():
-    model = ADDModel(_config("conditioned_metric"), _Env())
-    context = torch.randn(5, 12)
-    transformed = model.transform_diff(torch.zeros(5, 12), context)
-    assert torch.count_nonzero(transformed) == 0
+def test_disc_error_groups_cover_multiframe_input_exactly_once():
+    num_steps = 2
+    num_joints = 5
+    num_bodies = 5
+    num_dofs = 9
+    frame_dim = (
+        3 + 6 + 6 * (num_joints - 1) + 3 * num_bodies + 3 + 3
+        + num_dofs)
+    total_dim = num_steps * frame_dim
+    groups = build_disc_error_groups(
+        num_steps, num_joints, num_bodies, num_dofs, total_dim)
+
+    assert [name for name, _ in groups] == [
+        "root_pos", "root_rot", "body_pos", "body_rot",
+        "root_vel", "root_ang_vel", "dof_vel"]
+    all_indices = [index for _, indices in groups for index in indices]
+    assert sorted(all_indices) == list(range(total_dim))
+    assert len(all_indices) == len(set(all_indices))
 
 
-def test_ablation_configs_match_the_intended_matrix():
-    expected = {
-        "add_humanoid_agent.yaml": ("add", "raw"),
-        "gadd_refconcat_humanoid_agent.yaml": ("ref_concat", "raw"),
-        "gadd_global_metric_humanoid_agent.yaml": ("global_metric", "raw"),
-        "gadd_metric_raw_gp_humanoid_agent.yaml": ("conditioned_metric", "raw"),
-        "gadd_metric_z_gp_humanoid_agent.yaml": ("conditioned_metric", "z"),
-    }
-    for filename, (geometry, gp_space) in expected.items():
-        with (ROOT / "data" / "agents" / filename).open() as stream:
-            config = yaml.safe_load(stream)
-        assert config.get("disc_geometry", "add") == geometry
-        assert config.get("disc_gp_space", "raw") == gp_space
+def test_disc_error_groups_reject_layout_mismatch():
+    with pytest.raises(ValueError, match="layout mismatch"):
+        build_disc_error_groups(1, 5, 5, 9, total_dim=3)
+
+
+def test_signed_allocation_loss_uses_margin_targets_and_factual_gain():
+    gains = torch.tensor([-0.2, 0.8], requires_grad=True)
+    margin = torch.tensor(2.0, requires_grad=True)
+    target = torch.tensor([0.75, 0.25], requires_grad=True)
+    loss, desired = calc_influence_allocation_loss(gains, margin, target)
+    loss.backward()
+
+    assert torch.allclose(desired, torch.tensor([1.5, 0.5]))
+    assert gains.grad[0] < 0  # gradient descent raises the negative gain
+    assert gains.grad[1] > 0  # and lowers an over-allocated gain
+    assert margin.grad is None
+    assert target.grad is None
+
+
+def test_gadd_config_has_one_new_path_and_no_gradient_penalty():
+    path = ROOT / "data" / "agents" / "gadd_humanoid_agent.yaml"
+    with path.open() as stream:
+        config = yaml.safe_load(stream)
+    assert config["disc_geometry"] == "add"
+    assert config["disc_spectral_norm"] is True
+    assert config["disc_influence_allocation"] is True
+    assert config["disc_grad_penalty"] == 0
+
+
+def test_failed_metric_configs_are_removed():
+    for filename in (
+            "gadd_global_metric_humanoid_agent.yaml",
+            "gadd_metric_raw_gp_humanoid_agent.yaml",
+            "gadd_metric_z_gp_humanoid_agent.yaml"):
+        assert not (ROOT / "data" / "agents" / filename).exists()

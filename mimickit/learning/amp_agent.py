@@ -189,10 +189,6 @@ class AMPAgent(ppo_agent.PPOAgent):
                 device=self._device,
                 dtype=torch.float32)
 
-            if hasattr(self._model, "get_metric_grad_norm"):
-                loss_info["metric_grad_norm"] = \
-                    self._model.get_metric_grad_norm()
-
             torch_util.add_torch_dict(loss_info, info)
         
         torch_util.scale_torch_dict(1.0 / steps, info)

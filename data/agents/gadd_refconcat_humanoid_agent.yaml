@@ -1,6 +1,5 @@
 agent_name: "ADD"
 disc_geometry: "ref_concat"
-disc_gp_space: "raw"
 
 model:
   actor_net: "fc_2layers_1024units"
