@@ -11,6 +11,8 @@ import yaml
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mimickit"))
 
+from envs.add_env import build_disc_error_groups
+from learning.add_agent import calc_group_balanced_gp
 from learning.add_model import ADDModel
 
 
@@ -31,7 +33,7 @@ class _Env:
         return self._action
 
 
-def _config(geometry="add", spectral_norm=False):
+def _config(geometry="add"):
     return {
         "actor_net": "fc_2layers_128units",
         "actor_init_output_scale": 0.01,
@@ -40,7 +42,6 @@ def _config(geometry="add", spectral_norm=False):
         "critic_net": "fc_2layers_128units",
         "disc_net": "fc_2layers_128units",
         "disc_geometry": geometry,
-        "disc_spectral_norm": spectral_norm,
     }
 
 
@@ -55,26 +56,42 @@ def test_discriminator_geometry_shapes(geometry, input_dim):
     assert model.eval_disc(diff, context).shape == (7, 1)
 
 
-def test_full_spectral_norm_covers_hidden_and_output_layers():
-    model = ADDModel(_config(spectral_norm=True), _Env())
-    hidden = [
-        layer for layer in model._disc_layers.modules()
-        if isinstance(layer, torch.nn.Linear)
-    ]
-    assert len(hidden) == 2
-    layers = hidden + [model._disc_logits]
-    assert all(torch.nn.utils.parametrize.is_parametrized(
-        layer, "weight") for layer in layers)
+def test_group_layout_covers_differential_once():
+    groups = build_disc_error_groups(
+        num_steps=2, num_joints=4, num_bodies=5, num_dofs=8,
+        total_dim=2 * (3 + 6 + 18 + 15 + 3 + 3 + 8))
+    indices = [index for _, group in groups for index in group]
+    assert len(groups) == 7
+    assert sorted(indices) == list(range(len(indices)))
 
 
-def test_gadd_config_is_full_sn_only():
+def test_calibrated_group_balanced_gp_preserves_isotropic_scale():
+    groups = build_disc_error_groups(
+        num_steps=1, num_joints=4, num_bodies=5, num_dofs=8,
+        total_dim=3 + 6 + 18 + 15 + 3 + 3 + 8)
+    indices = tuple(torch.tensor(group) for _, group in groups)
+    dims = torch.tensor([len(group) for _, group in groups], dtype=torch.float32)
+    weights = dims * torch.sum(dims) / torch.sum(torch.square(dims))
+    grad = torch.ones(5, int(torch.sum(dims).item()))
+    penalty, raw, weighted = calc_group_balanced_gp(
+        grad, indices, weights)
+    assert torch.allclose(penalty, torch.sum(dims))
+    assert torch.allclose(raw, dims)
+    assert torch.allclose(weighted, dims * dims * torch.sum(dims)
+                          / torch.sum(torch.square(dims)))
+    assert torch.allclose(weights / dims,
+                          torch.full_like(dims, weights[0] / dims[0]))
+
+
+def test_gadd_config_is_calibrated_group_balanced_gp():
     path = ROOT / "data" / "agents" / "gadd_humanoid_agent.yaml"
     with path.open() as stream:
         config = yaml.safe_load(stream)
     assert config["disc_geometry"] == "add"
-    assert config["disc_spectral_norm"] is True
+    assert config["disc_group_balanced_gp"] is True
+    assert "disc_spectral_norm" not in config
     assert "disc_influence_allocation" not in config
-    assert config["disc_grad_penalty"] == 0
+    assert config["disc_grad_penalty"] == 2
 
 
 def test_failed_metric_configs_are_removed():
