@@ -108,7 +108,7 @@ def test_group_metric_is_applied_after_normalization_input():
         _config(spectral_norm=True, group_metric=True), _Env())
     diff = torch.ones(2, 12)
     transformed = model.build_disc_input(diff)
-    calibration_dim = (3 ** 2 + 9 ** 2) / 12
+    calibration_dim = (3 + 9) / 2
     assert torch.allclose(
         transformed[:, :3],
         torch.full((2, 3), (calibration_dim / 3) ** 0.5))
@@ -116,6 +116,13 @@ def test_group_metric_is_applied_after_normalization_input():
         transformed[:, 3:],
         torch.full((2, 9), (calibration_dim / 9) ** 0.5))
     assert torch.count_nonzero(model.build_disc_input(torch.zeros_like(diff))) == 0
+
+
+def test_group_metric_preserves_isotropic_expected_squared_distance():
+    model = ADDModel(
+        _config(spectral_norm=True, group_metric=True), _Env())
+    scale = model._disc_metric_scale
+    assert torch.allclose(torch.sum(torch.square(scale)), torch.tensor(12.0))
 
 
 def test_gadd_config_is_metric_aware_full_sn():

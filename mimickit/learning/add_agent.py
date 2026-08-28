@@ -37,7 +37,10 @@ class ADDAgent(amp_agent.AMPAgent):
             dims = torch.tensor(
                 [len(indices) for _, indices in self._disc_error_groups],
                 device=self._device, dtype=torch.float32)
-            calibration_dim = torch.sum(torch.square(dims)) / torch.sum(dims)
+            if self._use_group_balanced_gp:
+                calibration_dim = torch.sum(torch.square(dims)) / torch.sum(dims)
+            else:
+                calibration_dim = torch.mean(dims)
             self._disc_group_weights = dims / calibration_dim
         return
     

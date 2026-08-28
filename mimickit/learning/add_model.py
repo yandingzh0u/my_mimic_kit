@@ -49,7 +49,7 @@ class ADDModel(amp_model.AMPModel):
             groups = env.get_disc_error_groups()
             dims = torch.tensor(
                 [len(indices) for _, indices in groups], dtype=torch.float32)
-            calibration_dim = torch.sum(torch.square(dims)) / torch.sum(dims)
+            calibration_dim = torch.mean(dims)
             scale = torch.ones(self._disc_obs_dim, dtype=torch.float32)
             for group_id, (_, indices) in enumerate(groups):
                 scale[list(indices)] = torch.sqrt(
