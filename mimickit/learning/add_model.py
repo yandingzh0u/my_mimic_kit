@@ -6,13 +6,60 @@ import learning.amp_model as amp_model
 import learning.nets.net_builder as net_builder
 import util.torch_util as torch_util
 
+
+class GroupSeparableDiscLayers(torch.nn.Module):
+    def __init__(self, groups, first_width, trunk_widths, activation,
+                 spectral_norm):
+        super().__init__()
+        num_groups = len(groups)
+        self.group_width = first_width // num_groups
+        if self.group_width < 1:
+            raise ValueError("Discriminator width must cover every error group")
+
+        self.encoders = torch.nn.ModuleList()
+        for group_id, (_, indices) in enumerate(groups):
+            self.register_buffer(
+                "group_indices_{}".format(group_id),
+                torch.tensor(indices, dtype=torch.long))
+            layer = self._build_linear(
+                len(indices), self.group_width, spectral_norm)
+            self.encoders.append(torch.nn.Sequential(layer, activation()))
+
+        self.total_width = self.group_width * num_groups
+        trunk = []
+        in_size = self.total_width
+        for out_size in trunk_widths:
+            trunk.append(self._build_linear(
+                in_size, out_size, spectral_norm))
+            trunk.append(activation())
+            in_size = out_size
+        self.trunk = torch.nn.Sequential(*trunk)
+        self.out_features = in_size
+        return
+
+    @staticmethod
+    def _build_linear(in_features, out_features, spectral_norm):
+        layer = torch.nn.Linear(in_features, out_features)
+        torch.nn.init.zeros_(layer.bias)
+        if spectral_norm:
+            torch.nn.utils.parametrizations.spectral_norm(layer)
+        return layer
+
+    def forward(self, x):
+        encoded = []
+        for group_id, encoder in enumerate(self.encoders):
+            indices = getattr(self, "group_indices_{}".format(group_id))
+            encoded.append(encoder(torch.index_select(x, -1, indices)))
+        return self.trunk(torch.cat(encoded, dim=-1))
+
+
 class ADDModel(amp_model.AMPModel):
     def __init__(self, config, env):
         self._disc_geometry = config.get("disc_geometry", "add")
         self._disc_spectral_norm = bool(
             config.get("disc_spectral_norm", False))
-        self._disc_group_balanced_metric = bool(
-            config.get("disc_group_balanced_metric", False))
+        self._disc_group_separable_frontend = bool(
+            config.get("disc_group_separable_frontend", False))
         if self._disc_geometry not in {"add", "ref_concat"}:
             raise ValueError(
                 "Unsupported ADD discriminator geometry: {}".format(
@@ -29,8 +76,6 @@ class ADDModel(amp_model.AMPModel):
         return self._disc_logits(h)
 
     def build_disc_input(self, diff, context=None):
-        if self._disc_group_balanced_metric:
-            diff = diff * self._disc_metric_scale
         if self._disc_geometry == "add":
             return diff
         if self._disc_geometry == "ref_concat":
@@ -42,19 +87,6 @@ class ADDModel(amp_model.AMPModel):
     def _build_disc(self, config, env):
         disc_obs_space = env.get_disc_obs_space()
         self._disc_obs_dim = int(np.prod(disc_obs_space.shape))
-        if self._disc_group_balanced_metric:
-            if self._disc_geometry != "add":
-                raise ValueError(
-                    "Group-balanced metric requires direct ADD geometry")
-            groups = env.get_disc_error_groups()
-            dims = torch.tensor(
-                [len(indices) for _, indices in groups], dtype=torch.float32)
-            calibration_dim = torch.mean(dims)
-            scale = torch.ones(self._disc_obs_dim, dtype=torch.float32)
-            for group_id, (_, indices) in enumerate(groups):
-                scale[list(indices)] = torch.sqrt(
-                    calibration_dim / dims[group_id])
-            self.register_buffer("_disc_metric_scale", scale)
 
         input_dim = self._disc_obs_dim
         if self._disc_geometry == "ref_concat":
@@ -63,17 +95,46 @@ class ADDModel(amp_model.AMPModel):
             low=-np.inf, high=np.inf, shape=(input_dim,),
             dtype=disc_obs_space.dtype)
         input_dict = {"disc_obs": disc_input_space}
-        self._disc_layers, _ = net_builder.build_net(
+        base_layers, _ = net_builder.build_net(
             config["disc_net"], input_dict, activation=self._activation)
-        if self._disc_spectral_norm:
-            for layer in self._disc_layers.modules():
-                if isinstance(layer, torch.nn.Linear):
-                    torch.nn.utils.parametrizations.spectral_norm(layer)
+        if self._disc_group_separable_frontend:
+            if self._disc_geometry != "add":
+                raise ValueError(
+                    "Group-separable front-end requires direct ADD geometry")
+            linears = [
+                layer for layer in base_layers
+                if isinstance(layer, torch.nn.Linear)
+            ]
+            if len(linears) < 2:
+                raise ValueError(
+                    "Group-separable front-end requires a shared trunk")
+            self._disc_layers = GroupSeparableDiscLayers(
+                groups=env.get_disc_error_groups(),
+                first_width=linears[0].out_features,
+                trunk_widths=[layer.out_features for layer in linears[1:]],
+                activation=self._activation,
+                spectral_norm=self._disc_spectral_norm)
+            layers_out_size = self._disc_layers.out_features
+        else:
+            self._disc_layers = base_layers
+            if self._disc_spectral_norm:
+                for layer in self._disc_layers.modules():
+                    if isinstance(layer, torch.nn.Linear):
+                        torch.nn.utils.parametrizations.spectral_norm(layer)
+            layers_out_size = torch_util.calc_layers_out_size(
+                self._disc_layers)
 
-        layers_out_size = torch_util.calc_layers_out_size(self._disc_layers)
         self._disc_logits = torch.nn.Linear(layers_out_size, 1)
         torch.nn.init.uniform_(self._disc_logits.weight, -1.0, 1.0)
         torch.nn.init.zeros_(self._disc_logits.bias)
         if self._disc_spectral_norm:
             torch.nn.utils.parametrizations.spectral_norm(self._disc_logits)
         return
+
+    def get_disc_group_width(self):
+        return self._disc_logits.weight.new_tensor(
+            float(self._disc_layers.group_width))
+
+    def get_disc_group_total_width(self):
+        return self._disc_logits.weight.new_tensor(
+            float(self._disc_layers.total_width))

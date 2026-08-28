@@ -12,7 +12,6 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mimickit"))
 
 from envs.add_env import build_disc_error_groups
-from learning.add_agent import calc_group_balanced_gp
 from learning.add_model import ADDModel
 
 
@@ -40,7 +39,7 @@ class _Env:
         )
 
 
-def _config(geometry="add", spectral_norm=False, group_metric=False):
+def _config(geometry="add", spectral_norm=False, group_frontend=False):
     return {
         "actor_net": "fc_2layers_128units",
         "actor_init_output_scale": 0.01,
@@ -50,7 +49,7 @@ def _config(geometry="add", spectral_norm=False, group_metric=False):
         "disc_net": "fc_2layers_128units",
         "disc_geometry": geometry,
         "disc_spectral_norm": spectral_norm,
-        "disc_group_balanced_metric": group_metric,
+        "disc_group_separable_frontend": group_frontend,
     }
 
 
@@ -74,24 +73,6 @@ def test_group_layout_covers_differential_once():
     assert sorted(indices) == list(range(len(indices)))
 
 
-def test_calibrated_group_balanced_gp_preserves_isotropic_scale():
-    groups = build_disc_error_groups(
-        num_steps=1, num_joints=4, num_bodies=5, num_dofs=8,
-        total_dim=3 + 6 + 18 + 15 + 3 + 3 + 8)
-    indices = tuple(torch.tensor(group) for _, group in groups)
-    dims = torch.tensor([len(group) for _, group in groups], dtype=torch.float32)
-    weights = dims * torch.sum(dims) / torch.sum(torch.square(dims))
-    grad = torch.ones(5, int(torch.sum(dims).item()))
-    penalty, raw, weighted = calc_group_balanced_gp(
-        grad, indices, weights)
-    assert torch.allclose(penalty, torch.sum(dims))
-    assert torch.allclose(raw, dims)
-    assert torch.allclose(weighted, dims * dims * torch.sum(dims)
-                          / torch.sum(torch.square(dims)))
-    assert torch.allclose(weights / dims,
-                          torch.full_like(dims, weights[0] / dims[0]))
-
-
 def test_full_spectral_norm_covers_hidden_and_output_layers():
     model = ADDModel(_config(spectral_norm=True), _Env())
     hidden = [
@@ -103,35 +84,36 @@ def test_full_spectral_norm_covers_hidden_and_output_layers():
         assert torch.nn.utils.parametrize.is_parametrized(layer, "weight")
 
 
-def test_group_metric_is_applied_after_normalization_input():
+def test_group_separable_frontend_has_equal_width_and_expected_shape():
     model = ADDModel(
-        _config(spectral_norm=True, group_metric=True), _Env())
-    diff = torch.ones(2, 12)
-    transformed = model.build_disc_input(diff)
-    calibration_dim = (3 + 9) / 2
-    assert torch.allclose(
-        transformed[:, :3],
-        torch.full((2, 3), (calibration_dim / 3) ** 0.5))
-    assert torch.allclose(
-        transformed[:, 3:],
-        torch.full((2, 9), (calibration_dim / 9) ** 0.5))
-    assert torch.count_nonzero(model.build_disc_input(torch.zeros_like(diff))) == 0
+        _config(spectral_norm=True, group_frontend=True), _Env())
+    frontend = model._disc_layers
+    assert frontend.group_width == 64
+    assert frontend.total_width == 128
+    assert len(frontend.encoders) == 2
+    assert model.eval_disc(torch.randn(7, 12)).shape == (7, 1)
 
 
-def test_group_metric_preserves_isotropic_expected_squared_distance():
+def test_group_separable_frontend_and_trunk_are_spectral_normalized():
     model = ADDModel(
-        _config(spectral_norm=True, group_metric=True), _Env())
-    scale = model._disc_metric_scale
-    assert torch.allclose(torch.sum(torch.square(scale)), torch.tensor(12.0))
+        _config(spectral_norm=True, group_frontend=True), _Env())
+    linears = [
+        layer for layer in model._disc_layers.modules()
+        if isinstance(layer, torch.nn.Linear)
+    ]
+    assert len(linears) == 3
+    for layer in linears + [model._disc_logits]:
+        assert torch.nn.utils.parametrize.is_parametrized(layer, "weight")
 
 
-def test_gadd_config_is_metric_aware_full_sn():
+def test_gadd_config_is_group_separable_full_sn():
     path = ROOT / "data" / "agents" / "gadd_humanoid_agent.yaml"
     with path.open() as stream:
         config = yaml.safe_load(stream)
     assert config["disc_geometry"] == "add"
     assert config["disc_spectral_norm"] is True
-    assert config["disc_group_balanced_metric"] is True
+    assert config["disc_group_separable_frontend"] is True
+    assert "disc_group_balanced_metric" not in config
     assert "disc_group_balanced_gp" not in config
     assert "disc_influence_allocation" not in config
     assert config["disc_grad_penalty"] == 0
