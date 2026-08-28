@@ -70,6 +70,21 @@ class ADDModel(amp_model.AMPModel):
                 "metric_weight_std": torch.std(weights),
             }
 
+    def get_metric_grad_norm(self):
+        if self._disc_geometry == "global_metric":
+            params = [self._metric_logits]
+        elif self._disc_geometry == "conditioned_metric":
+            params = (list(self._metric_layers.parameters())
+                      + list(self._metric_out.parameters()))
+        else:
+            return torch.zeros((), device=self._disc_logits.weight.device)
+
+        grad_sq_sum = torch.zeros((), device=self._disc_logits.weight.device)
+        for param in params:
+            if param.grad is not None:
+                grad_sq_sum += torch.sum(torch.square(param.grad.detach()))
+        return torch.sqrt(grad_sq_sum)
+
     def get_disc_params(self):
         params = super().get_disc_params()
         if self._disc_geometry == "global_metric":
