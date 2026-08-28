@@ -95,7 +95,7 @@ if [[ ! -x "$python_bin" ]]; then
   exit 2
 fi
 
-methods=(deepmimic amp add plot)
+methods=(deepmimic amp add)
 motions=(run backflip crawl getup_facedown spinkick climb)
 
 run_methods=("${methods[@]}")
@@ -147,14 +147,12 @@ declare -A arg_files=(
   [deepmimic]="args/paper_benchmark/deepmimic_2k_8192_args.txt"
   [amp]="args/paper_benchmark/amp_2k_8192_args.txt"
   [add]="args/paper_benchmark/add_2k_8192_args.txt"
-  [plot]="args/paper_benchmark/plot_2k_8192_args.txt"
 )
 
 declare -A agent_files=(
   [deepmimic]="data/agents/deepmimic_humanoid_ppo_agent.yaml"
   [amp]="data/agents/amp_humanoid_agent.yaml"
   [add]="data/agents/add_humanoid_agent.yaml"
-  [plot]="data/agents/plot_humanoid_agent.yaml"
 )
 
 smoke_envs=64
@@ -601,12 +599,6 @@ fi
 if [[ "$run_scale_smoke" == true ]]; then
   for method in "${run_methods[@]}"; do
     scale_motions=(run)
-    # Every selected PLOT motion receives three production-size updates before
-    # the formal queue starts.  This checks the phase statistics and replay
-    # path under the exact 8192-environment allocation used by long training.
-    if [[ "$method" == "plot" ]]; then
-      scale_motions=("${run_motions[@]}")
-    fi
     for motion in "${scale_motions[@]}"; do
       motion_selected=false
       for requested_motion in "${run_motions[@]}"; do

@@ -58,17 +58,7 @@ def test_checkpoint_metadata_matches_intermediate_model_iteration(tmp_path):
     assert metadata["samples"] == 1234
 
 
-def test_plot_reward_diagnostic_is_never_labeled_as_optimized_policy():
-    assert reward_diagnostic_label("PLOT") == "base_learned_unweighted"
-    assert reward_diagnostic_episode_key("PLOT") == (
-        "base_learned_unweighted_reward_mean")
-    metrics = summarize_reward_diagnostics(
-        "plot", np.asarray([1.0, 2.0]), np.asarray([0.25, 0.5]))
-    assert set(metrics) == {"environment", "base_learned_unweighted"}
-    assert "optimized_policy" not in metrics
-
-
-def test_non_plot_reward_diagnostic_retains_optimized_policy_label():
+def test_reward_diagnostic_retains_optimized_policy_label():
     assert reward_diagnostic_label("ADD") == "optimized_policy"
     assert reward_diagnostic_episode_key("ADD") == "policy_reward_mean"
     metrics = summarize_reward_diagnostics(

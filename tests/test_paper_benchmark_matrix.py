@@ -18,7 +18,7 @@ import envs.deepmimic_env as deepmimic_env  # noqa: E402
 import envs.static_objects_env as static_objects_env  # noqa: E402
 
 
-METHODS = ("deepmimic", "amp", "add", "plot")
+METHODS = ("deepmimic", "amp", "add")
 MOTIONS = (
     "run",
     "backflip",
@@ -31,7 +31,6 @@ ENV_NAMES = {
     "deepmimic": "deepmimic",
     "amp": "amp",
     "add": "add",
-    "plot": "plot",
 }
 MOTION_FILES = {
     "run": "humanoid_run.pkl",
@@ -71,8 +70,6 @@ def test_physics_protocol_is_identical_across_methods(motion):
     shared_keys = (
         "motion_file",
         "episode_length",
-        "global_obs",
-        "root_height_obs",
         "pose_termination",
         "rand_reset",
         "enable_early_termination",
@@ -129,7 +126,6 @@ def test_method_specific_interfaces_are_locked():
         _, deepmimic = load_env("deepmimic", motion)
         _, amp = load_env("amp", motion)
         _, add = load_env("add", motion)
-        _, plot = load_env("plot", motion)
 
         assert deepmimic["enable_tar_obs"] is True
         assert deepmimic["tar_obs_steps"] == [1, 2, 3]
@@ -138,11 +134,6 @@ def test_method_specific_interfaces_are_locked():
         assert add["enable_tar_obs"] is True
         assert add["tar_obs_steps"] == [1, 2, 3]
         assert add["num_disc_obs_steps"] == 1
-        assert plot["enable_phase_obs"] is False
-        assert plot["enable_tar_obs"] is True
-        assert plot["tar_obs_steps"] == [1, 2, 3]
-        assert plot["num_disc_obs_steps"] == 1
-        assert "aligned_command_step" not in plot
 
 
 @pytest.mark.parametrize("method", METHODS)
@@ -160,7 +151,7 @@ def test_serial_launcher_syntax_and_contract():
     subprocess.run(["bash", "-n", str(script)], check=True)
     text = script.read_text()
     assert "motions=(run backflip crawl getup_facedown spinkick climb)" in text
-    assert "methods=(deepmimic amp add plot)" in text
+    assert "methods=(deepmimic amp add)" in text
     assert "motion_filters=()" in text
     assert "--motion" in text
     assert 'for motion in "${run_motions[@]}"' in text
@@ -188,7 +179,7 @@ def test_serial_launcher_syntax_and_contract():
     assert 'run_job_with_retries "scale_smoke"' in text
     assert "scale_smoke_envs=8192" in text
     assert "scale_smoke_iters=3" in text
-    assert 'scale_motions=("${run_motions[@]}")' in text
+    assert "scale_motions=(run)" in text
     assert "run_stage \"formal\"" in text
     assert "run_job_with_retries" in text
     assert "--method" in text
