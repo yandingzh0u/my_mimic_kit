@@ -61,6 +61,10 @@ class BaseEnv(abc.ABC):
 
     def get_visualize(self):
         return self._visualize
+
+    def is_running(self):
+        """Whether an interactive environment should keep stepping."""
+        return True
     
     def get_env_time(self, env_ids=None):
         return 0.0

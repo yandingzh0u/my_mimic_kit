@@ -68,6 +68,10 @@ class Engine:
 
         self._prev_frame_time = time.time()
         return
+
+    def is_running(self):
+        """Whether an interactive simulator window is still running."""
+        return True
     
     @abc.abstractmethod
     def get_timestep(self):

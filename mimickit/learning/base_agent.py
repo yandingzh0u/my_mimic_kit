@@ -487,7 +487,7 @@ class BaseAgent(torch.nn.Module):
             # this is mitigate bias in the return estimate towards shorter episodes
             min_eps_per_env = int(np.ceil(num_episodes / num_envs))
 
-            while True:
+            while self._env.is_running():
                 action, action_info = self._decide_action(self._curr_obs, self._curr_info)
 
                 next_obs, r, done, next_info = self._step_env(action)

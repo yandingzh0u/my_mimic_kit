@@ -229,6 +229,9 @@ class IsaacLabEngine(engine.Engine):
         self._draw_interface.clear_lines()
         super().render()
         return
+
+    def is_running(self):
+        return self._app_launcher.app.is_running()
     
     def get_timestep(self):
         return self._timestep

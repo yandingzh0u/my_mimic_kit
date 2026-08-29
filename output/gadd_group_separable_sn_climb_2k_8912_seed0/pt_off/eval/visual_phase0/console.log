@@ -1,0 +1,101 @@
+Loading user config located at: '/home/y/miniconda3/envs/env_isaaclab/lib/python3.11/site-packages/isaacsim/kit/data/Kit/Isaac-Sim/5.1/user.config.json'
+[Info] [carb] Logging to file: /home/y/miniconda3/envs/env_isaaclab/lib/python3.11/site-packages/isaacsim/kit/logs/Kit/Isaac-Sim/5.1/kit_20260829_103445.log
+2026-08-29T02:34:45Z [2ms] [Warning] [omni.ext.plugin] [ext: isaaclab_contrib] Extensions config 'extension.toml' doesn't exist '/home/y/IsaacLab/source/isaaclab_contrib' or '/home/y/IsaacLab/source/isaaclab_contrib/config'
+2026-08-29T02:34:45Z [269ms] [Warning] [gpu.foundation.plugin] Skipping unsupported non-NVIDIA GPU: Intel(R) UHD Graphics 770 (ADL-S GT1)
+2026-08-29T02:34:45Z [269ms] [Warning] [gpu.foundation.plugin] Skipping unsupported non-NVIDIA GPU: Intel(R) UHD Graphics 770 (ADL-S GT1)
+
+|---------------------------------------------------------------------------------------------|
+| Driver Version: 580.173.02    | Graphics API: Vulkan
+|=============================================================================================|
+| GPU | Name                             | Active | LDA | GPU Memory | Vendor-ID | LUID       |
+|     |                                  |        |     |            | Device-ID | UUID       |
+|     |                                  |        |     |            | Bus-ID    |            |
+|---------------------------------------------------------------------------------------------|
+| 0   | NVIDIA GeForce RTX 5080          | Yes: 0 |     | 16303   MB | 10de      | 0          |
+|     |                                  |        |     |            | 2c02      | e16ebef7.. |
+|     |                                  |        |     |            | 1         |            |
+|---------------------------------------------------------------------------------------------|
+| 1   | Intel(R) UHD Graphics 770 (ADL.. |        |     | 48013   MB | 8086      | 0          |
+|     |                                  |        |     |            | 4680      | 86808046.. |
+|     |                                  |        |     |            | 0         |            |
+|=============================================================================================|
+| OS: 22.04.5 LTS (Jammy Jellyfish) ubuntu, Version: 22.04.5, Kernel: 6.8.0-136-generic
+| XServer Vendor: The X.Org Foundation, XServer Version: 12101004 (1.21.1.4)
+| Processor: 12th Gen Intel(R) Core(TM) i9-12900K
+| Bare Metal Cores: 16 | Bare Metal Logical Cores: 32
+| Available Cores:  24 
+|---------------------------------------------------------------------------------------------|
+| Total Memory (MB): 64017 | Free Memory: 50752
+| Total Page/Swap (MB): 2047 | Free Page/Swap: 2015
+|---------------------------------------------------------------------------------------------|
+2026-08-29T02:34:46Z [504ms] [Warning] [gpu.foundation.plugin] CPU performance profile is set to powersave. This profile sets the CPU to the lowest frequency reducing performance.
+2026-08-29T02:34:46Z [506ms] [Warning] [gpu.foundation.plugin] PCIe link width current (1) and maximum (16) for device 0 don't match.
+2026-08-29T02:34:46Z [506ms] [Warning] [gpu.foundation.plugin] IOMMU is enabled.
+2026-08-29T02:34:46Z [506ms] [Warning] [gpu.foundation.plugin] Detected IOMMU is enabled. Running CUDA peer-to-peer bandwidth and latency validation.
+Unidirectional P2P=Enabled Bandwidth (P2P Writes) Matrix (GB/s)
+   D\D     0 
+     0 812.96 
+P2P=Enabled Latency (P2P Writes) Matrix (us)
+   GPU     0 
+     0   2.33 
+
+   CPU     0 
+     0   1.46 
+2026-08-29T02:34:48Z [3,443ms] [Warning] [omni.log] Source: omni.hydra was already registered.
+2026-08-29T02:34:49Z [3,660ms] [Warning] [pxr.Semantics] pxr.Semantics is deprecated - please use Semantics instead
+2026-08-29T02:34:49Z [3,876ms] [Warning] [carb] Acquiring non optional plugin interface which is not listed as dependency: [omni::physx::IPhysxBenchmarks v1.0] (plugin: <default plugin>), by client: omni.physics.physx.plugin. Add it to CARB_PLUGIN_IMPL_DEPS() macro of a client.
+2026-08-29T02:34:49Z [3,928ms] [Warning] [omni.isaac.dynamic_control] omni.isaac.dynamic_control is deprecated as of Isaac Sim 4.5. No action is needed from end-users.
+/home/y/miniconda3/envs/env_isaaclab/lib/python3.11/site-packages/requests/__init__.py:113: RequestsDependencyWarning: urllib3 (2.5.0) or chardet (7.4.3)/charset_normalizer (3.3.2) doesn't match a supported version!
+  warnings.warn(
+Setting seed: 457720546529
+Building add env
+[INFO][AppLauncher]: Using device: cuda:0
+[INFO][AppLauncher]: Loading experience file: /home/y/IsaacLab/apps/isaaclab.python.rendering.kit
+[INFO] IsaacLab logging to file: /tmp/isaaclab_2026-08-29_10-34-53.log
+Building 1/1 envs
+
+Loading 1/1 motion files: data/motions/humanoid/humanoid_climbing_up_down.pkl
+Loaded motion file: data/motions/humanoid/humanoid_climbing_up_down.pkl
+Loaded 1 motions with a total length of 9.967s.
+Building Obj:0 in 1/1 envs
+Building Obj:1 in 1/1 envs
+Building Obj:2 in 1/1 envs
+Initializing simulation...
+Char 0 properties
+	DoFs: 28
+	Mass: 50.050 kg
+
+Building ADD agent
+Total parameter count: 2567220
+Loaded model parameters from output/gadd_group_separable_sn_climb_2k_8912_seed0/pt_off/model.pt
+Mean Return: 0.0
+Mean Episode Length: 0.0
+Episodes: 0
+2026-08-29T02:34:49Z [4,406ms] [Warning] [omni.graph.core.plugin] Found duplicate of category 'Replicator' - was 'Annotators', adding 'Fabric Reader'
+2026-08-29T02:34:49Z [4,406ms] [Warning] [omni.graph.core.plugin] Category 'Replicator' not accepted on node type 'omni.replicator.core.FabricReader' in extension 'omni.replicator.core'
+2026-08-29T02:34:49Z [4,407ms] [Warning] [omni.replicator.core.scripts.extension] No material configuration file, adding configuration to material settings directly.
+2026-08-29T02:34:51Z [6,039ms] [Warning] [omni.fabric.plugin] Warning: attribute viewportHandle not found for bucket id 9
+
+2026-08-29T02:34:51Z [6,067ms] [Warning] [usdrt.population.plugin] [UsdNoticeHandler] Unhandled attribute type VtArray<std::string> (prim attribute: omni:rtx:material:db:flattener:reflection_roughness_constant)
+2026-08-29T02:34:51Z [6,067ms] [Warning] [usdrt.population.plugin] [UsdNoticeHandler] Unhandled attribute type VtArray<std::string> (prim attribute: omni:rtx:material:db:flattener:transmittance_color)
+2026-08-29T02:34:51Z [6,068ms] [Warning] [usdrt.population.plugin] [UsdNoticeHandler] Unhandled attribute type VtArray<std::string> (prim attribute: omni:rtx:material:db:flattener:ior_constant)
+2026-08-29T02:34:58Z [12,628ms] [Warning] [omni.fabric.plugin] getAttributeCount called on non-existent path /World/envs/env_0/obj_0/robot/torso/collisions/right_clavicle
+2026-08-29T02:34:58Z [12,628ms] [Warning] [omni.fabric.plugin] getTypes called on non-existent path /World/envs/env_0/obj_0/robot/torso/collisions/right_clavicle
+2026-08-29T02:35:03Z [18,268ms] [Warning] [omni.graph.core.plugin] Could not find category 'Replicator:Annotators' for removal
+2026-08-29T02:35:03Z [18,268ms] [Warning] [omni.graph.core.plugin] Could not find category 'Replicator:Annotators' for removal
+2026-08-29T02:35:03Z [18,268ms] [Warning] [omni.graph.core.plugin] Could not find category 'Replicator' for removal
+2026-08-29T02:35:03Z [18,268ms] [Warning] [omni.graph.core.plugin] Could not find category 'Replicator:Annotators' for removal
+2026-08-29T02:35:03Z [18,268ms] [Warning] [omni.graph.core.plugin] Could not find category 'Replicator:Annotators' for removal
+2026-08-29T02:35:03Z [18,268ms] [Warning] [omni.graph.core.plugin] Could not find category 'Replicator:Annotators' for removal
+2026-08-29T02:35:03Z [18,268ms] [Warning] [omni.graph.core.plugin] Could not find category 'Replicator:Annotators' for removal
+2026-08-29T02:35:03Z [18,268ms] [Warning] [omni.graph.core.plugin] Could not find category 'Replicator:Annotators' for removal
+2026-08-29T02:35:03Z [18,268ms] [Warning] [omni.graph.core.plugin] Could not find category 'Replicator:Annotators' for removal
+2026-08-29T02:35:03Z [18,268ms] [Warning] [omni.graph.core.plugin] Could not find category 'Replicator:Annotators' for removal
+2026-08-29T02:35:03Z [18,268ms] [Warning] [omni.graph.core.plugin] Could not find category 'Replicator:Annotators' for removal
+2026-08-29T02:35:03Z [18,268ms] [Warning] [omni.graph.core.plugin] Could not find category 'Replicator:Annotators' for removal
+2026-08-29T02:35:03Z [18,268ms] [Warning] [omni.graph.core.plugin] Could not find category 'Replicator:Annotators' for removal
+2026-08-29T02:35:03Z [18,268ms] [Warning] [omni.graph.core.plugin] Could not find category 'Replicator:Core' for removal
+2026-08-29T02:35:03Z [18,270ms] [Warning] [omni.graph.core.plugin] Could not find category 'animation' for removal
+2026-08-29T02:35:03Z [18,271ms] [Warning] [omni.physx.plugin] USD stage detach not called, holding a loose ptr to a stage!
+2026-08-29T02:35:03Z [18,343ms] [Warning] [omni.fabric.plugin] gFabricState->gUsdStageToSimStageWithHistoryMap had 1 outstanding SimStageWithHistory(s) at shutdown
+2026-08-29T02:35:03Z [18,441ms] [Warning] [carb] Recursive unloadAllPlugins() detected!

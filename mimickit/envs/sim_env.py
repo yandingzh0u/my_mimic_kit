@@ -90,6 +90,9 @@ class SimEnv(base_env.BaseEnv):
     
     def get_num_envs(self):
         return self._engine.get_num_envs()
+
+    def is_running(self):
+        return self._engine.is_running()
     
     def get_env_time(self, env_ids=None):
         if (env_ids is None):
@@ -114,14 +117,14 @@ class SimEnv(base_env.BaseEnv):
         return
     
     def _render(self):
-        while True:
+        while self.is_running():
             self._update_camera()
             self._render_scene()
 
             if (self._play_mode != PlayMode.PAUSE):
                 break
         
-        if (self._play_mode == PlayMode.ONE_STEP):
+        if (self.is_running() and self._play_mode == PlayMode.ONE_STEP):
             self._play_mode = PlayMode.PAUSE
         return
     
