@@ -11,6 +11,27 @@ def calc_unscaled_disc_reward(logits):
     return -torch.log(torch.clamp_min(1 - probability, 0.0001))
 
 
+def calc_disc_gradient_penalty(disc_neg_logit, neg_diff,
+                               disc_pos_logit, pos_diff):
+    """Official ADD gradient penalty on negative and zero-positive inputs."""
+    disc_neg_grad = torch.autograd.grad(
+        disc_neg_logit, neg_diff,
+        grad_outputs=torch.ones_like(disc_neg_logit),
+        create_graph=True, retain_graph=True, only_inputs=True)[0]
+    neg_penalty = torch.mean(torch.sum(
+        torch.square(disc_neg_grad), dim=-1))
+
+    disc_pos_grad = torch.autograd.grad(
+        disc_pos_logit, pos_diff,
+        grad_outputs=torch.ones_like(disc_pos_logit),
+        create_graph=True, retain_graph=True, only_inputs=True)[0]
+    pos_penalty = torch.mean(torch.sum(
+        torch.square(disc_pos_grad), dim=-1))
+
+    penalty = 0.5 * (neg_penalty + pos_penalty)
+    return penalty, neg_penalty, pos_penalty
+
+
 class ADDAgent(amp_agent.AMPAgent):
     def __init__(self, config, env, device):
         super().__init__(config, env, device)
@@ -135,10 +156,6 @@ class ADDAgent(amp_agent.AMPAgent):
     def _compute_disc_loss(self, batch):
         disc_obs = batch["disc_obs"]
         tar_disc_obs = batch["disc_obs_demo"]
-
-        if not self._uses_context():
-            pos_diff = self._pos_diff.clone().unsqueeze(dim=0)
-            disc_pos_logit = self._model.eval_disc(pos_diff).squeeze(-1)
         
         current_diff_obs = tar_disc_obs - disc_obs
         current_count = current_diff_obs.shape[0]
@@ -153,13 +170,22 @@ class ADDAgent(amp_agent.AMPAgent):
         norm_diff_obs = self._disc_obs_norm.normalize(diff_obs)
         norm_context = self._normalize_context(context)
 
+        use_grad_penalty = self._disc_grad_penalty > 0
+        if use_grad_penalty:
+            norm_diff_obs.requires_grad_(True)
+
         if self._uses_context():
             pos_diff = torch.zeros_like(norm_diff_obs)
+            if use_grad_penalty:
+                pos_diff.requires_grad_(True)
             disc_pos_logit = self._model.eval_disc(pos_diff, norm_context)
             disc_pos_logit = disc_pos_logit.squeeze(-1)
+        else:
+            pos_diff = self._pos_diff.clone().unsqueeze(dim=0)
+            if use_grad_penalty:
+                pos_diff.requires_grad_(True)
+            disc_pos_logit = self._model.eval_disc(pos_diff).squeeze(-1)
 
-        if self._disc_grad_penalty > 0:
-            norm_diff_obs.requires_grad_(True)
         disc_neg_logit = self._model.eval_disc(
             norm_diff_obs, norm_context)
         disc_neg_logit = disc_neg_logit.squeeze(-1)
@@ -174,17 +200,18 @@ class ADDAgent(amp_agent.AMPAgent):
         disc_logit_reg_loss = self._disc_logit_reg * disc_logit_loss
         disc_loss = disc_cls_loss + disc_logit_reg_loss
 
-        if self._disc_grad_penalty > 0:
-            disc_neg_grad = torch.autograd.grad(
+        if use_grad_penalty:
+            (disc_grad_penalty,
+             disc_grad_penalty_neg,
+             disc_grad_penalty_pos) = calc_disc_gradient_penalty(
                 disc_neg_logit, norm_diff_obs,
-                grad_outputs=torch.ones_like(disc_neg_logit),
-                create_graph=True, retain_graph=True, only_inputs=True)[0]
-            disc_grad_penalty = torch.mean(torch.sum(
-                torch.square(disc_neg_grad), dim=-1))
+                disc_pos_logit, pos_diff)
             disc_loss = (disc_loss
                          + self._disc_grad_penalty * disc_grad_penalty)
         else:
             disc_grad_penalty = torch.zeros((), device=self._device)
+            disc_grad_penalty_neg = torch.zeros((), device=self._device)
+            disc_grad_penalty_pos = torch.zeros((), device=self._device)
         
         disc_neg_acc, disc_pos_acc = self._compute_disc_acc(disc_neg_logit, disc_pos_logit)
         disc_pos_logit_mean = torch.mean(disc_pos_logit)
@@ -194,6 +221,8 @@ class ADDAgent(amp_agent.AMPAgent):
             "disc_loss": disc_loss,
             "disc_cls_loss": disc_cls_loss.detach(),
             "disc_grad_penalty": disc_grad_penalty.detach(),
+            "disc_grad_penalty_neg": disc_grad_penalty_neg.detach(),
+            "disc_grad_penalty_pos": disc_grad_penalty_pos.detach(),
             "disc_logit_loss": disc_logit_loss.detach(),
             "disc_logit_reg_loss": disc_logit_reg_loss.detach(),
             "disc_pos_acc": disc_pos_acc.detach(),
