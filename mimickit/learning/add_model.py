@@ -49,7 +49,7 @@ class GroupSeparableDiscLayers(torch.nn.Module):
 
 
 class ADDModel(amp_model.AMPModel):
-    """SAGE-ADD: a semantically factorized, zero-anchored signed critic."""
+    """PC-ADD: a group-separable, fully spectral-normalized critic."""
 
     def _build_disc(self, config, env):
         # Build and discard the configured dense net to preserve the RNG order
@@ -63,7 +63,7 @@ class ADDModel(amp_model.AMPModel):
             if isinstance(layer, torch.nn.Linear)
         ]
         if len(linears) < 2:
-            raise ValueError("SAGE-ADD requires a shared discriminator trunk")
+            raise ValueError("PC-ADD requires a shared discriminator trunk")
 
         self._disc_layers = GroupSeparableDiscLayers(
             groups=env.get_disc_error_groups(),
@@ -71,43 +71,31 @@ class ADDModel(amp_model.AMPModel):
             trunk_widths=[layer.out_features for layer in linears[1:]],
             activation=self._activation)
 
-        self._disc_relative_head = torch.nn.Linear(
-            self._disc_layers.out_features, 1, bias=False)
-        torch.nn.init.uniform_(self._disc_relative_head.weight, -1.0, 1.0)
+        self._disc_logits = torch.nn.Linear(
+            self._disc_layers.out_features, 1, bias=True)
+        torch.nn.init.uniform_(self._disc_logits.weight, -1.0, 1.0)
+        torch.nn.init.zeros_(self._disc_logits.bias)
         torch.nn.utils.parametrizations.spectral_norm(
-            self._disc_relative_head)
-        self._disc_anchor_bias = torch.nn.Parameter(torch.zeros(1))
+            self._disc_logits)
 
     def eval_disc(self, diff):
         shape = diff.shape[:-1]
         flat_diff = diff.reshape(-1, diff.shape[-1])
-        zero = torch.zeros(
-            (1, flat_diff.shape[-1]), device=flat_diff.device,
-            dtype=flat_diff.dtype)
-
-        # Data and anchor share one parametrized forward, so the same
-        # spectral-normalized weights are used for q(diff) and q(0).
-        features = self._disc_layers(torch.cat((flat_diff, zero), dim=0))
-        raw_scores = self._disc_relative_head(features)
-        relative_scores = raw_scores[:-1] - raw_scores[-1:]
-        logits = self._disc_anchor_bias + relative_scores
+        features = self._disc_layers(flat_diff)
+        logits = self._disc_logits(features)
         return logits.reshape(*shape, 1)
 
     def get_disc_params(self):
         return (list(self._disc_layers.parameters())
-                + list(self._disc_relative_head.parameters())
-                + [self._disc_anchor_bias])
-
-    def get_disc_anchor_bias(self):
-        return self._disc_anchor_bias
+                + list(self._disc_logits.parameters()))
 
     def get_disc_logit_weights(self):
-        return torch.flatten(self._disc_relative_head.weight)
+        return torch.flatten(self._disc_logits.weight)
 
     def get_disc_group_width(self):
-        return self._disc_anchor_bias.new_tensor(
+        return self._disc_logits.bias.new_tensor(
             float(self._disc_layers.group_width))
 
     def get_disc_group_total_width(self):
-        return self._disc_anchor_bias.new_tensor(
+        return self._disc_logits.bias.new_tensor(
             float(self._disc_layers.total_width))

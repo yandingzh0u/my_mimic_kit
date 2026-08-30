@@ -12,6 +12,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mimickit"))
 
 from envs.add_env import build_disc_error_groups
+from learning.add_agent import build_semantic_contractions, calc_pc_loss
 from learning.add_model import ADDModel
 
 
@@ -58,64 +59,65 @@ def test_semantic_groups_cover_each_differential_coordinate_once():
     assert sorted(indices) == list(range(len(indices)))
 
 
-def test_zero_is_exact_scalar_anchor():
-    torch.manual_seed(7)
-    model = ADDModel(_config(), _Env()).eval()
-    with torch.no_grad():
-        model.get_disc_anchor_bias().fill_(0.37)
-    logits = model.eval_disc(torch.zeros(16, 12)).squeeze(-1)
-    torch.testing.assert_close(logits, torch.full_like(logits, 0.37))
+def test_each_counterfactual_contracts_exactly_one_group():
+    diff = torch.arange(24, dtype=torch.float32).reshape(2, 12)
+    groups = _Env().get_disc_error_groups()
+    tau = torch.tensor([[[0.25], [0.50]], [[0.75], [0.10]]])
+    contractions = build_semantic_contractions(diff, groups, tau)
+
+    for group_id, (_, indices) in enumerate(groups):
+        complement = sorted(set(range(12)) - set(indices))
+        torch.testing.assert_close(
+            contractions[group_id, :, indices],
+            diff[:, indices] * tau[group_id])
+        torch.testing.assert_close(
+            contractions[group_id, :, complement], diff[:, complement])
 
 
-def test_sage_is_function_equivalent_to_unanchored_a30_score():
+def test_ignored_group_has_log2_loss_and_nonzero_correction_gradient():
+    pos = torch.zeros(1, requires_grad=True)
+    neg = torch.zeros(5, requires_grad=True)
+    contraction = torch.zeros(2, 5, requires_grad=True)
+    loss, pos_loss, neg_loss, preference_loss = calc_pc_loss(
+        pos, neg, contraction)
+
+    expected = torch.tensor(np.log(2), dtype=torch.float32)
+    torch.testing.assert_close(pos_loss, expected)
+    torch.testing.assert_close(neg_loss, expected)
+    torch.testing.assert_close(preference_loss, expected.expand(2))
+    torch.testing.assert_close(loss, expected)
+
+    loss.backward()
+    assert torch.all(contraction.grad < 0)
+    assert torch.all(neg.grad > 0)
+
+
+def test_direct_signed_critic_has_no_zero_anchor_subtraction():
     torch.manual_seed(11)
     model = ADDModel(_config(), _Env()).eval()
     diff = torch.randn(64, 12)
-    zero = torch.zeros(1, 12)
-
-    # q and q(0) use the exact a30 groupwise-SN trunk and signed head.
     with torch.no_grad():
-        features = model._disc_layers(torch.cat((diff, zero), dim=0))
-        raw_scores = model._disc_relative_head(features).squeeze(-1)
-        output_bias = torch.tensor(-0.23)
-        a30_logits = output_bias + raw_scores[:-1]
-        model.get_disc_anchor_bias().copy_(output_bias + raw_scores[-1])
-
-    sage_logits = model.eval_disc(diff).squeeze(-1)
-    torch.testing.assert_close(sage_logits, a30_logits, atol=1e-6, rtol=1e-6)
+        expected = model._disc_logits(model._disc_layers(diff))
+    torch.testing.assert_close(model.eval_disc(diff), expected)
 
 
-def test_positive_bce_gradient_is_isolated_to_anchor_bias():
+def test_positive_zero_supervision_reaches_shared_critic():
     torch.manual_seed(19)
     model = ADDModel(_config(), _Env()).eval()
+    with torch.no_grad():
+        for module in model.modules():
+            if isinstance(module, torch.nn.Linear) and module.bias is not None:
+                module.bias.fill_(0.1)
+
     positive = model.eval_disc(torch.zeros(8, 12)).squeeze(-1)
     torch.nn.functional.softplus(-positive).mean().backward()
 
-    assert model.get_disc_anchor_bias().grad is not None
-    assert torch.abs(model.get_disc_anchor_bias().grad) > 0
-    for name, parameter in model.named_parameters():
-        if name == "_disc_anchor_bias":
-            continue
-        if name.startswith("_disc_layers") or name.startswith(
-                "_disc_relative_head"):
-            if parameter.grad is not None:
-                torch.testing.assert_close(
-                    parameter.grad, torch.zeros_like(parameter.grad),
-                    atol=1e-8, rtol=0)
-
-
-def test_negative_bce_updates_signed_field_and_anchor():
-    torch.manual_seed(23)
-    model = ADDModel(_config(), _Env())
-    negative = model.eval_disc(torch.randn(32, 12)).squeeze(-1)
-    torch.nn.functional.softplus(negative).mean().backward()
-
-    encoder_weight = model._disc_layers.encoders[0][0] \
+    head_weight = model._disc_logits.parametrizations.weight.original
+    trunk_weight = model._disc_layers.trunk[0] \
         .parametrizations.weight.original
-    head_weight = model._disc_relative_head.parametrizations.weight.original
-    assert torch.linalg.vector_norm(encoder_weight.grad) > 0
     assert torch.linalg.vector_norm(head_weight.grad) > 0
-    assert torch.abs(model.get_disc_anchor_bias().grad) > 0
+    assert torch.linalg.vector_norm(trunk_weight.grad) > 0
+    assert torch.abs(model._disc_logits.bias.grad) > 0
 
 
 def test_signed_score_is_empirically_one_lipschitz():
@@ -135,23 +137,24 @@ def test_all_discriminator_linears_are_spectral_normalized():
         *[encoder[0] for encoder in model._disc_layers.encoders],
         *[layer for layer in model._disc_layers.trunk
           if isinstance(layer, torch.nn.Linear)],
-        model._disc_relative_head,
+        model._disc_logits,
     ]
     assert len(linears) == 4
     assert all(torch.nn.utils.parametrize.is_parametrized(layer, "weight")
                for layer in linears)
-    assert model._disc_relative_head.bias is None
-    assert tuple(model.get_disc_anchor_bias().shape) == (1,)
+    assert model._disc_logits.bias is not None
 
 
-def test_no_radial_distance_path_remains():
-    source = inspect.getsource(sys.modules[ADDModel.__module__])
-    assert "vector_norm" not in source
-    assert "eval_disc_distance" not in source
+def test_no_anchor_or_distance_path_remains():
+    model_source = inspect.getsource(sys.modules[ADDModel.__module__])
+    assert "anchor" not in model_source.lower()
+    assert "relative_scores" not in model_source
+    assert "vector_norm" not in model_source
+    assert "eval_disc_distance" not in model_source
 
 
-def test_sage_config_removes_external_discriminator_regularizers():
-    with (ROOT / "data/agents/sage_add_humanoid_agent.yaml").open() as stream:
+def test_pc_add_config_has_no_external_discriminator_regularizer():
+    with (ROOT / "data/agents/pc_add_humanoid_agent.yaml").open() as stream:
         config = yaml.safe_load(stream)
     assert config["disc_grad_penalty"] == 0
     assert config["disc_logit_reg"] == 0
