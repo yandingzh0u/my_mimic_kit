@@ -10,39 +10,15 @@ def calc_unscaled_disc_reward(logits):
     return torch.nn.functional.softplus(logits)
 
 
-def build_semantic_contractions(diff, groups, tau):
-    """Scale exactly one semantic group per counterfactual sample."""
-    num_groups = len(groups)
-    if tau.shape != (num_groups, diff.shape[0], 1):
-        raise ValueError("Semantic contraction tau has an invalid shape")
-
-    contractions = diff.unsqueeze(0).expand(
-        num_groups, *diff.shape).clone()
-    for group_id, (_, indices) in enumerate(groups):
-        contractions[group_id, :, indices] *= tau[group_id]
-    return contractions
-
-
-def calc_pc_loss(pos_logit, neg_logit, contraction_logit):
-    """Joint likelihood for zero, policy, and semantic-order events."""
-    pos_loss = torch.nn.functional.softplus(-pos_logit).mean()
-    neg_loss = torch.nn.functional.softplus(neg_logit).mean()
-    preference_loss = torch.nn.functional.softplus(
-        neg_logit.unsqueeze(0) - contraction_logit).mean(dim=1)
-    loss = (pos_loss + neg_loss + preference_loss.sum()) \
-        / (preference_loss.shape[0] + 2)
-    return loss, pos_loss, neg_loss, preference_loss
-
-
 class ADDAgent(amp_agent.AMPAgent):
-    """Pareto-consistent ADD with semantic contraction supervision."""
+    """ADD with a structurally Pareto-dominant residual discriminator."""
 
     def __init__(self, config, env, device):
         super().__init__(config, env, device)
         if self._disc_grad_penalty != 0:
-            raise ValueError("PC-ADD requires GP=0")
+            raise ValueError("PDR-ADD requires GP=0")
         if self._disc_logit_reg != 0:
-            raise ValueError("PC-ADD requires logit regularization=0")
+            raise ValueError("PDR-ADD requires logit regularization=0")
         self._pos_diff = self._build_pos_diff()
         self._disc_error_groups = self._env.get_disc_error_groups()
 
@@ -110,35 +86,44 @@ class ADDAgent(amp_agent.AMPAgent):
         replay_diff = replay_data["disc_obs_demo"] - replay_data["disc_obs"]
         raw_diff = torch.cat((current_diff, replay_diff), dim=0)
 
-        num_groups = len(self._disc_error_groups)
-        tau = torch.rand(
-            (num_groups, raw_diff.shape[0], 1),
-            device=raw_diff.device, dtype=raw_diff.dtype)
-        contractions = build_semantic_contractions(
-            raw_diff, self._disc_error_groups, tau)
-
         norm_diff = self._disc_obs_norm.normalize(raw_diff)
-        flat_contractions = contractions.flatten(0, 1)
-        norm_contractions = self._disc_obs_norm.normalize(flat_contractions)
         pos_diff = self._pos_diff.clone().unsqueeze(0)
 
-        # A single forward keeps every comparison on the same SN weights.
-        all_inputs = torch.cat(
-            (pos_diff, norm_diff, norm_contractions), dim=0)
-        all_logits = self._model.eval_disc(all_inputs).squeeze(-1)
+        # Fixed contraction probes are diagnostics only and never enter loss.
+        probe_count = min(64, norm_diff.shape[0])
+        probe_tau = 0.5
+        num_groups = len(self._disc_error_groups)
+        probes = norm_diff[:probe_count].unsqueeze(0).expand(
+            num_groups, probe_count, norm_diff.shape[-1]).clone()
+        for group_id, (_, indices) in enumerate(self._disc_error_groups):
+            probes[group_id, :, indices] *= probe_tau
+
+        all_inputs = torch.cat((
+            pos_diff,
+            norm_diff,
+            probes.flatten(0, 1),
+        ), dim=0)
+        all_logits, all_residuals, all_cores, all_radii = \
+            self._model.eval_disc_components(all_inputs)
+        all_logits = all_logits.squeeze(-1)
         disc_pos_logit = all_logits[:1]
         neg_end = 1 + norm_diff.shape[0]
         disc_neg_logit = all_logits[1:neg_end]
-        contraction_logit = all_logits[neg_end:].reshape(
-            num_groups, norm_diff.shape[0])
+        probe_logits = all_logits[neg_end:].reshape(
+            num_groups, probe_count)
+        neg_residuals = all_residuals[1:neg_end]
+        neg_cores = all_cores[1:neg_end]
+        neg_radii = all_radii[1:neg_end]
 
-        disc_loss, disc_loss_pos, disc_loss_neg, preference_loss = \
-            calc_pc_loss(
-                disc_pos_logit, disc_neg_logit, contraction_logit)
+        disc_loss_pos = self._disc_loss_pos(disc_pos_logit)
+        disc_loss_neg = self._disc_loss_neg(disc_neg_logit)
         disc_cls_loss = 0.5 * (disc_loss_pos + disc_loss_neg)
-        preference_margin = contraction_logit - disc_neg_logit.unsqueeze(0)
-        preference_acc = torch.mean(
-            (preference_margin > 0).float(), dim=1)
+        disc_loss = disc_cls_loss
+
+        probe_gain = probe_logits - disc_neg_logit[:probe_count].unsqueeze(0)
+        probe_scale = ((1.0 - probe_tau)
+                       * neg_radii[:probe_count].transpose(0, 1))
+        probe_slopes = probe_gain / torch.clamp(probe_scale, min=1e-8)
 
         disc_neg_acc, disc_pos_acc = self._compute_disc_acc(
             disc_neg_logit, disc_pos_logit)
@@ -146,10 +131,6 @@ class ADDAgent(amp_agent.AMPAgent):
         info = {
             "disc_loss": disc_loss,
             "disc_cls_loss": disc_cls_loss.detach().clone(),
-            "disc_pc_loss": preference_loss.mean().detach(),
-            "disc_pc_acc": preference_acc.mean().detach(),
-            "disc_pc_margin": preference_margin.mean().detach(),
-            "disc_pc_tau": tau.mean().detach(),
             "disc_grad_penalty": zero,
             "disc_logit_loss": zero,
             "disc_logit_reg_loss": zero,
@@ -157,15 +138,22 @@ class ADDAgent(amp_agent.AMPAgent):
             "disc_neg_acc": disc_neg_acc.detach(),
             "disc_pos_logit": torch.mean(disc_pos_logit).detach(),
             "disc_neg_logit": torch.mean(disc_neg_logit).detach(),
+            "disc_residual_logit_mean": neg_residuals.mean().detach(),
+            "disc_residual_logit_std": neg_residuals.std().detach(),
+            "disc_semantic_core_mean": neg_cores.mean().detach(),
+            "disc_semantic_core_std": neg_cores.std().detach(),
+            "disc_theoretical_floor":
+                self._model.get_disc_theoretical_floor(),
             "disc_group_width": self._model.get_disc_group_width(),
             "disc_group_total_width": self._model.get_disc_group_total_width()
         }
         for group_id, (name, _) in enumerate(self._disc_error_groups):
-            prefix = "disc_pc_{}".format(name)
-            info[prefix + "_loss"] = preference_loss[group_id].detach()
-            info[prefix + "_acc"] = preference_acc[group_id].detach()
-            info[prefix + "_margin"] = \
-                preference_margin[group_id].mean().detach()
+            info["disc_rho_{}".format(name)] = \
+                neg_radii[:, group_id].mean().detach()
+            info["disc_slope_{}_mean".format(name)] = \
+                probe_slopes[group_id].mean().detach()
+            info["disc_slope_{}_min".format(name)] = \
+                probe_slopes[group_id].min().detach()
         return info
 
     def _calc_disc_rewards(self, norm_diff):
