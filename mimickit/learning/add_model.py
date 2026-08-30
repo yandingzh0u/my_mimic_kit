@@ -7,7 +7,7 @@ import learning.nets.net_builder as net_builder
 
 
 class GroupSeparableDiscLayers(torch.nn.Module):
-    """Equal-width semantic encoders over dimension-free group coordinates."""
+    """The a30 group-separable front-end with group-RMS input geometry."""
 
     def __init__(self, groups, first_width, trunk_widths, activation):
         super().__init__()
@@ -43,20 +43,16 @@ class GroupSeparableDiscLayers(torch.nn.Module):
 
     def forward(self, diff):
         encoded = []
-        group_radii = []
         for group_id, encoder in enumerate(self.encoders):
             indices = getattr(self, "group_indices_{}".format(group_id))
             group_diff = torch.index_select(diff, -1, indices)
             group_diff = group_diff / math.sqrt(len(indices))
             encoded.append(encoder(group_diff))
-            group_radii.append(torch.linalg.vector_norm(
-                group_diff, ord=2, dim=-1))
-        features = self.trunk(torch.cat(encoded, dim=-1))
-        return features, torch.stack(group_radii, dim=-1)
+        return self.trunk(torch.cat(encoded, dim=-1))
 
 
 class ADDModel(amp_model.AMPModel):
-    """PDR-ADD: a Pareto core plus a bounded signed interaction residual."""
+    """Exact a30 signed Full-SN critic with group-RMS inputs."""
 
     def _build_disc(self, config, env):
         # Build and discard the configured dense net to preserve the RNG order
@@ -70,7 +66,7 @@ class ADDModel(amp_model.AMPModel):
             if isinstance(layer, torch.nn.Linear)
         ]
         if len(linears) < 2:
-            raise ValueError("PDR-ADD requires a shared discriminator trunk")
+            raise ValueError("A1 requires a shared discriminator trunk")
 
         self._disc_layers = GroupSeparableDiscLayers(
             groups=env.get_disc_error_groups(),
@@ -85,29 +81,11 @@ class ADDModel(amp_model.AMPModel):
         torch.nn.utils.parametrizations.spectral_norm(
             self._disc_logits)
 
-        self._num_disc_groups = len(env.get_disc_error_groups())
-        self._disc_core_scale = 2.0
-        self._disc_cert_scale = (
-            1.0 + self._disc_core_scale * math.sqrt(self._num_disc_groups))
-
-    def eval_disc_components(self, diff):
+    def eval_disc(self, diff):
         shape = diff.shape[:-1]
         flat_diff = diff.reshape(-1, diff.shape[-1])
-        features, group_radii = self._disc_layers(flat_diff)
-        residual_logit = self._disc_logits(features).squeeze(-1)
-        semantic_core = self._disc_core_scale * torch.sum(
-            group_radii, dim=-1)
-        logits = (residual_logit - semantic_core) / self._disc_cert_scale
-        return (
-            logits.reshape(*shape, 1),
-            residual_logit.reshape(*shape),
-            semantic_core.reshape(*shape),
-            group_radii.reshape(*shape, self._num_disc_groups),
-        )
-
-    def eval_disc(self, diff):
-        logits, _, _, _ = self.eval_disc_components(diff)
-        return logits
+        logits = self._disc_logits(self._disc_layers(flat_diff))
+        return logits.reshape(*shape, 1)
 
     def get_disc_params(self):
         return (list(self._disc_layers.parameters())
@@ -123,7 +101,3 @@ class ADDModel(amp_model.AMPModel):
     def get_disc_group_total_width(self):
         return self._disc_logits.bias.new_tensor(
             float(self._disc_layers.total_width))
-
-    def get_disc_theoretical_floor(self):
-        return self._disc_logits.bias.new_tensor(
-            1.0 / self._disc_cert_scale)

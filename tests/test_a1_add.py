@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "mimickit"))
 
 from envs.add_env import build_disc_error_groups
 import learning.add_agent as add_agent
+import learning.add_model as add_model
 from learning.add_model import ADDModel
 
 
@@ -51,14 +52,6 @@ def _config():
     }
 
 
-def _warm_spectral_norm(model, diff):
-    model.train()
-    with torch.no_grad():
-        for _ in range(20):
-            model.eval_disc(diff)
-    return model.eval()
-
-
 def test_semantic_groups_cover_each_differential_coordinate_once():
     groups = build_disc_error_groups(
         num_steps=2, num_joints=4, num_bodies=5, num_dofs=8,
@@ -68,45 +61,37 @@ def test_semantic_groups_cover_each_differential_coordinate_once():
     assert sorted(indices) == list(range(len(indices)))
 
 
-def test_group_rms_coordinates_are_dimension_invariant():
+def test_encoder_inputs_use_only_group_rms_scaling():
     model = ADDModel(_config(), _Env()).eval()
-    diff = torch.ones(5, 12) * 0.75
+    captured = []
+    handles = [encoder[0].register_forward_pre_hook(
+        lambda _module, inputs: captured.append(inputs[0].detach().clone()))
+        for encoder in model._disc_layers.encoders]
+
+    diff = torch.full((4, 12), 0.75)
+    model.eval_disc(diff)
+    for handle in handles:
+        handle.remove()
+
+    torch.testing.assert_close(
+        captured[0], diff[:, :3] / math.sqrt(3))
+    torch.testing.assert_close(
+        captured[1], diff[:, 3:] / math.sqrt(9))
+    small_rms = torch.linalg.vector_norm(captured[0], dim=-1)
+    large_rms = torch.linalg.vector_norm(captured[1], dim=-1)
+    torch.testing.assert_close(small_rms, large_rms)
+
+
+def test_signed_head_directly_scores_group_separable_features():
+    torch.manual_seed(11)
+    model = ADDModel(_config(), _Env()).eval()
+    diff = torch.randn(64, 12)
     with torch.no_grad():
-        _, _, _, radii = model.eval_disc_components(diff)
-    torch.testing.assert_close(radii[:, 0], radii[:, 1])
-    torch.testing.assert_close(radii, torch.full_like(radii, 0.75))
+        expected = model._disc_logits(model._disc_layers(diff))
+    torch.testing.assert_close(model.eval_disc(diff), expected)
 
 
-def test_semantic_contraction_has_certified_positive_slope():
-    torch.manual_seed(7)
-    model = _warm_spectral_norm(ADDModel(_config(), _Env()),
-                                torch.randn(256, 12))
-    diff = torch.randn(128, 12)
-    base_logit, _, _, radii = model.eval_disc_components(diff)
-    base_logit = base_logit.squeeze(-1)
-    tau = 0.37
-    floor = 1.0 / (1.0 + 2.0 * math.sqrt(2.0))
-
-    for group_id, (_, indices) in enumerate(_Env().get_disc_error_groups()):
-        contracted = diff.clone()
-        contracted[:, indices] *= tau
-        contracted_logit = model.eval_disc(contracted).squeeze(-1)
-        guaranteed_gain = floor * (1.0 - tau) * radii[:, group_id]
-        assert torch.all(contracted_logit - base_logit
-                         >= guaranteed_gain - 1e-5)
-
-
-def test_zero_is_global_score_maximum_on_random_inputs():
-    torch.manual_seed(13)
-    model = _warm_spectral_norm(ADDModel(_config(), _Env()),
-                                torch.randn(256, 12))
-    diff = torch.randn(512, 12)
-    zero_logit = model.eval_disc(torch.zeros_like(diff)).squeeze(-1)
-    diff_logit = model.eval_disc(diff).squeeze(-1)
-    assert torch.all(zero_logit > diff_logit)
-
-
-def test_positive_zero_supervision_reaches_the_entire_residual_critic():
+def test_positive_zero_supervision_reaches_the_entire_a30_critic():
     torch.manual_seed(19)
     model = ADDModel(_config(), _Env()).eval()
     with torch.no_grad():
@@ -127,19 +112,7 @@ def test_positive_zero_supervision_reaches_the_entire_residual_critic():
     assert torch.abs(model._disc_logits.bias.grad) > 0
 
 
-def test_full_score_is_empirically_one_lipschitz():
-    torch.manual_seed(29)
-    model = _warm_spectral_norm(ADDModel(_config(), _Env()),
-                                torch.randn(256, 12))
-    x = torch.randn(256, 12)
-    y = torch.randn(256, 12)
-    input_delta = torch.linalg.vector_norm(x - y, dim=-1)
-    logit_delta = torch.abs(
-        model.eval_disc(x).squeeze(-1) - model.eval_disc(y).squeeze(-1))
-    assert torch.all(logit_delta <= input_delta + 1e-5)
-
-
-def test_all_residual_linears_are_spectral_normalized():
+def test_every_discriminator_linear_keeps_a30_spectral_normalization():
     model = ADDModel(_config(), _Env())
     linears = [
         *[encoder[0] for encoder in model._disc_layers.encoders],
@@ -152,23 +125,33 @@ def test_all_residual_linears_are_spectral_normalized():
                for layer in linears)
 
 
-def test_no_pc_ranking_path_remains():
-    agent_source = inspect.getsource(add_agent)
+def test_no_superseded_discriminator_mechanism_remains():
+    source = inspect.getsource(add_agent) + inspect.getsource(add_model)
     forbidden = (
+        "semantic_core",
+        "cert_scale",
+        "theoretical_floor",
         "build_semantic_contractions",
         "calc_pc_loss",
-        "disc_pc_loss",
-        "disc_pc_acc",
-        "disc_pc_margin",
+        "anchor",
+        "distance_head",
+        "ref_concat",
+        "group_balanced",
     )
-    assert all(token not in agent_source for token in forbidden)
+    assert all(token not in source.lower() for token in forbidden)
 
 
-def test_pdr_config_has_no_external_discriminator_regularizer():
-    with (ROOT / "data/agents/pdr_add_humanoid_agent.yaml").open() as stream:
+def test_a1_config_matches_a30_regularization_and_reward_protocol():
+    with (ROOT / "data/agents/a1_add_humanoid_agent.yaml").open() as stream:
         config = yaml.safe_load(stream)
     assert config["disc_grad_penalty"] == 0
-    assert config["disc_logit_reg"] == 0
+    assert config["disc_logit_reg"] == 0.01
     assert config["disc_reward_scale"] == 2
-    assert "disc_spectral_norm" not in config
-    assert "disc_group_separable_frontend" not in config
+    assert config["task_reward_weight"] == 0
+    assert config["disc_reward_weight"] == 1
+    forbidden = (
+        "disc_geometry", "disc_spectral_norm",
+        "disc_group_separable_frontend", "disc_group_balanced_metric",
+        "disc_group_balanced_gp", "disc_influence_allocation",
+    )
+    assert all(key not in config for key in forbidden)
