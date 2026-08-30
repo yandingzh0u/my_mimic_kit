@@ -11,15 +11,14 @@ def calc_unscaled_disc_reward(logits):
 
 
 class ADDAgent(amp_agent.AMPAgent):
-    """Semantic Anchored Distance ADD with the original ADD training loop."""
+    """SAGE-ADD with the original ADD replay, reward, and PPO loop."""
 
     def __init__(self, config, env, device):
         super().__init__(config, env, device)
         if self._disc_grad_penalty != 0:
-            raise ValueError("Semantic Anchored Distance ADD requires GP=0")
+            raise ValueError("SAGE-ADD requires GP=0")
         if self._disc_logit_reg != 0:
-            raise ValueError(
-                "Semantic Anchored Distance ADD has no linear logit head")
+            raise ValueError("SAGE-ADD requires logit regularization=0")
         self._pos_diff = self._build_pos_diff()
 
     def _build_model(self, config):
@@ -89,9 +88,7 @@ class ADDAgent(amp_agent.AMPAgent):
         replay_diff = replay_data["disc_obs_demo"] - replay_data["disc_obs"]
         norm_diff = self._disc_obs_norm.normalize(
             torch.cat((current_diff, replay_diff), dim=0))
-        disc_neg_logit, disc_distance = \
-            self._model.eval_disc_with_distance(norm_diff)
-        disc_neg_logit = disc_neg_logit.squeeze(-1)
+        disc_neg_logit = self._model.eval_disc(norm_diff).squeeze(-1)
 
         disc_loss_pos = self._disc_loss_pos(disc_pos_logit)
         disc_loss_neg = self._disc_loss_neg(disc_neg_logit)
@@ -102,8 +99,6 @@ class ADDAgent(amp_agent.AMPAgent):
         zero = torch.zeros((), device=self._device)
         return {
             "disc_loss": disc_cls_loss,
-            # Keep metric accumulation storage independent from the tensor
-            # used as the optimizer loss.
             "disc_cls_loss": disc_cls_loss.detach().clone(),
             "disc_grad_penalty": zero,
             "disc_logit_loss": zero,
@@ -112,11 +107,14 @@ class ADDAgent(amp_agent.AMPAgent):
             "disc_neg_acc": disc_neg_acc.detach(),
             "disc_pos_logit": torch.mean(disc_pos_logit).detach(),
             "disc_neg_logit": torch.mean(disc_neg_logit).detach(),
-            "disc_distance_mean": torch.mean(disc_distance).detach(),
-            "disc_distance_std": torch.std(disc_distance).detach(),
-            # The training logger accumulates values in-place.  Clone the
-            # parameter-backed view so logging can never mutate the bias.
-            "disc_anchor_bias": self._model.get_disc_bias().detach().clone().squeeze(),
+            "disc_relative_score_mean": (
+                torch.mean(disc_neg_logit).detach()
+                - self._model.get_disc_anchor_bias()
+                .detach().clone().squeeze()),
+            "disc_relative_score_std": torch.std(disc_neg_logit).detach(),
+            # Logger aggregation is in-place; never expose parameter storage.
+            "disc_anchor_bias": self._model.get_disc_anchor_bias()
+                .detach().clone().squeeze(),
             "disc_group_width": self._model.get_disc_group_width(),
             "disc_group_total_width": self._model.get_disc_group_total_width()
         }

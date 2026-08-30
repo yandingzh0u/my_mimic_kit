@@ -4,6 +4,7 @@ import sys
 from unittest import mock
 
 import pytest
+import torch
 import yaml
 
 
@@ -14,6 +15,7 @@ if str(MIMICKIT) not in sys.path:
 
 import anim.motion as motion_lib  # noqa: E402
 import envs.amp_env as amp_env  # noqa: E402
+import envs.base_env as base_env  # noqa: E402
 import envs.deepmimic_env as deepmimic_env  # noqa: E402
 import envs.static_objects_env as static_objects_env  # noqa: E402
 
@@ -104,6 +106,37 @@ def test_only_climb_has_static_objects(method, motion):
 
 def test_legacy_static_object_env_does_not_build_objects_twice():
     assert "_build_env" not in static_objects_env.StaticObjectsEnv.__dict__
+
+
+def test_test_mode_always_starts_reference_motion_at_phase_zero():
+    env = object.__new__(deepmimic_env.DeepMimicEnv)
+    env._device = torch.device("cpu")
+    env._rand_reset = True
+    env._mode = base_env.EnvMode.TEST
+    env._motion_lib = mock.Mock()
+    env._motion_lib.sample_motions.return_value = torch.tensor([0, 0])
+
+    _, motion_times = env._sample_motion_times(2)
+
+    assert torch.equal(motion_times, torch.zeros(2))
+    env._motion_lib.sample_time.assert_not_called()
+
+
+def test_train_mode_preserves_random_reference_initialization():
+    env = object.__new__(deepmimic_env.DeepMimicEnv)
+    env._device = torch.device("cpu")
+    env._rand_reset = True
+    env._mode = base_env.EnvMode.TRAIN
+    env._motion_lib = mock.Mock()
+    motion_ids = torch.tensor([0, 0])
+    sampled_times = torch.tensor([0.25, 0.75])
+    env._motion_lib.sample_motions.return_value = motion_ids
+    env._motion_lib.sample_time.return_value = sampled_times
+
+    _, motion_times = env._sample_motion_times(2)
+
+    assert torch.equal(motion_times, sampled_times)
+    env._motion_lib.sample_time.assert_called_once_with(motion_ids)
 
 
 @pytest.mark.parametrize(

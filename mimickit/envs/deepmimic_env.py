@@ -308,7 +308,7 @@ class DeepMimicEnv(char_env.CharEnv):
     def _sample_motion_times(self, n):
         motion_ids = self._motion_lib.sample_motions(n)
 
-        if (self._rand_reset):
+        if (self._rand_reset and self._mode == base_env.EnvMode.TRAIN):
             motion_times = self._motion_lib.sample_time(motion_ids)
         else:
             motion_times = torch.zeros(n, dtype=torch.float, device=self._device)
