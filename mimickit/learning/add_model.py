@@ -1,5 +1,3 @@
-import math
-
 import torch
 
 import learning.amp_model as amp_model
@@ -7,7 +5,7 @@ import learning.nets.net_builder as net_builder
 
 
 class GroupSeparableDiscLayers(torch.nn.Module):
-    """The a30 group-separable front-end with group-RMS input geometry."""
+    """The a30 group-separable discriminator front-end."""
 
     def __init__(self, groups, first_width, trunk_widths, activation):
         super().__init__()
@@ -46,13 +44,12 @@ class GroupSeparableDiscLayers(torch.nn.Module):
         for group_id, encoder in enumerate(self.encoders):
             indices = getattr(self, "group_indices_{}".format(group_id))
             group_diff = torch.index_select(diff, -1, indices)
-            group_diff = group_diff / math.sqrt(len(indices))
             encoded.append(encoder(group_diff))
         return self.trunk(torch.cat(encoded, dim=-1))
 
 
 class ADDModel(amp_model.AMPModel):
-    """Exact a30 signed Full-SN critic with group-RMS inputs."""
+    """Exact a30 signed Full-SN group-separable critic."""
 
     def _build_disc(self, config, env):
         # Build and discard the configured dense net to preserve the RNG order
@@ -66,7 +63,7 @@ class ADDModel(amp_model.AMPModel):
             if isinstance(layer, torch.nn.Linear)
         ]
         if len(linears) < 2:
-            raise ValueError("A1 requires a shared discriminator trunk")
+            raise ValueError("a30 requires a shared discriminator trunk")
 
         self._disc_layers = GroupSeparableDiscLayers(
             groups=env.get_disc_error_groups(),

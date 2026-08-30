@@ -6,18 +6,56 @@ import learning.diff_normalizer as diff_normalizer
 import util.torch_util as torch_util
 
 
+_SEMANTIC_RADIUS_EPS = 1e-6
+
+
+def build_radius_balanced_semantic_negatives(diff, groups,
+                                             eps=_SEMANTIC_RADIUS_EPS):
+    """Keep one semantic group at a time while preserving total L2 radius.
+
+    Returns counterfactuals with shape ``[..., num_groups, diff_dim]`` and a
+    boolean mask identifying groups with a nonzero direction.  Invalid groups
+    must not participate in hard-negative selection: a zero group has no
+    direction that can be rescaled to the radius of the complete residual.
+    """
+    full_radius = torch.linalg.vector_norm(diff, dim=-1, keepdim=True)
+    semantic_negatives = []
+    valid_groups = []
+
+    for _, group_indices in groups:
+        indices = torch.as_tensor(
+            group_indices, device=diff.device, dtype=torch.long)
+        group_diff = torch.index_select(diff, -1, indices)
+        group_radius = torch.linalg.vector_norm(
+            group_diff, dim=-1, keepdim=True)
+        valid = group_radius > eps
+        scale = torch.where(
+            valid, full_radius / torch.clamp_min(group_radius, eps),
+            torch.zeros_like(group_radius))
+        scaled_group = group_diff * scale
+        semantic = torch.zeros_like(diff).index_copy(
+            -1, indices, scaled_group)
+
+        semantic_negatives.append(semantic)
+        valid_groups.append(valid.squeeze(-1))
+
+    return (torch.stack(semantic_negatives, dim=-2),
+            torch.stack(valid_groups, dim=-1))
+
+
 def calc_unscaled_disc_reward(logits):
     probability = torch.sigmoid(logits)
     return -torch.log(torch.clamp_min(1 - probability, 0.0001))
 
 
 class ADDAgent(amp_agent.AMPAgent):
-    """Exact a30 training path with group-RMS input geometry."""
+    """Exact a30 training path."""
 
     def __init__(self, config, env, device):
         super().__init__(config, env, device)
         if self._disc_grad_penalty != 0:
-            raise ValueError("A1 requires GP=0")
+            raise ValueError("a30 requires GP=0")
+        self._disc_error_groups = self._env.get_disc_error_groups()
         self._pos_diff = self._build_pos_diff()
 
     def _build_model(self, config):
@@ -87,10 +125,32 @@ class ADDAgent(amp_agent.AMPAgent):
         norm_diff = self._disc_obs_norm.normalize(raw_diff)
         pos_diff = self._pos_diff.clone().unsqueeze(0)
         disc_pos_logit = self._model.eval_disc(pos_diff).squeeze(-1)
-        disc_neg_logit = self._model.eval_disc(norm_diff).squeeze(-1)
+
+        semantic_negatives, valid_groups = \
+            build_radius_balanced_semantic_negatives(
+                norm_diff, self._disc_error_groups)
+        all_negatives = torch.cat(
+            (norm_diff.unsqueeze(-2), semantic_negatives), dim=-2)
+        all_neg_logits = self._model.eval_disc(all_negatives).squeeze(-1)
+        disc_neg_logit = all_neg_logits[..., 0]
+        semantic_logits = all_neg_logits[..., 1:]
+
+        masked_semantic_logits = semantic_logits.masked_fill(
+            ~valid_groups, -torch.inf)
+        semantic_hard_logit, semantic_hard_group = torch.max(
+            masked_semantic_logits, dim=-1)
+        has_semantic_direction = torch.any(valid_groups, dim=-1)
+        semantic_hard_logit = torch.where(
+            has_semantic_direction, semantic_hard_logit, disc_neg_logit)
+        semantic_hard_group = torch.where(
+            has_semantic_direction, semantic_hard_group,
+            torch.full_like(semantic_hard_group, -1))
 
         disc_loss_pos = self._disc_loss_pos(disc_pos_logit)
-        disc_loss_neg = self._disc_loss_neg(disc_neg_logit)
+        disc_loss_neg_full = self._disc_loss_neg(disc_neg_logit)
+        disc_loss_neg_semantic = self._disc_loss_neg(semantic_hard_logit)
+        disc_loss_neg = 0.5 * (
+            disc_loss_neg_full + disc_loss_neg_semantic)
         disc_cls_loss = 0.5 * (disc_loss_pos + disc_loss_neg)
         logit_weights = self._model.get_disc_logit_weights()
         disc_logit_loss = torch.sum(torch.square(logit_weights))
@@ -99,9 +159,11 @@ class ADDAgent(amp_agent.AMPAgent):
 
         disc_neg_acc, disc_pos_acc = self._compute_disc_acc(
             disc_neg_logit, disc_pos_logit)
-        return {
+        disc_info = {
             "disc_loss": disc_loss,
             "disc_cls_loss": disc_cls_loss.detach().clone(),
+            "disc_neg_full_loss": disc_loss_neg_full.detach(),
+            "disc_neg_semantic_loss": disc_loss_neg_semantic.detach(),
             "disc_grad_penalty": torch.zeros((), device=self._device),
             "disc_logit_loss": disc_logit_loss.detach(),
             "disc_logit_reg_loss": disc_logit_reg_loss.detach(),
@@ -109,9 +171,20 @@ class ADDAgent(amp_agent.AMPAgent):
             "disc_neg_acc": disc_neg_acc.detach(),
             "disc_pos_logit": torch.mean(disc_pos_logit).detach(),
             "disc_neg_logit": torch.mean(disc_neg_logit).detach(),
+            "disc_semantic_hard_logit": torch.mean(
+                semantic_hard_logit).detach(),
+            "disc_semantic_hard_gain": torch.mean(
+                semantic_hard_logit - disc_neg_logit).detach(),
+            "disc_semantic_radius": torch.mean(torch.linalg.vector_norm(
+                norm_diff, dim=-1)).detach(),
             "disc_group_width": self._model.get_disc_group_width(),
             "disc_group_total_width": self._model.get_disc_group_total_width()
         }
+        for group_id, (group_name, _) in enumerate(
+                self._disc_error_groups):
+            disc_info["disc_hard_{}_frac".format(group_name)] = torch.mean(
+                (semantic_hard_group == group_id).float()).detach()
+        return disc_info
 
     def _calc_disc_rewards(self, norm_diff):
         with torch.no_grad():
