@@ -32,10 +32,6 @@ def build_agent(agent_file, env, device):
     elif (agent_name == "ADD"):
         import learning.add_agent as add_agent
         agent = add_agent.ADDAgent(config=agent_config, env=env, device=device)
-    elif (agent_name == "GraNADD"):
-        import learning.gran_add_agent as gran_add_agent
-        agent = gran_add_agent.GraNADDAgent(
-            config=agent_config, env=env, device=device)
     elif (agent_name == "LCP"):
         import learning.lcp_agent as lcp_agent
         agent = lcp_agent.LCPAgent(config=agent_config, env=env, device=device)
