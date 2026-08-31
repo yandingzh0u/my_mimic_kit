@@ -36,6 +36,10 @@ def build_agent(agent_file, env, device):
         import learning.gain_sandwich_add_agent as gain_sandwich_add_agent
         agent = gain_sandwich_add_agent.GainSandwichADDAgent(
             config=agent_config, env=env, device=device)
+    elif (agent_name == "RD_FSN_ADD"):
+        import learning.rd_fsn_add_agent as rd_fsn_add_agent
+        agent = rd_fsn_add_agent.RDFSNADDAgent(
+            config=agent_config, env=env, device=device)
     elif (agent_name == "LCP"):
         import learning.lcp_agent as lcp_agent
         agent = lcp_agent.LCPAgent(config=agent_config, env=env, device=device)
