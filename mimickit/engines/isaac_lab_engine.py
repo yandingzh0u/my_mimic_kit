@@ -723,6 +723,7 @@ class IsaacLabEngine(engine.Engine):
         sim_cfg.physx.max_position_iteration_count = 4
         sim_cfg.physx.max_velocity_iteration_count = 0
         sim_cfg.physx.gpu_max_rigid_contact_count = 8 * 1024 * 1024
+        sim_cfg.physx.gpu_found_lost_pairs_capacity = 2 ** 24
         sim_cfg.physics_material.static_friction = 1.0
         sim_cfg.physics_material.dynamic_friction = 1.0
         

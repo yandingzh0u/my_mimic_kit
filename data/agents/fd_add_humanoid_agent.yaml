@@ -1,4 +1,4 @@
-agent_name: "SBE_FSN_ADD"
+agent_name: "FD_ADD"
 
 model:
   actor_net: "fc_2layers_1024units"
@@ -14,7 +14,7 @@ disc_optimizer: {type: "SGD", learning_rate: 2.5e-4, weight_decay: 0.0001}
 
 discount: 0.99
 steps_per_iter: 32
-iters_per_output: 1
+iters_per_output: 100
 test_episodes: 32
 normalizer_samples: 100000000
 use_mixed_precision: false
