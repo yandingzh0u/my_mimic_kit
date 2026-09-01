@@ -1,6 +1,6 @@
-# Locked local benchmark configuration: add / spinkick
+# Locked local benchmark configuration: add / roll
 env_name: "add"
-motion_name: "spinkick"
+motion_name: "roll"
 
 char_file: "data/assets/humanoid/humanoid.xml"
 camera_mode: "track"
@@ -23,9 +23,9 @@ init_pose: [0, 0, 0.882416, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1.5708, 0, 0, 0, -1.5708,
 
 enable_early_termination: true
 key_bodies: ["head", "right_hand", "left_hand", "right_foot", "left_foot"]
-contact_bodies: ["right_foot", "left_foot"]
+contact_bodies: []
 
-motion_file: "data/motions/humanoid/humanoid_spinkick.pkl"
+motion_file: "data/motions/humanoid/humanoid_roll.pkl"
 
 # Handcrafted tracking terms are used by DeepMimic and retained as
 # diagnostics for adversarial methods. Adversarial agent task weight is zero.

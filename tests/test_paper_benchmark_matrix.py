@@ -22,9 +22,9 @@ import envs.static_objects_env as static_objects_env  # noqa: E402
 
 METHODS = ("deepmimic", "amp", "add")
 MOTIONS = (
-    "run",
     "backflip",
     "crawl",
+    "roll",
     "getup_facedown",
     "spinkick",
     "climb",
@@ -35,9 +35,9 @@ ENV_NAMES = {
     "add": "add",
 }
 MOTION_FILES = {
-    "run": "humanoid_run.pkl",
     "backflip": "humanoid_backflip.pkl",
     "crawl": "humanoid_crawl.pkl",
+    "roll": "humanoid_roll.pkl",
     "getup_facedown": "humanoid_getup_facedown.pkl",
     "spinkick": "humanoid_spinkick.pkl",
     "climb": "humanoid_climbing_up_down.pkl",
@@ -58,7 +58,10 @@ def test_all_matrix_configs_exist_and_resolve(method, motion):
     assert config["motion_name"] == motion
     assert config["motion_file"].endswith(MOTION_FILES[motion])
     assert (ROOT / config["motion_file"]).is_file()
-    assert config["pose_termination"] is False
+    if method == "amp":
+        assert config["pose_termination"] is False
+    else:
+        assert config["pose_termination"] is True
     assert config["rand_reset"] is True
     assert config["log_tracking_error"] is True
 
@@ -72,7 +75,6 @@ def test_physics_protocol_is_identical_across_methods(motion):
     shared_keys = (
         "motion_file",
         "episode_length",
-        "pose_termination",
         "rand_reset",
         "enable_early_termination",
         "key_bodies",
@@ -162,11 +164,14 @@ def test_method_specific_interfaces_are_locked():
 
         assert deepmimic["enable_tar_obs"] is True
         assert deepmimic["tar_obs_steps"] == [1, 2, 3]
+        assert deepmimic["pose_termination"] is True
         assert amp["enable_tar_obs"] is False
         assert amp["num_disc_obs_steps"] == 10
+        assert amp["pose_termination"] is False
         assert add["enable_tar_obs"] is True
         assert add["tar_obs_steps"] == [1, 2, 3]
         assert add["num_disc_obs_steps"] == 1
+        assert add["pose_termination"] is True
 
 
 @pytest.mark.parametrize("method", METHODS)
@@ -183,7 +188,7 @@ def test_serial_launcher_syntax_and_contract():
     script = ROOT / "tools/paper_benchmark/run_serial_matrix.sh"
     subprocess.run(["bash", "-n", str(script)], check=True)
     text = script.read_text()
-    assert "motions=(run backflip crawl getup_facedown spinkick climb)" in text
+    assert "motions=(backflip crawl roll getup_facedown spinkick climb)" in text
     assert "methods=(deepmimic amp add)" in text
     assert "motion_filters=()" in text
     assert "--motion" in text
@@ -212,7 +217,7 @@ def test_serial_launcher_syntax_and_contract():
     assert 'run_job_with_retries "scale_smoke"' in text
     assert "scale_smoke_envs=8192" in text
     assert "scale_smoke_iters=3" in text
-    assert "scale_motions=(run)" in text
+    assert "scale_motions=(backflip)" in text
     assert "run_stage \"formal\"" in text
     assert "run_job_with_retries" in text
     assert "--method" in text

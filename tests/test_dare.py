@@ -3,7 +3,7 @@ import pathlib
 import gymnasium.spaces as spaces
 import torch
 
-from learning.fd_add_model import FDADDModel
+from learning.dare_model import DAREModel
 from learning.semantic_grouped_linear import SemanticGroupedLinear
 
 
@@ -85,8 +85,8 @@ def test_matches_explicit_group_linears_forward_and_backward():
     assert torch.count_nonzero(layer.weight.grad) > 0
 
 
-def test_fd_model_is_full_sn_and_has_a_single_grouped_frontend():
-    model = FDADDModel(_config(), _Env()).train()
+def test_dare_model_is_full_sn_and_has_a_single_grouped_frontend():
+    model = DAREModel(_config(), _Env()).train()
     semantic = model._disc_layers.semantic
     assert isinstance(semantic, SemanticGroupedLinear)
     assert not hasattr(model._disc_layers, "encoders")
@@ -105,16 +105,16 @@ def test_fd_model_is_full_sn_and_has_a_single_grouped_frontend():
 
 
 def test_config_is_fixed_to_gp_zero_and_100_iter_logging():
-    text = (ROOT / "data/agents/fd_add_humanoid_agent.yaml").read_text()
-    assert 'agent_name: "FD_ADD"' in text
+    text = (ROOT / "data/agents/dare_humanoid_agent.yaml").read_text()
+    assert 'agent_name: "DARE"' in text
     assert "disc_grad_penalty: 0" in text
     assert "iters_per_output: 100" in text
 
 
-def test_official_add_is_not_modified_by_fd_add():
+def test_official_add_is_not_modified_by_dare():
     add_model = (ROOT / "mimickit/learning/add_model.py").read_text()
     add_agent = (ROOT / "mimickit/learning/add_agent.py").read_text()
-    assert "FDADD" not in add_model
+    assert "DARE" not in add_model
     assert "SemanticGroupedLinear" not in add_model
-    assert "FDADD" not in add_agent
+    assert "DARE" not in add_agent
     assert "grad_penalty = 0.5 * (neg_gp + pos_gp)" in add_agent

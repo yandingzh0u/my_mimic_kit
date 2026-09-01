@@ -1,6 +1,6 @@
-# Locked local benchmark configuration: add / spinkick
-env_name: "add"
-motion_name: "spinkick"
+# Locked local benchmark configuration: amp / roll
+env_name: "amp"
+motion_name: "roll"
 
 char_file: "data/assets/humanoid/humanoid.xml"
 camera_mode: "track"
@@ -8,13 +8,12 @@ camera_mode: "track"
 episode_length: 2.0
 global_obs: true
 root_height_obs: true
-pose_termination: true
+pose_termination: false
 pose_termination_dist: 1.0
 enable_phase_obs: false
-enable_tar_obs: true
+enable_tar_obs: false
 num_phase_encoding: 4
-tar_obs_steps: [1, 2, 3]
-num_disc_obs_steps: 1
+num_disc_obs_steps: 10
 rand_reset: true
 log_tracking_error: true
 
@@ -23,9 +22,9 @@ init_pose: [0, 0, 0.882416, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1.5708, 0, 0, 0, -1.5708,
 
 enable_early_termination: true
 key_bodies: ["head", "right_hand", "left_hand", "right_foot", "left_foot"]
-contact_bodies: ["right_foot", "left_foot"]
+contact_bodies: []
 
-motion_file: "data/motions/humanoid/humanoid_spinkick.pkl"
+motion_file: "data/motions/humanoid/humanoid_roll.pkl"
 
 # Handcrafted tracking terms are used by DeepMimic and retained as
 # diagnostics for adversarial methods. Adversarial agent task weight is zero.

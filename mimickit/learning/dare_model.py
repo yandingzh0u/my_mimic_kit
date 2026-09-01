@@ -41,8 +41,8 @@ class DifferentialDirectSumLayers(torch.nn.Module):
         return self.trunk(features)
 
 
-class FDADDModel(add_model.ADDModel):
-    """Factorized Differential ADD with one grouped Full-SN front-end."""
+class DAREModel(add_model.ADDModel):
+    """DARE model with an equalized differential Full-SN critic."""
 
     def _build_disc(self, config, env):
         input_dict = {"disc_obs": env.get_disc_obs_space()}
@@ -51,7 +51,7 @@ class FDADDModel(add_model.ADDModel):
         linears = [layer for layer in base_layers.modules()
                    if isinstance(layer, torch.nn.Linear)]
         if len(linears) < 2:
-            raise ValueError("FD-ADD requires a shared discriminator trunk")
+            raise ValueError("DARE requires a shared discriminator trunk")
 
         self._disc_layers = DifferentialDirectSumLayers(
             groups=env.get_disc_error_groups(),

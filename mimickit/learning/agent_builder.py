@@ -32,9 +32,9 @@ def build_agent(agent_file, env, device):
     elif (agent_name == "ADD"):
         import learning.add_agent as add_agent
         agent = add_agent.ADDAgent(config=agent_config, env=env, device=device)
-    elif (agent_name == "FD_ADD"):
-        import learning.fd_add_agent as fd_add_agent
-        agent = fd_add_agent.FDADDAgent(
+    elif (agent_name == "DARE"):
+        import learning.dare_agent as dare_agent
+        agent = dare_agent.DAREAgent(
             config=agent_config, env=env, device=device)
     elif (agent_name == "LCP"):
         import learning.lcp_agent as lcp_agent

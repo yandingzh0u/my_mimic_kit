@@ -96,7 +96,7 @@ if [[ ! -x "$python_bin" ]]; then
 fi
 
 methods=(deepmimic amp add)
-motions=(run backflip crawl getup_facedown spinkick climb)
+motions=(backflip crawl roll getup_facedown spinkick climb)
 
 run_methods=("${methods[@]}")
 if [[ -n "$method_filter" ]]; then
@@ -598,7 +598,7 @@ fi
 
 if [[ "$run_scale_smoke" == true ]]; then
   for method in "${run_methods[@]}"; do
-    scale_motions=(run)
+    scale_motions=(backflip)
     for motion in "${scale_motions[@]}"; do
       motion_selected=false
       for requested_motion in "${run_motions[@]}"; do

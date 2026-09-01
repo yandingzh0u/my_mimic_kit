@@ -1,19 +1,19 @@
 import torch
 
 import learning.add_agent as add_agent
-import learning.fd_add_model as fd_add_model
+import learning.dare_model as dare_model
 
 
-class FDADDAgent(add_agent.ADDAgent):
-    """Factorized Differential ADD: direct-sum Full SN, no GP."""
+class DAREAgent(add_agent.ADDAgent):
+    """Differential Adversarial Reward Equalization agent."""
 
     def __init__(self, config, env, device):
         super().__init__(config, env, device)
         if self._disc_grad_penalty != 0:
-            raise ValueError("FD-ADD requires disc_grad_penalty=0")
+            raise ValueError("DARE requires disc_grad_penalty=0")
 
     def _build_model(self, config):
-        self._model = fd_add_model.FDADDModel(config["model"], self._env)
+        self._model = dare_model.DAREModel(config["model"], self._env)
 
     def _compute_disc_loss(self, batch):
         current_diff = batch["disc_obs_demo"] - batch["disc_obs"]

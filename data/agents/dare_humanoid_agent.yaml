@@ -1,4 +1,4 @@
-agent_name: "FD_ADD"
+agent_name: "DARE"
 
 model:
   actor_net: "fc_2layers_1024units"

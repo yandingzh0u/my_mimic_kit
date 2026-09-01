@@ -8,7 +8,7 @@ camera_mode: "track"
 episode_length: 9.9666666667
 global_obs: true
 root_height_obs: true
-pose_termination: false
+pose_termination: true
 pose_termination_dist: 1.0
 enable_phase_obs: false
 enable_tar_obs: true
