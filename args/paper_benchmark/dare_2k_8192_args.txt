@@ -1,0 +1,11 @@
+# Method template; run_serial_matrix.sh supplies --env_config and --out_dir.
+--mode train
+--num_envs 8192
+--devices cuda:0
+--engine_config data/engines/isaac_lab_engine.yaml
+--agent_config data/agents/dare_humanoid_agent.yaml
+--max_samples 524288000
+--rand_seed 0
+--visualize false
+--save_int_models true
+--logger txt

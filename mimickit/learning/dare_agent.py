@@ -5,7 +5,7 @@ import learning.dare_model as dare_model
 
 
 class DAREAgent(add_agent.ADDAgent):
-    """Differential Adversarial Reward Equalization agent."""
+    """Exact a30 training path used as the DARE restoration baseline."""
 
     def __init__(self, config, env, device):
         super().__init__(config, env, device)
@@ -16,6 +16,11 @@ class DAREAgent(add_agent.ADDAgent):
         self._model = dare_model.DAREModel(config["model"], self._env)
 
     def _compute_disc_loss(self, batch):
+        # Keep a30's forward order. PyTorch spectral_norm updates its power
+        # iteration buffers on every training-mode forward, so order matters.
+        pos_logit = self._model.eval_disc(
+            self._pos_diff.unsqueeze(0)).squeeze(-1)
+
         current_diff = batch["disc_obs_demo"] - batch["disc_obs"]
         replay_data = self._disc_buffer.sample(current_diff.shape[0])
         replay_diff = replay_data["disc_obs_demo"] - replay_data["disc_obs"]
@@ -23,8 +28,6 @@ class DAREAgent(add_agent.ADDAgent):
         norm_diff = self._disc_obs_norm.normalize(raw_diff)
 
         neg_logit = self._model.eval_disc(norm_diff).squeeze(-1)
-        pos_logit = self._model.eval_disc(
-            self._pos_diff.unsqueeze(0)).squeeze(-1)
         pos_loss = self._disc_loss_pos(pos_logit)
         neg_loss = self._disc_loss_neg(neg_logit)
         cls_loss = 0.5 * (pos_loss + neg_loss)
@@ -50,6 +53,4 @@ class DAREAgent(add_agent.ADDAgent):
             "disc_group_width": self._model.get_disc_group_width(),
             "disc_group_total_width": (
                 self._model.get_disc_group_total_width()),
-            "disc_lipschitz_bound": (
-                self._model.get_disc_lipschitz_bound()),
         }

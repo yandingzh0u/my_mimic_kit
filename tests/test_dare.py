@@ -1,10 +1,11 @@
+import inspect
 import pathlib
 
 import gymnasium.spaces as spaces
 import torch
 
-from learning.dare_model import DAREModel
-from learning.semantic_grouped_linear import SemanticGroupedLinear
+from learning.dare_agent import DAREAgent
+from learning.dare_model import DAREModel, GroupSeparableDiscLayers
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -43,71 +44,81 @@ def _config():
     }
 
 
-def test_grouped_linear_is_one_module_and_partitions_input():
-    layer = SemanticGroupedLinear(
-        172, _Env().get_disc_error_groups(), out_features=18).eval()
-    assert layer.weight.shape == (18, 172)
-    assert layer.bias.shape == (7, 18)
-    assert not isinstance(layer, torch.nn.ModuleList)
-    assert sum(1 for _ in layer.modules()) == 1
+def _sn_linears(module):
+    return [child for child in module.modules()
+            if isinstance(child, torch.nn.Linear)]
 
 
-def test_every_group_block_has_unit_spectral_norm():
-    layer = SemanticGroupedLinear(
-        172, _Env().get_disc_error_groups(), out_features=18).eval()
-    packed = layer.normalized_weight()
-    for group_id, dim in enumerate(_Env.dims):
-        block = packed[group_id, :, :dim]
-        norm = torch.linalg.matrix_norm(block, ord=2)
-        torch.testing.assert_close(norm, torch.ones_like(norm),
-                                   rtol=2e-3, atol=2e-3)
-
-
-def test_matches_explicit_group_linears_forward_and_backward():
-    groups = _Env().get_disc_error_groups()
-    layer = SemanticGroupedLinear(172, groups, out_features=18).eval()
-    inputs = torch.randn(11, 172, requires_grad=True)
-    actual = layer(inputs)
-
-    packed = layer.normalized_weight()
-    expected = []
-    for group_id, (_, indices) in enumerate(groups):
-        group_input = inputs[:, torch.tensor(indices)]
-        expected.append(torch.nn.functional.linear(
-            group_input, packed[group_id, :, :len(indices)],
-            layer.bias[group_id]))
-    expected = torch.stack(expected, dim=1)
-    torch.testing.assert_close(actual, expected)
-
-    actual.square().mean().backward()
-    assert torch.isfinite(inputs.grad).all()
-    assert torch.isfinite(layer.weight.grad).all()
-    assert torch.count_nonzero(layer.weight.grad) > 0
-
-
-def test_dare_model_is_full_sn_and_has_a_single_grouped_frontend():
+def test_model_restores_explicit_a30_group_frontend():
     model = DAREModel(_config(), _Env()).train()
-    semantic = model._disc_layers.semantic
-    assert isinstance(semantic, SemanticGroupedLinear)
-    assert not hasattr(model._disc_layers, "encoders")
-    assert hasattr(model._disc_logits.parametrizations, "weight")
-    trunk_linears = [module for module in model._disc_layers.trunk
-                     if isinstance(module, torch.nn.Linear)]
-    assert trunk_linears
-    assert all(hasattr(module.parametrizations, "weight")
-               for module in trunk_linears)
+    layers = model._disc_layers
+    assert isinstance(layers, GroupSeparableDiscLayers)
+    assert len(layers.encoders) == len(_Env.dims)
+    assert layers.group_width == 18
+    assert layers.total_width == 126
+    for dim, encoder in zip(_Env.dims, layers.encoders):
+        linear = encoder[0]
+        assert linear.in_features == dim
+        assert linear.out_features == layers.group_width
+        assert hasattr(linear.parametrizations, "weight")
+        torch.testing.assert_close(
+            linear.bias, torch.zeros_like(linear.bias))
+
+
+def test_all_discriminator_linears_use_pytorch_spectral_norm():
+    model = DAREModel(_config(), _Env()).train()
+    linears = _sn_linears(model._disc_layers) + [model._disc_logits]
+    assert len(linears) == 9
+    assert all(hasattr(layer.parametrizations, "weight")
+               for layer in linears)
+
+
+def test_model_forward_backward_is_finite():
+    model = DAREModel(_config(), _Env()).train()
     logits = model.eval_disc(torch.randn(32, 172)).squeeze(-1)
     loss = (torch.nn.functional.softplus(logits).mean()
             + torch.nn.functional.softplus(
                 -model.eval_disc(torch.zeros(1, 172))).mean())
     loss.backward()
-    assert torch.isfinite(semantic.weight.grad).all()
+    assert torch.isfinite(logits).all()
+    assert all(parameter.grad is None
+               or torch.isfinite(parameter.grad).all()
+               for parameter in model.get_disc_params())
 
 
-def test_config_is_fixed_to_gp_zero_and_100_iter_logging():
+def test_reward_forward_uses_training_mode_sn_updates_like_a30():
+    agent = object.__new__(DAREAgent)
+    torch.nn.Module.__init__(agent)
+    agent._model = DAREModel(_config(), _Env()).train()
+    agent._disc_reward_scale = 2.0
+    agent._disc_eval_batch_size = 0
+
+    before = {
+        name: value.clone()
+        for name, value in agent._model.named_buffers()
+        if name.endswith("._u") or name.endswith("._v")
+    }
+    reward = agent._calc_disc_rewards(torch.randn(31, 172))
+    after = dict(agent._model.named_buffers())
+
+    assert reward.shape == (31,)
+    assert torch.isfinite(reward).all()
+    assert any(not torch.equal(before[name], after[name])
+               for name in before)
+    assert agent._model._disc_layers.training
+    assert agent._model._disc_logits.training
+
+
+def test_disc_loss_evaluates_positive_before_negative():
+    source = inspect.getsource(DAREAgent._compute_disc_loss)
+    assert source.index("pos_logit =") < source.index("neg_logit =")
+
+
+def test_config_restores_a30_gp_and_reward_batch_semantics():
     text = (ROOT / "data/agents/dare_humanoid_agent.yaml").read_text()
     assert 'agent_name: "DARE"' in text
     assert "disc_grad_penalty: 0" in text
+    assert "disc_eval_batch_size: 0" in text
     assert "iters_per_output: 100" in text
 
 
@@ -115,6 +126,6 @@ def test_official_add_is_not_modified_by_dare():
     add_model = (ROOT / "mimickit/learning/add_model.py").read_text()
     add_agent = (ROOT / "mimickit/learning/add_agent.py").read_text()
     assert "DARE" not in add_model
-    assert "SemanticGroupedLinear" not in add_model
+    assert "GroupSeparableDiscLayers" not in add_model
     assert "DARE" not in add_agent
     assert "grad_penalty = 0.5 * (neg_gp + pos_gp)" in add_agent

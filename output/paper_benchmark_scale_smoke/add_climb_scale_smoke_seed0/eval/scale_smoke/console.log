@@ -1,0 +1,71 @@
+[2026-09-02T01:11:31+08:00] COMMAND /home/y/miniconda3/envs/env_isaaclab/bin/python tools/paper_eval/evaluate_checkpoint.py --model-file output/paper_benchmark_scale_smoke/add_climb_scale_smoke_seed0/model.pt --env-config data/envs/paper_benchmark/add_climb_env.yaml --agent-config data/agents/add_humanoid_agent.yaml --engine-config data/engines/isaac_lab_engine.yaml --method add --motion climb --num-envs 2 --steps 2 --start-mode phase0 --condition nominal --seed 0 --out-dir output/paper_benchmark_scale_smoke/add_climb_scale_smoke_seed0/eval/scale_smoke
+/home/y/miniconda3/envs/env_isaaclab/lib/python3.11/site-packages/requests/__init__.py:113: RequestsDependencyWarning: urllib3 (2.6.3) or chardet (7.4.3)/charset_normalizer (3.3.2) doesn't match a supported version!
+  warnings.warn(
+Building add env
+[INFO][AppLauncher]: Using device: cuda:0
+[INFO][AppLauncher]: Loading experience file: /home/y/IsaacLab/apps/isaaclab.python.headless.kit
+Loading user config located at: '/home/y/miniconda3/envs/env_isaaclab/lib/python3.11/site-packages/isaacsim/kit/data/Kit/Isaac-Sim/5.1/user.config.json'
+[Info] [carb] Logging to file: /home/y/miniconda3/envs/env_isaaclab/lib/python3.11/site-packages/isaacsim/kit/logs/Kit/Isaac-Sim/5.1/kit_20260902_011133.log
+2026-09-01T17:11:33Z [2ms] [Warning] [omni.ext.plugin] [ext: isaaclab_contrib] Extensions config 'extension.toml' doesn't exist '/home/y/IsaacLab/source/isaaclab_contrib' or '/home/y/IsaacLab/source/isaaclab_contrib/config'
+2026-09-01T17:11:34Z [66ms] [Warning] [omni.usd_config.extension] Enable omni.materialx.libs extension to use MaterialX
+2026-09-01T17:11:34Z [409ms] [Warning] [carb] Acquiring non optional plugin interface which is not listed as dependency: [omni::physx::IPhysxBenchmarks v1.0] (plugin: <default plugin>), by client: omni.physics.physx.plugin. Add it to CARB_PLUGIN_IMPL_DEPS() macro of a client.
+2026-09-01T17:11:34Z [549ms] [Warning] [omni.isaac.dynamic_control] omni.isaac.dynamic_control is deprecated as of Isaac Sim 4.5. No action is needed from end-users.
+2026-09-01T17:11:35Z [1,995ms] [Warning] [gpu.foundation.plugin] Skipping unsupported non-NVIDIA GPU: Intel(R) UHD Graphics 770 (ADL-S GT1)
+2026-09-01T17:11:35Z [1,995ms] [Warning] [gpu.foundation.plugin] Skipping unsupported non-NVIDIA GPU: Intel(R) UHD Graphics 770 (ADL-S GT1)
+
+|---------------------------------------------------------------------------------------------|
+| Driver Version: 580.173.02    | Graphics API: Vulkan
+|=============================================================================================|
+| GPU | Name                             | Active | LDA | GPU Memory | Vendor-ID | LUID       |
+|     |                                  |        |     |            | Device-ID | UUID       |
+|     |                                  |        |     |            | Bus-ID    |            |
+|---------------------------------------------------------------------------------------------|
+| 0   | NVIDIA GeForce RTX 5080          | Yes: 0 |     | 16303   MB | 10de      | 0          |
+|     |                                  |        |     |            | 2c02      | e16ebef7.. |
+|     |                                  |        |     |            | 1         |            |
+|---------------------------------------------------------------------------------------------|
+| 1   | Intel(R) UHD Graphics 770 (ADL.. |        |     | 48013   MB | 8086      | 0          |
+|     |                                  |        |     |            | 4680      | 86808046.. |
+|     |                                  |        |     |            | 0         |            |
+|=============================================================================================|
+| OS: 22.04.5 LTS (Jammy Jellyfish) ubuntu, Version: 22.04.5, Kernel: 6.8.0-136-generic
+| XServer Vendor: The X.Org Foundation, XServer Version: 12101004 (1.21.1.4)
+| Processor: 12th Gen Intel(R) Core(TM) i9-12900K
+| Bare Metal Cores: 16 | Bare Metal Logical Cores: 32
+| Available Cores:  24 
+|---------------------------------------------------------------------------------------------|
+| Total Memory (MB): 64017 | Free Memory: 51287
+| Total Page/Swap (MB): 2047 | Free Page/Swap: 1813
+|---------------------------------------------------------------------------------------------|
+2026-09-01T17:11:36Z [2,301ms] [Warning] [gpu.foundation.plugin] CPU performance profile is set to powersave. This profile sets the CPU to the lowest frequency reducing performance.
+2026-09-01T17:11:36Z [2,303ms] [Warning] [gpu.foundation.plugin] PCIe link width current (1) and maximum (16) for device 0 don't match.
+2026-09-01T17:11:36Z [2,303ms] [Warning] [gpu.foundation.plugin] IOMMU is enabled.
+2026-09-01T17:11:36Z [2,303ms] [Warning] [gpu.foundation.plugin] Detected IOMMU is enabled. Running CUDA peer-to-peer bandwidth and latency validation.
+Unidirectional P2P=Enabled Bandwidth (P2P Writes) Matrix (GB/s)
+   D\D     0 
+     0 817.21 
+P2P=Enabled Latency (P2P Writes) Matrix (us)
+   GPU     0 
+     0   2.32 
+
+   CPU     0 
+     0   1.54 
+[INFO] IsaacLab logging to file: /tmp/isaaclab_2026-09-02_01-11-36.log
+Building 1/2 envsBuilding 2/2 envs
+
+Loading 1/1 motion files: data/motions/humanoid/humanoid_climbing_up_down.pkl
+Loaded motion file: data/motions/humanoid/humanoid_climbing_up_down.pkl
+Loaded 1 motions with a total length of 9.967s.
+Building Obj:0 in 2/2 envs
+Building Obj:1 in 2/2 envs
+Initializing simulation...
+Char 0 properties
+	DoFs: 28
+	Mass: 50.050 kg
+
+Building ADD agent
+Total parameter count: 2719262
+Loaded model parameters from /home/y/my_mimic_mixgrpo/MimicKit/output/paper_benchmark_scale_smoke/add_climb_scale_smoke_seed0/model.pt
+{"completion_rate": 0.0, "method": "add", "motion": "climb", "summary": "/home/y/my_mimic_mixgrpo/MimicKit/output/paper_benchmark_scale_smoke/add_climb_scale_smoke_seed0/eval/scale_smoke/summary.json"}
+2026-09-01T17:11:43Z [9,477ms] [Warning] [omni.physx.plugin] USD stage detach not called, holding a loose ptr to a stage!
+2026-09-01T17:11:43Z [9,868ms] [Warning] [carb] Recursive unloadAllPlugins() detected!

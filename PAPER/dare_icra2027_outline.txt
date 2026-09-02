@@ -26,7 +26,8 @@ component weight 或 motion-specific reward coefficient。
     主线：消除手工奖励设计和逐动作调参。
     方法：从多目标 tracking error 推导 differential adversarial reward，再推导 DARE critic 与 loss。
     支撑：zero-anchor relative gain bound 提供稳定、可复用的 learned reward geometry。
-    结果：同一套 DARE 配置在选定的官方 humanoid benchmark motions 上获得稳定的动作模仿质量。
+    结果：同一套冻结的 DARE reward-learning 配置在六个动力学特性不同的官方 humanoid benchmark
+    motions 上获得稳定且有竞争力的动作模仿质量。
 
 
 Abstract
@@ -58,9 +59,9 @@ Abstract
 
 4. 结果（2句，正式实验完成后填写具体数字）
 
-    强调选定 benchmark motions 共用一套配置；按照官方评价口径报告 position tracking error、DoF velocity
-    tracking error 和 seed statistics。结尾落在“without manually weighted tracking rewards or
-    motion-specific coefficient tuning”。
+    强调全部 benchmark motions 共用一套预先冻结的 reward-learning 配置；按照官方评价口径报告 position
+    tracking error、DoF velocity tracking error 和多 seed 统计。结尾落在“without manually weighted
+    tracking rewards or per-motion reward tuning”。
 
 摘要不放公式，不展开具体层实现，也不把稳定性工具写成论文主角。
 
@@ -121,9 +122,9 @@ I. Introduction
        semantic factor before interaction and controls reward variation relative
        to the unique zero-error anchor.
 
-    3. We evaluate DARE under one shared configuration on benchmark humanoid
-       motions, demonstrating accurate tracking, stable optimization, and reduced
-       reward tuning.
+    3. We evaluate DARE with one frozen reward-learning configuration across
+       heterogeneous benchmark motions, demonstrating accurate tracking and
+       stable cross-motion reuse without per-motion reward tuning.
 
 
 II. Related Work
@@ -283,10 +284,10 @@ DARE critic loss：
 本小节将 differential equalization 和稳定性写成一个统一 critic，而不是拆成多个小模块。
 
 首先，differential space 具有语义直和结构：X = X_1 direct-sum ... direct-sum X_G。DARE 的第一层对每个
-factor 施加独立仿射映射和非线性，然后拼接为等宽 latent representation：
+factor 施加独立线性映射和非线性，然后拼接为等宽 latent representation：
 
     \Phi_\oplus(\Delta)
-      = \bigoplus_{g=1}^{G} \rho(\bar{W}_g \Delta_g + b_g),
+      = \bigoplus_{g=1}^{G} \rho(\bar{W}_g \Delta_g),
     \bar{W}_g = W_g / \sigma_{max}(W_g).                             （6）
 
 （公式（6）单独居中。正文将它称为 Differential Direct-Sum Layer，不为它另设章节。）
@@ -325,8 +326,10 @@ linear operator 即可，不展开工程数据布局。
 （公式（10）必须单独居中并加框；这是全文核心理论公式。）
 
 公式（10）的文字解释：相对理想动作只发生小幅变化时，learned score 不会产生不成比例的跳变；随着误差
-分布变化，critic 仍可通过 shared nonlinear trunk 学习不同 motion 所需的组合关系。所有 affine bias 保留，
-使 activation boundaries 能够适应不同 residual 区域，从而在有界增益下保持非线性 reward geometry。
+分布变化，critic 仍可通过 shared nonlinear trunk 学习不同 motion 所需的组合关系。semantic direct-sum
+layer 不使用 bias，使唯一 ideal differential 在进入共享交互前仍映射到零特征；shared trunk 与 scalar output
+保留 bias，使后续 activation boundaries 能够适应不同 residual 区域，从而在有界增益下保持非线性 reward
+geometry。
 
 这一小节最后用一句话收束两部分作用：
 
@@ -348,6 +351,16 @@ linear operator 即可，不展开工程数据布局。
 正文解释公式（11）：policy 获得高 reward 当且仅当其 differential 被 critic 判为更接近 ideal class。该 reward
 由同一个 f_theta 同时聚合全部 tracking objectives，因此 PPO 不需要访问 e_g、人工 success threshold 或
 component coefficient。
+
+紧接着把 critic 的结构性质传递到 PPO 实际接收的 reward。由于 softplus 是 1-Lipschitz，且公式（4）中的
+Delta 已经是 normalized differential，由公式（10）直接得到：
+
+    |r^{DARE}(Delta) - r^{DARE}(0)|
+      <= 2 |f_theta(Delta) - f_theta(0)|
+      <= 2 ||Delta||_2.                                             （12）
+
+（公式（12）单独居中。正文明确：该界定义在 normalized differential space，而不是未经归一化的 raw state
+coordinates；它说明结构约束直接作用于 PPO 所使用的 reward variation，而不仅是中间 critic score。）
 
 训练交替执行：rollout collection、differential construction、critic update 和 PPO update。判别器直接最小化
 公式（5），策略以公式（11）构造 returns，并通过标准 PPO surrogate 更新。
@@ -376,8 +389,8 @@ discounting、GAE 和 PPO 完成。一个 critic、一个 reward、一个 policy
 V. Experiments
 ==============
 
-本节约 1.2–1.5 页，只保留三个小节。实验沿用官方 motion-imitation benchmark 的评价口径：最终误差采用
-统一表格汇总，训练过程采用多 seed learning curves 展示。
+本节约 1.4–1.7 页，围绕唯一实证主张组织：一套在正式评估前冻结的 DARE reward-learning 配置，能否在
+六个动力学特性不同的 humanoid motions 上稳定复用。
 
 5.1 Experimental Setup
 ----------------------
@@ -385,47 +398,88 @@ V. Experiments
 一个小节交代完以下信息：
 
     - Humanoid model、control frequency、PPO、reference initialization、PT protocol 和训练预算；
-    - 从官方 humanoid benchmark 中选取 Roll 和 Climb，并报告 reference length 与 termination protocol；
-    - 所有动作使用同一 critic architecture、optimizer 和 reward-learning configuration；
-    - baselines 精简为 handcrafted tracking controller 与标准 differential adversarial reward；
+    - 从官方 benchmark 中选取六个异质动作，覆盖 contact-rich rotation、long-horizon object interaction、
+      locomotion、aerial/acrobatic motion 和 recovery 等不同 regime；
+    - 正式动作固定为 Roll、Climb、Backflip、Crawl、Get-Up 和 Spin Kick；
+    - 所有动作使用同一套冻结的 DARE critic architecture、optimizer 和 reward-learning hyperparameters；
+    - motion file、reference length、object layout 和 termination condition 属于任务定义，不混称为共享超参数；
+    - baselines 直接使用各自论文或官方实现公开的配置；
     - 主指标完全对齐官方 Table 1：Position Tracking Error [m] 与 DoF Velocity Tracking Error [rad/s]；
-    - 每个模型在 4096 个 test episodes 上评估，正式表格报告 5 seeds 的 mean ± std。
+    - 六个动作全部使用 5 training seeds；每个模型在 4096 个 test episodes 上评估，报告 mean ± std；
+    - 六动作正式评估前冻结 reward-learning configuration，正式结果不再用于修改该配置。
 
-正文不要列内部实验目录名或 commit hash；这些信息进入实验记录而不是论文。
+Table I：Frozen DARE Reward-Learning Configuration。
 
-5.2 Quantitative Motion Tracking
---------------------------------
+    用一个紧凑表格列出最终真实使用的 critic architecture、factor width、critic optimizer、critic LR、replay
+    设置、reward scale、normalization、GP=0 和谱参数化实现。不要在大纲阶段填入猜测值；正式稿全部从最终
+    config 自动核对。表注写明：
 
-Table I（全文主表）：沿用官方 ADD Table 1 的格式，在其方法列后增加 DARE。
+        All reward-learning entries are frozen before formal evaluation and are
+        identical for every motion.
+
+    PPO 与环境设置若事实上共享，可以在 setup 正文说明；如果存在由任务定义决定的差异，则不得扩大为
+    “all training configurations are identical”。论文的核心承诺严格限定为 reward-learning configuration。
+
+正文不列内部实验目录名、commit hash 或失败试验代号；这些信息只进入实验记录。
+
+5.2 Cross-Motion Tracking Performance
+-------------------------------------
+
+Table II（全文主结果表）：沿用官方 motion tracking table 的评价格式，覆盖全部六个动作，而不是只针对
+Roll 与 Climb。
 
 表格组织：
 
-    行：Skill（当前补充 Roll、Climb）及其 reference length。
+    行：六个 Skill 及其 reference length / dynamical regime。
     第一组列：Position Tracking Error [m]，方法为 AMP、DeepMimic、ADD、DARE。
     第二组列：DoF Velocity Tracking Error [rad/s]，方法同上。
-    每项结果：mean ± std，向下箭头表示越低越好。
+    每项结果：mean ± std，向下箭头表示越低越好；caption 明确 DARE 所有行使用同一 frozen
+    reward-learning configuration。
 
 正文回答：
 
-    - DARE 在共享配置下是否达到官方 tracking benchmark 的精度范围；
+    - DARE 在共享配置下是否在不同动力学 regime 中保持稳定完成与有竞争力的 tracking error；
     - 与 handcrafted 和 learned reward baselines 相比，position 与 velocity tracking 是否保持竞争力；
-    - qualitative completion 通过正文简短描述和 accompanying video 展示，不另设动作专属图。
+    - 结果的重点是 cross-motion reuse，不要求宣称每个动作、每个指标都绝对最优；
+    - qualitative completion 通过 accompanying video 展示，不另设每个动作的专属图。
 
-5.3 Training Curves
--------------------
+5.3 Component Ablation
+----------------------
+
+Table III：只在代表性最强的 Roll 与 Climb 上做三项最小消融；两项任务均使用 5 seeds。
+
+    Variant                    Semantic factorization    Gain control
+    -----------------------------------------------------------------
+    Flat + Full SN                       no             Full SN
+    Factorized + GP                     yes             fixed GP
+    DARE                                yes             Full SN
+
+其中 Factorized + GP 的 GP 值必须在正式评估前依据公开配置固定，并对 Roll、Climb 共用；不得观察结果后选择，
+也不进行 sweep。三个 variant 保持相同 actor、PPO、训练预算、differential definition 和网络容量口径。
+
+该表只回答两个机制问题：
+
+    - Flat + Full SN vs DARE：interaction 前的 semantic factorization 是否必要；
+    - Factorized + GP vs DARE：在相同 factorization 下，结构化 gain control 是否比系数化软约束更适合稳定复用。
+
+不要扩展出更多 variant，也不要在额外动作上重复整套消融。
+
+5.4 Representative Learning Curves
+----------------------------------
 
 Figure 1：按照官方 ADD learning-curve figure 的表达方式，绘制 Position Tracking Error 随 environment samples
 变化的曲线。
 
 图的组织：
 
-    - 两个 panel 分别对应 Roll 与 Climb；
+    - 两个 panel 仅选择 Roll 与 Climb 作为 representative regimes；这不是把全文结论限定到两个动作，
+      全部动作的最终结果已由 Table II 汇总；
     - 横轴为 environment samples，纵轴为官方 Position Tracking Error [m]；
     - 每条实线表示跨 seeds 的均值，阴影表示标准差；
     - 使用完全一致的坐标尺度和训练预算；
     - 曲线只比较具有 matched local training protocol 的方法。
 
-正文只讨论三件事：收敛速度、最终平台和 seed consistency。DoF Velocity 的最终结果已经包含在 Table I，
+正文只讨论三件事：收敛速度、最终平台和 seed consistency。DoF Velocity 的最终结果已经包含在 Table II，
 不再绘制第二组曲线。
 
 
@@ -438,9 +492,9 @@ VI. Conclusion
 聚合变成逐动作工程。DARE 从 synchronized motion differential 学习一个 nonlinear scalar reward，并通过
 interaction 前的 differential equalization 保留各类误差信息。
 
-第二段回扣稳定性与结果：以 perfect imitation 的 zero differential 为 anchor，DARE 对 learned score 的相对
-增益施加结构界，使选定 benchmark motions 能够共用同一训练配置。最后总结正式实验支持的动作质量，
-不加入超出当前 benchmark 证据的新理论声明。
+第二段回扣稳定性与结果：以 perfect imitation 的 zero differential 为 anchor，DARE 对 learned score 与
+实际 PPO reward 的相对变化施加结构界，使异质 benchmark motions 能够共用同一套冻结的 reward-learning
+配置。最后总结正式实验支持的动作质量，不加入超出当前 benchmark 证据的新理论声明。
 
 
 全文公式清单与排版位置
@@ -457,6 +511,7 @@ interaction 前的 differential equalization 保留各类误差信息。
 （9）zero-anchor relative gap：Method 4.2，正文引出后单独编号。
 （10）anchor-relative gain bound：Method 4.2，单独居中、加框。
 （11）DARE policy reward：Method 4.3，单独居中、加框。
+（12）normalized differential space 中的 PPO reward variation bound：Method 4.3，单独居中。
 
 全文只保留三处 boxed equation：（5）训练目标、（10）核心结构性质、（11）策略奖励。
 
@@ -465,7 +520,10 @@ interaction 前的 differential equalization 保留各类误差信息。
 ============
 
 Algorithm 1   DARE Training：第四节唯一的方法流程展示。
-Table I       官方格式的 motion tracking performance，在基线后增加 DARE。
-Figure 1      Position Tracking Error learning curves，均值与 seed 方差。
+Table I       Frozen DARE reward-learning configuration。
+Table II      六个异质 motions 的主 tracking performance，与官方 baselines 同表比较。
+Table III     Roll / Climb 上的三项最小组件消融。
+Figure 1      Roll / Climb representative Position Tracking Error learning curves，均值与 seed 方差。
 
-总计：1 table、1 figure、1 algorithm。
+总计：3 tables、1 figure、1 algorithm。若最终版面不足，Table I 可压缩为正文中的紧凑 configuration block，
+但冻结配置声明和完整数值不得删除。

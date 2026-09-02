@@ -95,8 +95,8 @@ if [[ ! -x "$python_bin" ]]; then
   exit 2
 fi
 
-methods=(deepmimic amp add)
-motions=(backflip crawl roll getup_facedown spinkick climb)
+methods=(dare add deepmimic amp)
+motions=(climb backflip crawl roll getup_facedown spinkick)
 
 run_methods=("${methods[@]}")
 if [[ -n "$method_filter" ]]; then
@@ -147,12 +147,14 @@ declare -A arg_files=(
   [deepmimic]="args/paper_benchmark/deepmimic_2k_8192_args.txt"
   [amp]="args/paper_benchmark/amp_2k_8192_args.txt"
   [add]="args/paper_benchmark/add_2k_8192_args.txt"
+  [dare]="args/paper_benchmark/dare_2k_8192_args.txt"
 )
 
 declare -A agent_files=(
   [deepmimic]="data/agents/deepmimic_humanoid_ppo_agent.yaml"
   [amp]="data/agents/amp_humanoid_agent.yaml"
   [add]="data/agents/add_humanoid_agent.yaml"
+  [dare]="data/agents/dare_humanoid_agent.yaml"
 )
 
 smoke_envs=64
@@ -202,8 +204,8 @@ write_plan() {
   printf 'order\tmethod\tmotion\tenv_config\tformal_output\n' > "$plan_file"
   local order=0
   local method motion env_config out_dir
-  for method in "${run_methods[@]}"; do
-    for motion in "${run_motions[@]}"; do
+  for motion in "${run_motions[@]}"; do
+    for method in "${run_methods[@]}"; do
       order=$((order + 1))
       env_config="data/envs/paper_benchmark/${method}_${motion}_env.yaml"
       out_dir="$campaign_root/${method}_${motion}_2k_8192_seed${seed}"
@@ -571,8 +573,10 @@ run_stage() {
   local root="$5"
   local method motion
 
-  for method in "${run_methods[@]}"; do
-    for motion in "${run_motions[@]}"; do
+  # Motion-major order: every method finishes the current clip before the next
+  # clip.  Methods themselves start at DARE.
+  for motion in "${run_motions[@]}"; do
+    for method in "${run_methods[@]}"; do
       run_job_with_retries "$stage" "$method" "$motion" "$num_envs" "$max_samples" \
         "$save_int_models" "$root"
     done
@@ -598,7 +602,7 @@ fi
 
 if [[ "$run_scale_smoke" == true ]]; then
   for method in "${run_methods[@]}"; do
-    scale_motions=(backflip)
+    scale_motions=(climb)
     for motion in "${scale_motions[@]}"; do
       motion_selected=false
       for requested_motion in "${run_motions[@]}"; do

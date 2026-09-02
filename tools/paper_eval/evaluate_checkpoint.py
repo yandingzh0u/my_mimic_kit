@@ -140,6 +140,8 @@ def infer_method(
         return "AMP"
     if agent_name == "ADD":
         return "ADD"
+    if agent_name == "DARE":
+        return "DARE"
     if agent_name in ("RCCI_ADD", "ALIGNED_ADD"):
         return "RCCI" if agent_name == "RCCI_ADD" else "AlignedADD"
     return agent_name or env_name or "unknown"

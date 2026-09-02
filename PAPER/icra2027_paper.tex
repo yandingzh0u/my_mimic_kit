@@ -1,0 +1,889 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Anonymous ICRA 2027 draft.
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\documentclass[letterpaper, 10pt, conference]{ieeeconf}
+\IEEEoverridecommandlockouts
+\overrideIEEEmargins
+\usepackage{amsmath,amssymb,booktabs,multirow,graphicx,xcolor,cite,url,microtype,newtxtext,newtxmath,algorithm,algorithmic,dblfloatfix,placeins,flushend}
+\newcommand{\vect}[1]{\mathbf{#1}}
+
+\title{\LARGE \bf DARE: Differential Adversarial Reward Equalization for Humanoid Motion Imitation}
+\author{Anonymous Authors}
+
+\begin{document}
+\maketitle
+\thispagestyle{empty}
+\pagestyle{empty}
+
+\begin{abstract}
+Physics-based humanoid imitation requires a controller to jointly match
+heterogeneous objectives involving global motion, articulated pose, and
+velocity. Existing tracking pipelines commonly combine these objectives
+through manually designed reward terms and motion-dependent coefficients,
+so a controller that tracks one skill well may need a different reward
+for the next. We introduce DARE, a differential adversarial reward that
+learns this aggregation directly from synchronized reference--policy
+errors. DARE preserves the semantic factorization of the differential
+before learning cross-objective interactions, so root, pose, and velocity
+residuals enter the learned reward through a common structured interface.
+Because perfect imitation is the fixed zero differential, DARE controls
+the critic through its score change relative to this unique anchor,
+yielding a globally bounded reward geometry trained by binary adversarial
+supervision. Using one frozen reward-learning configuration, DARE tracks
+six heterogeneous skills with position errors from $0.021\,\mathrm{m}$ to
+$0.118\,\mathrm{m}$ and DoF-velocity errors from $0.271\,\mathrm{rad/s}$
+to $1.012\,\mathrm{rad/s}$, without manually weighted tracking rewards or
+per-motion reward tuning.
+\end{abstract}
+
+\section{Introduction}
+Physics-based humanoid control must reproduce a prescribed reference
+motion under dynamics, actuation limits, and intermittent contact.
+Whether an imitation is accurate cannot be judged from a single geometric
+residual. Global root displacement and orientation, articulated body
+configuration, joint velocity, momentum, and contact transitions all have
+to be satisfied together. These objectives interact: a small mismatch in
+contact timing can change which poses and velocities remain physically
+attainable a few steps later. On long-horizon, contact-rich skills that
+coupling is especially strong, so the relevant trade-off among objectives
+is nonlinear in the tracking residual.
+
+The standard engineering response is to define a tracking term for each
+error and combine those terms by hand. A representative scalar reward is
+\begin{equation}
+ r_t^{\mathrm{hand}}
+ =\sum_{g=1}^{G} w_g\exp\!\bigl[-\alpha_g e_g(s_t,\hat{s}_t)\bigr].
+ \label{eq:hand}
+\end{equation}
+The weights $w_g$ decide how objectives exchange against one another, and
+the scales $\alpha_g$ fix the numerical range of each error.
+Implementations often add joint-specific weights, contact schedules,
+alive bonuses, or clip-specific termination rules, each of which further
+couples learned behavior to a manual scalarization. When the motion
+changes, typical error magnitudes, learning difficulty, and dynamical
+roles all change, so the same coefficients need not retain the same
+meaning. A setting that tracks a cyclic walk can starve the brief contact
+sequence of a vault, while a setting tuned for an aerial skill can
+over-penalize the long ground phase of a get-up. Reward construction
+itself becomes a substantial part of controller engineering.
+
+Data-driven adversarial rewards offer a different route. Instead of
+declaring how many meters of root error are worth how many radians of
+joint error, a discriminator can learn a scalar imitation signal from the
+difference between reference and policy behavior. Style priors such as
+AMP do this at the level of short state transitions \cite{peng2021amp}.
+Adversarial differential discriminators (ADD) make the tracking case
+precise: imitation is a decision between an ideal residual and the
+residuals produced by the current policy \cite{zhang2025add}. Mapping
+every perfect pair to the same origin removes the need to invent a
+success threshold per feature, and it removes the need to write
+\eqref{eq:hand}. Completing a new skill, however, still typically
+requires retuning how that discriminator itself is trained. A
+regularizer that stabilizes one clip can be too strong or too weak for
+another, so the engineering burden moves from tracking kernels to critic
+coefficients. We take learned aggregation as the right direction, and ask
+for a reward model that can be frozen once and reused.
+
+Unlike a generic observation, a motion differential has two structural
+facts that a reward model can use. Perfect imitation is always the same
+point, $\Delta=0$. Actual residuals occupy semantic subspaces associated
+with root motion, body configuration, rotation, and velocity. These
+subspaces are the coordinates in which tracking quality is already
+measured. If the first nonlinear layer mixes all of them, later
+aggregation is exposed to raw input dimension: a high-dimensional
+body-pose block can dominate a three-dimensional root-position block
+simply because it offers more coordinates, not because it is more
+important for the skill. DARE therefore factorizes before interaction.
+Each differential factor is mapped to an equal-capacity representation;
+a shared critic then learns the full nonlinear coupling among objectives.
+
+The second fact yields a stability condition that does not require a
+motion-specific penalty coefficient. Because every perfect pair occupies
+the same origin, the critic's meaningful variation is the change in score
+from that origin to a realized residual. A global gain bound on this
+anchor-relative change keeps nearby residuals from producing
+disproportionate reward jumps, while bias terms and a shared nonlinear
+trunk remain free to express the geometry of different skills. We
+realize that geometry by spectrally parameterizing the equalized critic,
+and we reuse those maps for every motion.
+
+The contributions are as follows. First, we formulate humanoid motion
+imitation as learning a nonlinear scalar reward over semantically
+factorized motion differentials, eliminating manually weighted tracking
+objectives. Second, we introduce DARE, an equalized differential critic
+that preserves each semantic factor before interaction and controls
+reward variation relative to the unique zero-error anchor. Third, we
+evaluate DARE with one frozen reward-learning configuration across six
+heterogeneous skills---Roll, Climb, Backflip, Crawl, Get-Up, and Spin
+Kick---and show accurate tracking without per-motion reward tuning.
+
+\section{Related Work}
+\subsection{Physics-Based Humanoid Motion Imitation}
+DeepMimic showed that reinforcement learning can reproduce diverse
+motion-capture clips with physically simulated characters by combining
+pose, velocity, root, and end-effector tracking terms
+\cite{peng2018deepmimic}. Each term is an exponential kernel of a
+physical error, and the kernels are summed with coefficients chosen by
+the user. Subsequent work scales tracking to large motion collections,
+improves recovery, and learns more general controllers through
+architecture and data
+\cite{won2020scadiver,wang2020unicon,luo2023phc,luo2024pulse,tessler2023maskedmimic,merel2017learning}.
+Distributed RL for humanoids demonstrated that physically simulated
+characters can acquire locomotion from weak task rewards
+\cite{heess2017emergence}, and SFV showed that reference tracking can be
+driven from video \cite{peng2018sfv}. Architecture-focused systems then
+scaled the controller: ScaDiver uses a mixture of experts, UniCon
+separates motion scheduling from low-level execution, PULSE distills a
+reusable latent motion representation, and MaskedMimic conditions control
+on incomplete goals. Motion matching and residual tracking controllers
+similarly keep a phase or error coordinate in the loop
+\cite{bergamin2019drecon,park2019learning}. These systems deliver strong
+control. Their imitation objectives, however, still commonly include
+manual scales and weights. The present concern is therefore an imitation
+objective that can be reused across motions.
+
+\subsection{Adversarial Imitation and Learned Rewards}
+GAIL casts imitation as adversarial occupancy matching \cite{ho2016gail}.
+AMP adapts this idea to physics-based characters by discriminating short
+state transitions and using the learned signal as a motion prior
+\cite{peng2021amp}. ASE extends the same prior to reusable skill
+representations \cite{peng2022ase}. Reward-learning variants such as AIRL
+seek discriminators whose scores remain meaningful under changes of
+dynamics \cite{fu2018airl}, while Wasserstein critics replace
+Jensen--Shannon training with a Lipschitz value function
+\cite{arjovsky2017wasserstein}. Distribution matching is well suited to
+stylized behavior, where the policy need not be synchronized with a
+particular frame of a clip.
+
+Frame-synchronized tracking is a stricter problem. A reward that only
+scores ``looking like the dataset'' can accept a plausible but incomplete
+motion. Differential rewards address this by handing the
+reference--policy error itself to a discriminator \cite{zhang2025add}.
+ADD composes multiple tracking objectives into one differential and
+treats the ideal zero vector as the sole positive example, thereby
+learning a nonlinear aggregation without component weights. Completing a
+new skill still typically requires retuning the discriminator's training
+coefficients. DARE continues the learned-aggregation program. Its
+emphasis is the representation of the differential before interaction,
+and a reward geometry that can be shared across motions.
+
+\subsection{Stable Adversarial Learning}
+Unconstrained adversarial critics can become overly sensitive. A
+discriminator that assigns a huge slope near the decision boundary
+produces brittle rewards, while a discriminator that saturates yields no
+learning signal. Gradient penalties, weight normalization, Lipschitz
+constraints, and spectral parameterization were introduced to control
+that sensitivity
+\cite{salimans2016weightnorm,gulrajani2017improved,miyato2018spectral}.
+In motion tracking the same tools are often applied as an extra loss
+whose coefficient then varies with the clip. Once the ideal residual is
+a known origin, that concern has a natural form: nearby residuals should
+not produce arbitrarily different scores. DARE builds this geometry into
+an equalized critic, so one Lipschitz construction can serve every skill.
+
+\subsection{Multi-Objective Optimization}
+Weighted-sum scalarization, Pareto methods, adaptive loss balancing, and
+gradient-based multi-task optimization all address competing objectives
+\cite{sener2018multitask,kendall2018multi,yu2020gradient}. They typically
+require explicit preferences, multiple objective gradients, or a Pareto
+set. Linear scalarization is simple, but it conceals weak objectives and
+forces the user to choose trade-offs before seeing the residual
+distribution of a learned policy.
+
+The tracking errors of motion imitation form a multi-objective problem of
+this kind: root position, body rotation, and velocity cannot be optimized
+in isolation, and their relative urgency changes through a clip.
+Differential adversarial learning provides a data-driven nonlinear
+scalarization of that vector. DARE performs the aggregation with one
+learned critic and uses the same training configuration for different
+motions, rather than maintaining a preference vector or a family of task
+gradients.
+
+\section{Background}
+\subsection{Reference-Conditioned Humanoid Control}
+Let $s_t$ be the simulated state at time $t$, $\hat{s}_t$ the
+synchronized reference target, and $a_t$ the action. The simulated state
+contains root pose and velocity, joint configuration and velocity, and
+body transforms. The action is a vector of desired joint positions. A
+proportional--derivative servo converts those targets into torques at
+the control frequency. The transition kernel $p$ and discount
+$\gamma\in(0,1)$ define a discounted MDP. A policy $\pi_\varphi$ observes
+proprioception together with a short-horizon reference target---the next
+few synchronized frames---and must close the loop under contact and
+underactuation. Training begins from a randomized reference phase, so a
+single policy has to recover the clip rather than replay a fixed
+open-loop sequence. The objective is
+\begin{equation}
+ J(\pi_\varphi)
+ =\mathbb{E}_{\pi_\varphi}\!\left[\sum_{t=0}^{T-1}\gamma^t r_t\right].
+ \label{eq:rl}
+\end{equation}
+The actor interface and PPO update follow the standard
+reference-conditioned setup \cite{schulman2017ppo,schulman2016gae}.
+Section~\ref{sec:dare} constructs the DARE reward on top of this
+interface and does not change the action space, the PD plant, or the PPO
+surrogate.
+
+\subsection{Motion Tracking as Multi-Objective Optimization}
+A motion descriptor decomposes a state into $G$ feature groups
+$g_1(s),\ldots,g_G(s)$ covering global root motion, articulated body
+configuration, and velocities. For the $g$-th group, an error map $E_g$
+compares the simulated features with the synchronized reference and
+returns a scalar $e_{g,t}$---a distance in that group's units. Collecting
+these $G$ scalars yields the tracking-error vector
+\begin{equation}
+ \vect{e}_t=[e_{1,t},\ldots,e_{G,t}],
+ \qquad
+ e_{g,t}=E_g\bigl(g_g(s_t),g_g(\hat{s}_t)\bigr).
+ \label{eq:errors}
+\end{equation}
+Equation~\eqref{eq:hand} is then a hand-chosen map from $\vect{e}_t$ to a
+reward: each $E_g$ has already discarded direction, and the coefficients
+$w_g$ and $\alpha_g$ decide the remaining trade-off. The difficulty is
+not only that $G$ is larger than one. Root position is measured in
+meters, orientations in an embedding of rotation, and velocities in
+units per second; their errors change at different rates through a
+motion. The objectives also interact: a contact error changes which pose
+and velocity errors remain physically attainable, so the feasible set is
+not a product of independent intervals.
+
+From a multi-objective view, the policy does not solve $G$ independent
+tasks. It needs one scalar training signal that coordinates a single
+action sequence. A fixed weighted sum freezes the trade-off in advance
+and therefore encodes a preference that may be wrong for a later clip, or
+even for a later phase of the same clip. The remainder of the paper
+studies a learned scalarization of $\vect{e}_t$, so that the trade-off is
+inferred from residual data rather than declared before training.
+
+\subsection{Learned Motion Objectives}
+An adversarially learned objective distinguishes ideal or reference
+behavior from policy behavior and then trains the policy to maximize that
+signal. When the discriminator observes states or short transitions, it
+can reward plausible motion that is not synchronized with the clip. For
+synchronized imitation, a differential retains information about
+\emph{how} the current motion departs from the reference---which bodies
+lead or lag, and which velocities disagree---rather than discarding that
+structure into a state occupancy. Perfect tracking collapses every pair
+onto one origin, so the positive class does not have to be a collection
+of privileged frames.
+
+We seek a single learned reward that (i)~aggregates heterogeneous motion
+errors without manually specified component weights, (ii)~preserves their
+semantic structure before learning interactions, and (iii)~remains stable
+under one shared training configuration. Section~\ref{sec:dare} derives
+DARE from these requirements.
+
+\section{DARE: Differential Adversarial Reward Equalization}
+\label{sec:dare}
+\subsection{Learned Differential Reward}
+The distances $e_{g,t}$ are convenient for a weighted sum, but they throw
+away the signed structure of the residual. Two policies can share the
+same root-position distance while drifting in opposite directions; only
+one of them remains compatible with the next contact. We therefore work
+with the signed, normalized motion differential.
+
+Recall that $s_t$ is the simulated state and $\hat{s}_t$ the synchronized
+reference. For each objective $g$, a feature map $\phi_g$ extracts the
+corresponding coordinates from a state. The concatenated map is
+$\phi(s)=\phi_1(s)\oplus\cdots\oplus\phi_G(s)$. A running, origin-preserving
+normalizer $\mathcal{N}=\mathcal{N}_1\oplus\cdots\oplus\mathcal{N}_G$
+rescales each coordinate by a magnitude estimated from training data,
+removing unit disparity without imposing a trade-off among groups.
+Quaternion orientations are mapped to a continuous tangent--normal
+embedding before subtraction, so the difference is taken in a Euclidean
+feature space. The group-wise residual, the full differential, and the
+ideal point are
+\begin{equation}
+ \begin{aligned}
+ \Delta_{g,t}
+ &=\mathcal{N}_g\bigl(\phi_g(\hat{s}_t)-\phi_g(s_t)\bigr),\\
+ \Delta_t
+ &=\Delta_{1,t}\oplus\cdots\oplus\Delta_{G,t},\\
+ \Delta^+&=0.
+ \end{aligned}
+ \label{eq:delta}
+\end{equation}
+Equivalently, $\Delta_t=\mathcal{N}\bigl(\phi(\hat{s}_t)-\phi(s_t)\bigr)$.
+The vector $\Delta_t$ retains error direction and cross-coordinate
+relationships instead of collapsing them into $G$ distances. Every
+perfectly synchronized pair maps to the same origin. Differentials from
+the current rollout and from a replay buffer form a non-ideal
+distribution $q_\pi$. Two characters at the same pose can still require
+different actions if their momenta disagree, so $\phi$ includes both
+configuration and velocity. Global root coordinates keep the displacement
+needed for travel and vaulting; root-relative body positions describe the
+articulated shape without copying the same translation onto every body.
+Each block corresponds to a physical tracking question that a handcrafted
+reward would have named explicitly.
+
+The remaining question is how to turn $\Delta$ into a scalar that a
+policy can maximize. Rather than assigning a price to each block, we
+ask a critic to recognize the unique ideal point. Let
+$D_\theta(\Delta)=\sigma\bigl(f_\theta(\Delta)\bigr)$ be the probability
+that a residual is ideal, where $\sigma$ is the logistic sigmoid and
+$f_\theta$ is a scalar logit. The origin is the positive class; residuals
+drawn from $q_\pi$ are the negative class. The corresponding two-player
+objective, without an extra gradient penalty, is
+\begin{equation*}
+ \max_{\theta}\;
+ \log D_\theta(0)
+ +\mathbb{E}_{\Delta\sim q_\pi}\bigl[\log\bigl(1-D_\theta(\Delta)\bigr)\bigr].
+\end{equation*}
+The first term asks the critic to accept perfect imitation; the second
+asks it to reject the residuals of the current controller. Because every
+perfect pair occupies the same origin, the positive class is a point
+rather than a set of ``good enough'' frames. Taking the expectation over
+policy residuals, as above, makes the negative class track both the
+present controller and recently visited errors in replay.
+
+Minimizing the balanced Bernoulli negative log-likelihood of the same
+labeling is equivalent. Using
+$-\log\sigma(z)=\operatorname{softplus}(-z)$ and
+$-\log\bigl(1-\sigma(z)\bigr)=\operatorname{softplus}(z)$ yields the
+training loss
+\begin{equation}
+ \boxed{
+ \begin{aligned}
+ \mathcal{L}_{\mathrm{DARE}}(\theta)
+ &=\tfrac12\operatorname{softplus}\bigl[-f_\theta(0)\bigr]\\
+ &\quad+\tfrac12\mathbb{E}_{\Delta\sim q_\pi}
+  \operatorname{softplus}\bigl[f_\theta(\Delta)\bigr].
+ \end{aligned}}
+ \label{eq:dare_loss}
+\end{equation}
+As the policy improves, $q_\pi$ concentrates, and $f_\theta$ re-estimates
+how root, pose, and velocity residuals should trade. The aggregation is
+therefore a function of the residual distribution, not of a coefficient
+vector chosen before training. Equation~\eqref{eq:dare_loss} replaces the
+manual scalarization~\eqref{eq:hand} by a data-driven nonlinear
+scalarization.
+
+\subsection{Equalized Anchor-Relative Critic}
+If the first nonlinear layer mixes all coordinates of $\Delta$, later
+layers never see which residual asked which physical question.
+High-dimensional blocks---body pose, in particular---then dominate
+low-dimensional ones by coordinate count. The learned prices become an
+artifact of the feature layout: a skill that hinges on a three-dimensional
+root residual can still be scored as if body-pose coordinates were the
+cheaper currency, simply because there are more of them. Section~V
+confirms the cost of that mixing. Flattening the first layer, while
+retaining a Lipschitz trunk of the same capacity, raises tracking error
+on representative skills. DARE therefore maps each factor independently
+to an equal-width latent before any shared mixing.
+
+The differential space is the semantic direct sum
+$X=X_1\oplus\cdots\oplus X_G$. The Differential Direct-Sum Layer applies
+an independent affine map and nonlinearity to each factor and
+concatenates equal-width latents:
+\begin{equation}
+ \Phi_\oplus(\Delta)
+ =\bigoplus_{g=1}^{G}\rho(\bar{W}_g\Delta_g+b_g),\qquad
+ \bar{W}_g=W_g/\sigma_{\max}(W_g).
+ \label{eq:directsum}
+\end{equation}
+\begin{equation}
+ f_\theta(\Delta)=\bar{T}\bigl(\Phi_\oplus(\Delta)\bigr),\qquad
+ \operatorname{Lip}(\bar{T})\le 1.
+ \label{eq:trunk}
+\end{equation}
+Here $\rho$ is a $1$-Lipschitz activation and $\sigma_{\max}$ is the
+largest singular value. Each factor map includes an affine bias, so
+activation thresholds can sit where the residual distribution actually
+lives; spectral normalization of $W_g$ keeps the map non-expansive
+regardless of that offset. Equalization then gives every motion factor
+the same latent capacity before interaction, so a three-dimensional root
+residual is not structurally outvoted by a much wider body-pose residual.
+The concatenated features enter one shared critic that can represent
+contact--pose--velocity couplings: an orientation error that is harmless
+at one angular velocity can be incompatible at another, and that
+dependence is not written as a product of kernels. The factors themselves
+are the natural tracking blocks of a humanoid differential: root position
+and rotation, body position and rotation, root linear and angular
+velocity, and joint velocity.
+
+All linear maps, including the shared trunk $\bar{T}$, use spectral
+parameterization. Each block map
+$\phi_g(\Delta_g)=\rho(\bar{W}_g\Delta_g+b_g)$ is therefore
+non-expansive---the bias cancels in the Lipschitz argument---and the
+direct-sum layer satisfies
+\begin{equation}
+ \begin{aligned}
+ &\bigl\|\Phi_\oplus(\Delta)-\Phi_\oplus(\Delta')\bigr\|_2^2
+ =\sum_{g=1}^{G}\bigl\|\phi_g(\Delta_g)-\phi_g(\Delta'_g)\bigr\|_2^2\\
+ &\qquad\le\|\Delta-\Delta'\|_2^2.
+ \end{aligned}
+ \label{eq:nonexp}
+\end{equation}
+The inequality is immediate: each spectrally normalized block has
+Lipschitz constant at most one, and the Euclidean norm of a concatenation
+is the root-sum of squared block norms. Equivalently, the Jacobian of
+$\Phi_\oplus$ is block diagonal across factors, so a perturbation in one
+semantic subspace cannot be amplified by the first layer through
+coordinates of another subspace. Mixing is deferred to $\bar{T}$, where
+every factor already occupies an equal-width channel. Equalization
+assigns every factor the same latent width before mixing; the subsequent
+trunk can then learn contact--pose--velocity couplings without the first
+layer converting coordinate cardinality into an implicit price.
+
+Because every ideal pair occupies the same origin, the quantity that
+governs reward variation is the zero-anchor relative gap
+\begin{equation}
+ G_\theta(\Delta)=f_\theta(0)-f_\theta(\Delta).
+ \label{eq:gap}
+\end{equation}
+Combining~\eqref{eq:trunk} and~\eqref{eq:nonexp} gives
+\begin{equation}
+ \boxed{
+ |G_\theta(\Delta)|
+ =\bigl|f_\theta(0)-f_\theta(\Delta)\bigr|
+ \le\|\Delta\|_2.
+ }
+ \label{eq:bound}
+\end{equation}
+If the realized motion changes only slightly relative to the reference,
+the learned score cannot jump by an amount larger than the residual
+itself. As the error distribution evolves, the shared nonlinear trunk can
+still learn the combinations required by different motions. Affine biases
+are retained throughout, so activation boundaries can move across residual
+regions and the reward geometry remains nonlinear inside the gain bound.
+
+Differential equalization preserves the objectives before interaction;
+anchor-relative gain control makes their learned aggregation stable under
+a shared configuration.
+
+\subsection{DARE Reward and Training}
+The critic $D_\theta$ is a probability of ideality. A policy that
+maximizes imitation should therefore receive a large reward precisely
+when that probability is large, i.e., when $1-D_\theta(\Delta)$ is small.
+The AMP-style conversion
+$-2\log\bigl(1-D_\theta(\Delta)\bigr)$
+implements this requirement and, in logits, is a scaled softplus:
+\begin{equation}
+ \boxed{
+ \begin{aligned}
+ r_t^{\mathrm{DARE}}
+ &=-2\log\bigl[1-D_\theta(\Delta_t)\bigr]\\
+ &=2\operatorname{softplus}\bigl[f_\theta(\Delta_t)\bigr].
+ \end{aligned}}
+ \label{eq:reward}
+\end{equation}
+The same $f_\theta$ aggregates every tracking objective, so PPO never
+consults $e_g$, a hand-set success threshold, or a component coefficient.
+The global factor $2$ is a fixed reward scale, shared across skills.
+
+Because $\operatorname{softplus}$ is $1$-Lipschitz, the critic bound
+passes to the signal that PPO actually receives. On the already
+normalized differential~\eqref{eq:delta},
+\begin{equation}
+ \bigl|r^{\mathrm{DARE}}(\Delta)-r^{\mathrm{DARE}}(0)\bigr|
+ \le 2\bigl|f_\theta(\Delta)-f_\theta(0)\bigr|
+ \le 2\|\Delta\|_2.
+ \label{eq:rewbound}
+\end{equation}
+Nearby residuals therefore produce nearby rewards, in the same units in
+which the critic is trained.
+
+Training alternates rollout collection, differential construction, critic
+updates, and PPO updates (Algorithm~\ref{alg:dare}). After each control
+step the synchronized residual is formed with~\eqref{eq:delta}, converted
+to $r_t^{\mathrm{DARE}}$, and written to a replay buffer together with
+the on-policy batch. Critic updates draw an equal mixture of current and
+replay differentials, so $q_\pi$ is not a single-iteration snapshot. The
+critic minimizes~\eqref{eq:dare_loss}; spectral parameterization already
+enforces~\eqref{eq:bound}. The policy builds returns
+from~\eqref{eq:reward} and applies the standard PPO surrogate. DARE
+learns only an instantaneous scalar reward. Long-horizon credit
+assignment remains the responsibility of discounting, GAE, and PPO.
+
+\begin{algorithm}[t]
+\caption{DARE Training}
+\label{alg:dare}
+\small
+\begin{algorithmic}[1]
+\REQUIRE reference motions $\mathcal{M}$, policy $\pi_\varphi$,
+value $V_\omega$, critic $f_\theta$, replay buffer $\mathcal{B}$
+\FOR{iteration $=1,2,\ldots$}
+  \STATE Collect a synchronized rollout with $\pi_\varphi$
+  \STATE Construct $\Delta_t$ using~\eqref{eq:delta}
+  \STATE Compute $r_t^{\mathrm{DARE}}$ using~\eqref{eq:reward}
+  \STATE Add rollout differentials to $\mathcal{B}$
+  \STATE Sample current and replay differentials
+  \STATE Update $f_\theta$ by minimizing~\eqref{eq:dare_loss}
+  \STATE Estimate returns and advantages from $r_t^{\mathrm{DARE}}$
+  \STATE Update $\pi_\varphi$ and $V_\omega$ with PPO
+\ENDFOR
+\end{algorithmic}
+\end{algorithm}
+
+The critic $f_\theta$ scores a single residual; the value function
+$V_\omega$ still predicts the discounted return of~\eqref{eq:reward}.
+Keeping those roles separate leaves long-horizon credit assignment with
+PPO, which is already the standard interface for reference-conditioned
+control. The change is concentrated in how the differential is
+represented and scored, not in a new policy class.
+
+\section{Experiments}
+\subsection{Experimental Setup}
+\label{sec:setup}
+All methods control a $28$-DoF simulated humanoid with PD joint targets
+at $30\,\mathrm{Hz}$; the simulator runs at $120\,\mathrm{Hz}$ in Isaac
+Lab \cite{mittal2023isaaclab,makoviychuk2021isaacgym}. The character
+model follows the simulated humanoid used by DeepMimic and ADD
+\cite{todorov2012mujoco,lee2019scalable,chentanez2018physics}. Episodes
+are initialized at a random reference phase. DeepMimic, ADD, and DARE use
+pose termination with a unit threshold. AMP follows its standard protocol
+without pose termination, because a distribution-matching prior is not
+synchronized to a reference frame. Early termination on undesired ground
+contact is enabled for every method. Each policy is trained for $2000$
+iterations with $8192$ parallel environments and $32$ control steps per
+iteration, for a budget of $5.243\times 10^8$ environment samples. Actor
+and value networks are two-layer MLPs with $1024$ units. Learned-reward
+methods share the PPO clip $0.2$, GAE $\lambda=0.95$, discount
+$\gamma=0.99$, and SGD family; DARE additionally shares one critic
+architecture and one reward-learning configuration across motions.
+
+The evaluation uses six skills that span distinct dynamical regimes:
+cyclic ground rotation (Roll, $2.00\,\mathrm{s}$), long-horizon object
+interaction (Climb, $9.97\,\mathrm{s}$), aerial inversion (Backflip,
+$1.75\,\mathrm{s}$), prone locomotion (Crawl, $2.93\,\mathrm{s}$),
+recumbent recovery (Get-Up, $3.03\,\mathrm{s}$), and a ballistic kick
+(Spin Kick, $1.28\,\mathrm{s}$). Motion files, reference lengths, object
+layouts, and termination conditions belong to the task definition; they
+are not treated as shared hyperparameters. Baselines use the training
+settings published with each method. We report position tracking error in
+meters and DoF-velocity tracking error in radians per second, the two
+quantities used by prior humanoid tracking studies. AMP, DeepMimic, and
+ADD numbers in Table~\ref{tab:main} are those reported by Zhang
+\textit{et al.} for the same clips and metrics \cite{zhang2025add}. Every
+DARE run uses the frozen configuration in Table~\ref{tab:config},
+identical for all six skills. Each method is trained with five seeds and
+evaluated on $4096$ test episodes; we report mean $\pm$ std.
+
+\begin{table}[t]
+\caption{Frozen DARE reward-learning configuration. All entries are
+identical for every motion.}
+\label{tab:config}
+\centering
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{ll}
+\toprule
+Component & Setting \\
+\midrule
+Semantic factors & $7$ (root pos./rot., body pos./rot., \\
+ & root lin./ang.\ vel., DoF vel.) \\
+Direct-sum width & $146$ per factor ($1022$ total) \\
+Shared trunk & SN MLP $1022\to 512$, ReLU \\
+Output & SN logit, affine bias \\
+First-layer bias & yes, zero-initialized \\
+Critic optimizer & SGD, $2.5\times 10^{-4}$, wd $10^{-4}$ \\
+Logit regularizer & $10^{-2}$ \\
+Replay & buffer $2\times 10^{5}$, $1000$ samples/batch \\
+Reward scale & $2$ \\
+Normalization & running per-coordinate scale \\
+Gradient penalty & $0$ \\
+Spectral maps & all linear layers \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table*}[t]
+\caption{Tracking performance on six heterogeneous skills. DARE uses one
+frozen reward-learning configuration on every row. AMP, DeepMimic, and
+ADD are published results on the same clips and metrics
+\cite{zhang2025add}. Mean $\pm$ std over five seeds. Lower is better.}
+\label{tab:main}
+\centering
+\setlength{\tabcolsep}{3.2pt}
+\begin{tabular}{l c cccc cccc}
+\toprule
+ & & \multicolumn{4}{c}{Position [m] $\downarrow$}
+ & \multicolumn{4}{c}{DoF vel.\ [rad/s] $\downarrow$} \\
+\cmidrule(lr){3-6}\cmidrule(lr){7-10}
+Skill & Len.\ (s)
+ & AMP & DeepMimic & ADD & DARE
+ & AMP & DeepMimic & ADD & DARE \\
+\midrule
+Roll      & $2.00$
+ & $.141{\pm}.031$ & $.115{\pm}.132$ & $.152{\pm}.005$ & $.118{\pm}.012$
+ & $1.576{\pm}.318$ & $.994{\pm}.051$ & $1.330{\pm}.101$ & $1.012{\pm}.041$ \\
+Climb     & $9.97$
+ & $.185{\pm}.021$ & $.066{\pm}.004$ & $.046{\pm}.031$ & $.042{\pm}.008$
+ & $1.190{\pm}.012$ & $.567{\pm}.015$ & $.374{\pm}.071$ & $.352{\pm}.018$ \\
+Backflip  & $1.75$
+ & $.267{\pm}.015$ & $.111{\pm}.054$ & $.062{\pm}.001$ & $.058{\pm}.004$
+ & $2.243{\pm}.113$ & $1.103{\pm}.024$ & $.878{\pm}.013$ & $.812{\pm}.024$ \\
+Crawl     & $2.93$
+ & $.050{\pm}.006$ & $.027{\pm}.000$ & $.028{\pm}.002$ & $.027{\pm}.003$
+ & $.646{\pm}.089$ & $.430{\pm}.006$ & $.283{\pm}.002$ & $.271{\pm}.012$ \\
+Get-Up    & $3.03$
+ & $.096{\pm}.018$ & $.023{\pm}.001$ & $.022{\pm}.001$ & $.021{\pm}.002$
+ & $.838{\pm}.029$ & $.433{\pm}.008$ & $.325{\pm}.005$ & $.308{\pm}.009$ \\
+Spin Kick & $1.28$
+ & $.064{\pm}.010$ & $.078{\pm}.062$ & $.025{\pm}.000$ & $.024{\pm}.003$
+ & $1.453{\pm}.327$ & $1.222{\pm}.233$ & $.774{\pm}.007$ & $.731{\pm}.016$ \\
+\bottomrule
+\end{tabular}
+\end{table*}
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/fig_tracking_curves.pdf}
+\caption{Position tracking error versus environment samples on two
+representative regimes. Curves are seed means; shaded regions are
+standard deviations. Final six-skill numbers are in
+Table~\ref{tab:main}.}
+\label{fig:curves}
+\end{figure*}
+
+\subsection{Cross-Motion Tracking Performance}
+Table~\ref{tab:main} asks whether one frozen reward-learning
+configuration can serve skills whose contacts, horizons, and velocity
+profiles differ. DARE matches or improves published tracking accuracy on
+five of the six clips, and remains within the DeepMimic range on Roll
+position, without restoring a weighted tracking sum and without choosing
+a critic coefficient per skill. Short, highly constrained recoveries
+(Crawl, Get-Up, Spin Kick) already have little room under ADD; DARE
+stays in the same band while using the configuration of
+Table~\ref{tab:config}. Longer and more acrobatic clips leave more
+aggregation work for the critic. There the equalized differential
+improves both position and DoF-velocity error relative to AMP, and it
+improves velocity tracking relative to DeepMimic, which still depends on
+handcrafted kernels.
+
+The six rows are not six copies of the same control problem. Roll is a
+cyclic ground skill in which root travel and body rotation must stay in
+phase. Backflip inverts the character and then demands a precise landing
+velocity. Crawl keeps the torso near the ground, so small orientation
+errors become large position errors. Get-Up starts from a recumbent pose
+and has to discover a contact sequence that restores stance. Spin Kick
+is short and ballistic: a mistimed root rotation cannot be repaired
+later in the clip. Across that range, the same DARE critic, optimizer,
+replay buffer, and reward scale train every row of the table. That is
+the empirical claim: reuse of the reward-learning configuration, rather
+than a new champion number on every metric.
+
+Accompanying video shows synchronized reference and policy frames for
+each skill. Those frames are qualitative support for completion;
+Table~\ref{tab:main} is the quantitative comparison.
+
+\subsection{Component Ablation}
+Table~\ref{tab:ablation} isolates the two design choices on Roll and
+Climb, chosen as representative short-cycle and long-horizon regimes.
+The full six-skill result is already in Table~\ref{tab:main}; the
+ablation is not repeated on every clip. All three variants share the
+actor, PPO, training budget, differential definition, and network
+capacity. \emph{Flat$+$Full SN} replaces the direct-sum layer by a
+spectrally normalized dense map of the same output width, so the first
+nonlinearity already mixes every coordinate. \emph{Factorized$+$GP}
+keeps the direct-sum layer but replaces spectral gain control by a
+gradient penalty of coefficient $2$, frozen before evaluation and shared
+by both skills. DARE keeps both factorization and spectral
+parameterization, with no gradient penalty.
+
+The largest degradation comes from flattening the first layer. Body-pose
+and joint coordinates then outnumber root position by more than an order
+of magnitude, and the Lipschitz trunk inherits that imbalance. Position
+error rises from $0.118\,\mathrm{m}$ to $0.168\,\mathrm{m}$ on Roll and
+from $0.042\,\mathrm{m}$ to $0.091\,\mathrm{m}$ on the long-horizon
+clip; velocity error rises with it. The shared trunk is still nonlinear
+and still $1$-Lipschitz. What it no longer receives is an equalized view
+of each physical residual, so the prices it learns follow coordinate
+cardinality rather than contact, balance, or timing. That is why the
+first layer must preserve the blocks of \eqref{eq:delta}: later mixing
+is then about residual geometry, not about how many numbers a feature
+happens to occupy.
+
+Factorized$+$GP lands between the two. Semantic channels are intact, yet
+sensitivity is controlled by a scalar coefficient rather than by the
+maps themselves. The same coefficient is usable on both representative
+skills, which is already more reusable than a per-clip penalty, but the
+resulting errors remain higher than DARE. Nothing in that architecture
+gives a three-dimensional root residual and a high-dimensional pose
+residual equal standing before mixing. Structured gain control and
+equalization belong together: factorization decides \emph{what} enters
+the aggregator, and the bound~\eqref{eq:bound} decides \emph{how steeply}
+that aggregator may respond.
+
+\begin{table}[t]
+\caption{Ablation on two representative skills. Mean $\pm$ std over five
+seeds. Lower is better.}
+\label{tab:ablation}
+\centering
+\setlength{\tabcolsep}{2.8pt}
+\small
+\begin{tabular}{l cc cc}
+\toprule
+ & \multicolumn{2}{c}{Position [m] $\downarrow$}
+ & \multicolumn{2}{c}{DoF vel.\ [rad/s] $\downarrow$} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+Variant & Roll & Climb & Roll & Climb \\
+\midrule
+Flat$+$Full SN
+ & $.168{\pm}.021$ & $.091{\pm}.019$
+ & $1.284{\pm}.087$ & $.612{\pm}.041$ \\
+Factorized$+$GP
+ & $.139{\pm}.015$ & $.061{\pm}.011$
+ & $1.156{\pm}.052$ & $.448{\pm}.027$ \\
+DARE
+ & $.118{\pm}.012$ & $.042{\pm}.008$
+ & $1.012{\pm}.041$ & $.352{\pm}.018$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Representative Learning Curves}
+Figure~\ref{fig:curves} plots position tracking error against environment
+samples for the same two representative regimes. All four methods are
+shown under a matched training budget; solid curves are seed means and
+shaded regions are standard deviations. On Roll, DeepMimic attains a
+slightly lower mean than DARE, but with a much wider seed band; DARE
+sits next to that mean and continues to improve after AMP has flattened.
+The long-horizon clip takes longer for every method, as expected from a
+multi-second contact sequence. There DARE and ADD separate from AMP, and
+DARE edges the published ADD plateau while keeping a comparable schedule.
+DoF-velocity results are already in Table~\ref{tab:main} and are not
+repeated as a second figure.
+
+\FloatBarrier
+\section{Conclusion}
+Humanoid imitation is a multi-objective tracking problem. Root motion,
+body pose, and velocity have to be satisfied together, and their coupling
+is strongest on the contact-rich skills that make reward engineering
+painful. Manual rewards turn that aggregation into per-motion
+engineering: each new clip invites a new choice of weights, scales, and
+regularizers. DARE instead learns a nonlinear scalar reward from the
+synchronized motion differential, and it keeps each semantic error intact
+until a shared critic is allowed to mix them.
+
+Because perfect imitation occupies a unique zero differential, DARE
+bounds the learned score---and the PPO reward---relative to that anchor.
+Nearby residuals cannot produce disproportionate reward jumps, while the
+shared trunk remains free to represent the combinations required by
+different motions. Ablating the first layer shows that this reuse
+depends on keeping each semantic residual intact until that trunk is
+allowed to mix them. The same architecture, optimizer, and
+reward-learning configuration therefore train Roll, Climb, Backflip,
+Crawl, Get-Up, and Spin Kick, with position errors from
+$0.021\,\mathrm{m}$ to $0.118\,\mathrm{m}$ and DoF-velocity errors from
+$0.271\,\mathrm{rad/s}$ to $1.012\,\mathrm{rad/s}$. Accompanying video
+shows synchronized reference and policy frames for each skill.
+
+\IEEEtriggercmd{\newpage}
+\IEEEtriggeratref{16}
+
+\begin{thebibliography}{99}
+\bibitem{peng2018deepmimic}
+X.~B. Peng, P.~Abbeel, S.~Levine, and M.~van~de~Panne, ``DeepMimic:
+Example-guided deep reinforcement learning of physics-based character
+skills,'' \emph{ACM Trans. Graph.}, vol.~37, no.~4, 2018.
+\bibitem{won2020scadiver}
+J.~Won, D.~Gopinath, and J.~Hodgins, ``A scalable approach to control diverse
+behaviors for physically simulated characters,'' \emph{ACM Trans. Graph.},
+vol.~39, no.~4, 2020.
+\bibitem{wang2020unicon}
+T.~Wang, Y.~Guo, M.~Shugrina, and S.~Fidler, ``UniCon: Universal neural
+controller for physics-based character motion,'' arXiv:2011.15119, 2020.
+\bibitem{luo2023phc}
+Z.~Luo, J.~Cao, A.~W. Winkler, K.~Kitani, and W.~Xu, ``Perpetual humanoid
+control for real-time simulated avatars,'' in \emph{Proc. ICCV}, 2023.
+\bibitem{luo2024pulse}
+Z.~Luo, J.~Cao, J.~Merel, A.~Winkler, J.~Huang, K.~M. Kitani, and W.~Xu,
+``Universal humanoid motion representations for physics-based control,'' in
+\emph{Proc. ICLR}, 2024.
+\bibitem{tessler2023maskedmimic}
+C.~Tessler, Y.~Guo, O.~Nabati, G.~Chechik, and X.~B. Peng, ``MaskedMimic:
+Unified physics-based character control through masked motion inpainting,''
+\emph{ACM Trans. Graph.}, 2024.
+\bibitem{merel2017learning}
+J.~Merel, Y.~Tassa, D.~TB, S.~Srinivasan, J.~Lemmon, Z.~Wang, G.~Wayne, and
+N.~Heess, ``Learning human behaviors from motion capture by adversarial
+imitation,'' arXiv:1707.02201, 2017.
+\bibitem{heess2017emergence}
+N.~Heess, D.~TB, S.~Sriram, J.~Lemmon, J.~Merel, G.~Wayne, Y.~Tassa, T.~Erez,
+Z.~Wang, S.~M. A. Eslami, M.~Riedmiller, and D.~Silver, ``Emergence of
+locomotion behaviours in rich environments,'' arXiv:1707.02286, 2017.
+\bibitem{peng2018sfv}
+X.~B. Peng, A.~Kanazawa, J.~Malik, P.~Abbeel, S.~Levine, and S.~Fidler, ``SFV:
+Reinforcement learning of physical skills from videos,'' \emph{ACM Trans.
+Graph.}, vol.~37, no.~6, 2018.
+\bibitem{bergamin2019drecon}
+K.~Bergamin, S.~Clavet, D.~Holden, and J.~R. Forbes, ``DReCon: Data-driven
+responsive control of physics-based characters,'' \emph{ACM Trans. Graph.},
+vol.~38, no.~4, 2019.
+\bibitem{park2019learning}
+S.~Park, H.~Ryu, S.~Lee, S.~Lee, and J.~Lee, ``Learning predict-and-simulate
+policies from unorganized and simulated motion data,'' \emph{ACM Trans.
+Graph.}, vol.~38, no.~4, 2019.
+\bibitem{ho2016gail}
+J.~Ho and S.~Ermon, ``Generative adversarial imitation learning,'' in
+\emph{Advances in Neural Information Processing Systems}, 2016.
+\bibitem{peng2021amp}
+X.~B. Peng, Z.~Ma, P.~Abbeel, S.~Levine, and A.~Kanazawa, ``AMP: Adversarial
+motion priors for stylized physics-based character control,'' \emph{ACM Trans.
+Graph.}, vol.~40, no.~4, 2021.
+\bibitem{peng2022ase}
+X.~B. Peng, Y.~Guo, L.~Halper, S.~Levine, and S.~Fidler, ``ASE: Large-scale
+reusable adversarial skill embeddings for physically simulated characters,''
+\emph{ACM Trans. Graph.}, vol.~41, no.~4, 2022.
+\bibitem{fu2018airl}
+J.~Fu, K.~Luo, and S.~Levine, ``Learning robust rewards with adversarial
+inverse reinforcement learning,'' in \emph{Proc. ICLR}, 2018.
+\bibitem{arjovsky2017wasserstein}
+M.~Arjovsky, S.~Chintala, and L.~Bottou, ``Wasserstein generative adversarial
+networks,'' in \emph{Proc. ICML}, 2017.
+\bibitem{zhang2025add}
+Z.~Zhang, S.~Bashkirov, D.~Yang, Y.~Shi, M.~Taylor, and X.~B. Peng,
+``Physics-based motion imitation with adversarial differential
+discriminators,'' in \emph{SIGGRAPH Asia Conf. Papers}, 2025.
+\bibitem{salimans2016weightnorm}
+T.~Salimans and D.~P. Kingma, ``Weight normalization: A simple
+reparameterization to accelerate training of deep neural networks,'' in
+\emph{Advances in Neural Information Processing Systems}, 2016.
+\bibitem{gulrajani2017improved}
+I.~Gulrajani, F.~Ahmed, M.~Arjovsky, V.~Dumoulin, and A.~Courville,
+``Improved training of Wasserstein GANs,'' in \emph{Advances in Neural
+Information Processing Systems}, 2017.
+\bibitem{miyato2018spectral}
+T.~Miyato, T.~Kataoka, M.~Koyama, and Y.~Yoshida, ``Spectral normalization
+for generative adversarial networks,'' in \emph{Proc. ICLR}, 2018.
+\bibitem{sener2018multitask}
+O.~Sener and V.~Koltun, ``Multi-task learning as multi-objective
+optimization,'' in \emph{Advances in Neural Information Processing Systems},
+2018.
+\bibitem{kendall2018multi}
+A.~Kendall, Y.~Gal, and R.~Cipolla, ``Multi-task learning using uncertainty
+to weigh losses for scene geometry and semantics,'' in \emph{Proc. CVPR},
+2018.
+\bibitem{yu2020gradient}
+T.~Yu, S.~Kumar, A.~Gupta, S.~Levine, K.~Hausman, and C.~Finn, ``Gradient
+surgery for multi-task learning,'' in \emph{Advances in Neural Information
+Processing Systems}, 2020.
+\bibitem{schulman2017ppo}
+J.~Schulman, F.~Wolski, P.~Dhariwal, A.~Radford, and O.~Klimov, ``Proximal
+policy optimization algorithms,'' arXiv:1707.06347, 2017.
+\bibitem{schulman2016gae}
+J.~Schulman, P.~Moritz, S.~Levine, M.~Jordan, and P.~Abbeel,
+``High-dimensional continuous control using generalized advantage
+estimation,'' in \emph{Proc. ICLR}, 2016.
+\bibitem{makoviychuk2021isaacgym}
+V.~Makoviychuk, L.~Wawrzyniak, Y.~Guo, M.~Lu, K.~Storey, M.~Macklin,
+D.~Hoeller, N.~Rudin, A.~Allshire, A.~Handa, and G.~State, ``Isaac Gym:
+High performance GPU-based physics simulation for robot learning,'' in
+\emph{Proc. NeurIPS Datasets and Benchmarks}, 2021.
+\bibitem{mittal2023isaaclab}
+M.~Mittal, C.~Yu, Q.~Yu, J.~Liu, N.~Rudin, D.~Hoeller, J.~L. Yuan, R.~Singh,
+Y.~Guo, H.~Mazhar, A.~Mandlekar, B.~Babich, G.~State, M.~Hutter, and
+A.~Garg, ``Orbit: A unified simulation framework for interactive robot
+learning environments,'' \emph{IEEE Robot. Autom. Lett.}, vol.~8, no.~6,
+pp.~3740--3747, 2023.
+\bibitem{todorov2012mujoco}
+E.~Todorov, T.~Erez, and Y.~Tassa, ``MuJoCo: A physics engine for model-based
+control,'' in \emph{Proc. IEEE/RSJ Int. Conf. Intell. Robots Syst.}, 2012.
+\bibitem{chentanez2018physics}
+N.~Chentanez, M.~M\"uller, M.~Macklin, V.~Makoviychuk, and S.~Jeschke,
+``Physics-based motion capture imitation with deep reinforcement learning,''
+in \emph{Proc. ACM SIGGRAPH Conf. Motion, Interaction and Games}, 2018.
+\bibitem{lee2019scalable}
+S.~Lee, M.~Park, K.~Lee, and J.~Lee, ``Scalable muscle-actuated human
+simulation and control,'' \emph{ACM Trans. Graph.}, vol.~38, no.~4, 2019.
+\end{thebibliography}
+\end{document}
