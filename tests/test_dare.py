@@ -4,8 +4,11 @@ import pathlib
 import gymnasium.spaces as spaces
 import torch
 
-from learning.dare_agent import DAREAgent
-from learning.dare_model import DAREModel, GroupSeparableDiscLayers
+import learning.diff_normalizer as diff_normalizer
+from learning.dare_agent import DAREAgent, anchor_gap
+from learning.dare_model import (ANCHOR_GAP_TARGET, DAREModel,
+                                 GroupSeparableDiscLayers)
+import util.torch_util as torch_util
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -84,6 +87,68 @@ def test_model_forward_backward_is_finite():
     assert all(parameter.grad is None
                or torch.isfinite(parameter.grad).all()
                for parameter in model.get_disc_params())
+
+
+def test_uncalibrated_model_is_bitwise_v6():
+    model = DAREModel(_config(), _Env()).eval()
+    inputs = torch.randn(64, 172)
+    assert not model.is_disc_logit_calibrated()
+    assert float(model.get_disc_logit_scale()) == 1.0
+    torch.testing.assert_close(
+        model.eval_disc(inputs), model.eval_disc_raw(inputs),
+        rtol=0.0, atol=0.0)
+
+
+def test_anchor_gap_calibration_hits_ln16():
+    torch.manual_seed(0)
+    model = DAREModel(_config(), _Env()).eval()
+    norm = diff_normalizer.DiffNormalizer((172,), device="cpu")
+    pos = torch.zeros(172)
+    current = torch.randn(2048, 172)
+    replay = torch.randn(1024, 172)
+
+    gap = anchor_gap(model, norm, pos, current, replay, 512)
+    assert gap != 0.0
+    model.set_disc_logit_scale(ANCHOR_GAP_TARGET / gap)
+
+    def mean_scaled(raw_diff):
+        def eval_scaled(disc_obs):
+            return model.eval_disc(norm.normalize(disc_obs))
+
+        return torch_util.eval_minibatch(
+            eval_scaled, {"disc_obs": raw_diff}, 512).mean()
+
+    scaled_gap = (model.eval_disc(pos.unsqueeze(0)).mean()
+                  - 0.5 * (mean_scaled(current) + mean_scaled(replay)))
+    torch.testing.assert_close(
+        scaled_gap, torch.tensor(ANCHOR_GAP_TARGET), rtol=0.0, atol=1e-5)
+
+
+def test_anchor_gap_leaves_spectral_norm_state_untouched():
+    model = DAREModel(_config(), _Env()).eval()
+    norm = diff_normalizer.DiffNormalizer((172,), device="cpu")
+    before = {
+        name: value.clone()
+        for name, value in model.named_buffers()
+        if name.endswith("._u") or name.endswith("._v")
+    }
+    anchor_gap(model, norm, torch.zeros(172),
+               torch.randn(256, 172), torch.randn(256, 172), 128)
+    after = dict(model.named_buffers())
+    assert before
+    assert all(torch.equal(before[name], after[name]) for name in before)
+
+
+def test_legacy_state_dict_without_calibration_loads_as_v6():
+    source = DAREModel(_config(), _Env())
+    legacy_state = source.state_dict()
+    del legacy_state["_disc_logit_scale"]
+    del legacy_state["_disc_logit_calibrated"]
+
+    restored = DAREModel(_config(), _Env())
+    restored.load_state_dict(legacy_state, strict=True)
+    assert not restored.is_disc_logit_calibrated()
+    assert float(restored.get_disc_logit_scale()) == 1.0
 
 
 def test_reward_forward_uses_training_mode_sn_updates_like_a30():

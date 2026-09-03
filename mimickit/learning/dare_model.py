@@ -1,7 +1,14 @@
+import math
+
 import torch
 
 import learning.add_model as add_model
 import learning.nets.net_builder as net_builder
+
+
+# Fixed 20%-80% softplus-slope transition span.  This is a method constant,
+# not a task or motion configuration parameter.
+ANCHOR_GAP_TARGET = math.log(16.0)
 
 
 class GroupSeparableDiscLayers(torch.nn.Module):
@@ -51,7 +58,13 @@ class GroupSeparableDiscLayers(torch.nn.Module):
 
 
 class DAREModel(add_model.ADDModel):
-    """Exact a30 model path used as the DARE restoration baseline."""
+    """DARE critic with a one-shot, anchor-relative output calibration."""
+
+    def __init__(self, config, env):
+        super().__init__(config, env)
+        self.register_buffer("_disc_logit_scale", torch.ones(()))
+        self.register_buffer(
+            "_disc_logit_calibrated", torch.zeros((), dtype=torch.bool))
 
     def _build_disc(self, config, env):
         input_dict = {"disc_obs": env.get_disc_obs_space()}
@@ -74,6 +87,35 @@ class DAREModel(add_model.ADDModel):
         torch.nn.init.uniform_(self._disc_logits.weight, -1.0, 1.0)
         torch.nn.init.zeros_(self._disc_logits.bias)
         torch.nn.utils.parametrizations.spectral_norm(self._disc_logits)
+
+    def eval_disc_raw(self, disc_obs):
+        return self._disc_logits(self._disc_layers(disc_obs))
+
+    def eval_disc(self, disc_obs):
+        return self._disc_logit_scale * self.eval_disc_raw(disc_obs)
+
+    @torch.no_grad()
+    def set_disc_logit_scale(self, scale):
+        self._disc_logit_scale.fill_(float(scale))
+        self._disc_logit_calibrated.fill_(True)
+
+    def is_disc_logit_calibrated(self):
+        return bool(self._disc_logit_calibrated.item())
+
+    def get_disc_logit_scale(self):
+        return self._disc_logit_scale.clone()
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata,
+                              strict, missing_keys, unexpected_keys,
+                              error_msgs):
+        # Legacy v6 model/checkpoint state dicts have no calibration buffers.
+        state_dict.setdefault(prefix + "_disc_logit_scale", torch.ones(()))
+        state_dict.setdefault(
+            prefix + "_disc_logit_calibrated",
+            torch.zeros((), dtype=torch.bool))
+        super()._load_from_state_dict(
+            state_dict, prefix, local_metadata, strict, missing_keys,
+            unexpected_keys, error_msgs)
 
     def get_disc_group_width(self):
         return self._disc_logits.weight.new_tensor(
