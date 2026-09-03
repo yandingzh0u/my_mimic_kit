@@ -16,3 +16,4 @@ wandb/
 PAPER/*.aux
 PAPER/*.log
 PAPER/*.synctex.gz
+PAPER/build/
