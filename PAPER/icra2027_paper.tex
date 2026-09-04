@@ -39,13 +39,13 @@ DARE, a differential adversarial reward that fixes these two properties
 separately, with no motion-specific coefficient. The geometry of the critic is
 fixed by construction: every semantic block of the differential enters
 through its own spectrally normalized map, so objectives of very
-different dimension receive equal capacity and equal gain, and the score
-change relative to the unique zero-error anchor is bounded by the size of
-the residual. The scale of the critic is fixed once, in closed form, from
-the reward transform: the balanced adversarial loss places the anchor and
-the typical policy residual symmetrically around zero, and DARE rescales
-the critic so that this separation equals the width of the window over
-which the reward transform responds to the critic's score. The same
+different dimension use the same latent width and an independent gain bound,
+and the score change relative to the unique zero-error anchor is bounded by
+the size of the residual. The scale of the critic is fixed once, in closed
+form, from the reward transform: the balanced adversarial loss places the
+anchor and the typical policy residual symmetrically around zero, and DARE
+uses a one-shot closed-form rescaling to set the critic score scale relative
+to the response window of the reward transform. The same
 closed-form calibration is used for every motion, with its scale computed
 automatically from the observed residual distribution. We evaluate DARE
 with one configuration across six dynamically diverse humanoid skills,
@@ -117,10 +117,10 @@ the tracking problem. Differential discriminators were conceived for
 general multi-objective optimization, where each objective is one scalar
 loss and the differential has one entry per objective, so all objectives
 enter on equal footing. The tracking instance replaces each entry by the
-raw coordinates of its objective, and the footing is lost: an
-$84$-dimensional body-rotation block competes inside one dense layer with
-a $3$-dimensional root-position block and wins by coordinate count. DARE
-restores the footing by mapping each block through its own spectrally
+raw coordinates of its objective. When objectives are represented by feature
+blocks of unequal dimension, a shared first layer can couple learned
+sensitivity to representation size. DARE restores the footing by mapping each
+block through its own spectrally
 normalized map to an equal-width latent---a learned, vector-valued
 generalization of the per-objective scalar loss---before a shared
 Lipschitz critic mixes the latents; the resulting critic changes its
@@ -142,8 +142,8 @@ follows, depends on the data.
 
 The contributions are as follows. First, we identify that the
 regularization coefficient of differential adversarial rewards conflates
-critic geometry with critic scale, and we show that this is why it must
-be re-tuned per motion. Second, we introduce DARE, whose factorized,
+critic geometry with critic scale, which can lead to motion-dependent
+regularization requirements. Second, we introduce DARE, whose factorized,
 spectrally normalized critic fixes the geometry by construction and whose
 one-shot anchor calibration fixes the scale in closed form from the reward
 transform, so that no reward or regularization coefficient is specified
@@ -234,9 +234,9 @@ actual performance on every objective. The ideal solution is the single
 point $\Delta=0$. A discriminator $D(\Delta)$ trained to separate this
 point from the differentials of the current model is a learned, nonlinear
 aggregation of the objectives, and its gradient $\partial D/\partial l^i$
-is the weight the aggregation currently assigns to objective $i$; that
-weight moves during training toward the objectives on which the model
-still falls short. For synchronized motion imitation the same
+is the weight the aggregation currently assigns to objective $i$; this
+sensitivity may vary over the residual space and during training. For
+synchronized motion imitation the same
 construction is applied to the feature differential
 $\phi(\hat{s}_t)-\phi(s_t)$. Perfect tracking maps every pair onto one
 origin, so the positive class is again a single known point, and the
@@ -369,16 +369,14 @@ blocks before they interact. Each factor $\Delta_g\in\mathbb{R}^{d_g}$
 is mapped by its own affine map and a $1$-Lipschitz activation $\rho$ to a
 latent representation of a common width, and the representations are
 concatenated:
-\begin{equation}
- \begin{aligned}
+\begin{align}
  \Phi_\oplus(\Delta)
- &=\bigoplus_{g=1}^{G}\psi_g(\Delta_g),\\
+ &=\bigoplus_{g=1}^{G}\psi_g(\Delta_g), \notag\\
  \psi_g(\Delta_g)&=\rho(\bar{W}_g\Delta_g+b_g),
  \qquad
  \bar{W}_g=\frac{W_g}{\sigma_{\max}(W_g)},
- \end{aligned}
- \label{eq:directsum}
-\end{equation}
+\label{eq:directsum}
+\end{align}
 where $W_g\in\mathbb{R}^{m\times d_g}$ and every factor receives the same
 latent width $m$. Each $\psi_g$ is a scalar- or vector-valued representation
 of its block with a $1$-Lipschitz bound; $m=1$ gives a scalar-valued map,
@@ -406,15 +404,13 @@ the shared bound in~\eqref{eq:budget}, each factor in~\eqref{eq:directsum}
 has its own normalized map. Because the outputs are disjoint, their
 distances combine by a root-sum-square identity: for any two
 differentials,
-\begin{equation}
- \begin{aligned}
+\begin{align}
  \bigl\|\Phi_\oplus(\Delta)-\Phi_\oplus(\Delta')\bigr\|_2^2
  &=\sum_{g=1}^{G}
- \bigl\|\psi_g(\Delta_g)-\psi_g(\Delta'_g)\bigr\|_2^2\\
+ \bigl\|\psi_g(\Delta_g)-\psi_g(\Delta'_g)\bigr\|_2^2 \notag\\
  &\le\|\Delta-\Delta'\|_2^2 ,
- \end{aligned}
- \label{eq:nonexp}
-\end{equation}
+\label{eq:nonexp}
+\end{align}
 since each block has Lipschitz constant at most one. Thus a perturbation in
 one semantic subspace cannot be amplified through the coordinates of
 another before the shared trunk processes the slots. The trunk can still
@@ -477,12 +473,9 @@ $M=f_\theta(0)-\bar{f}_\theta$ for the anchor gap,
  \label{eq:symmetric}
 \end{equation}
 The anchor and the typical residual sit symmetrically about zero, and the
-loss pushes $M$ as wide as the function class and the data permit.
-($\bar{f}_\theta$ coincides with the arithmetic mean of the scores to
-second order in their spread; the runs reported below computed $M$ with
-the arithmetic mean, which differed from $\bar{f}_\theta$ by
-\tbd\% at $t_f$.) The bound~\eqref{eq:bound} caps $M$ by the size of the
-residuals themselves; the realized value is some fraction of that cap,
+loss pushes $M$ as wide as the function class and the data permit. The
+bound~\eqref{eq:bound} caps $M$ by the size of the residuals themselves;
+the realized value is some fraction of that cap,
 set by how much of the bound the trained network uses and by the residual
 scale of the motion, neither of which is a design quantity. The two
 failure modes of Section~\ref{sec:learned} are the two placements of $M$
@@ -500,9 +493,8 @@ directly.
 
 Both endpoints must therefore lie on the part of the transition where the
 slope is neither negligible nor saturated, and the question is how wide
-that part is. A sigmoid has no sharp edges; the conventional way to give
-its transition a width---the same convention used for the rise time of
-any sigmoidal response---is the span over which it climbs from $20\%$ to
+that part is. A sigmoid has no sharp edges; a common operational definition
+of its transition width is the span over which it climbs from $20\%$ to
 $80\%$ of its maximum. For the slope~\eqref{eq:slope} this span is
 \begin{equation}
  w=\sigma^{-1}(0.8)-\sigma^{-1}(0.2)=\ln4-(-\ln4)=\ln 16\approx 2.77 .
@@ -519,20 +511,17 @@ vanishes on typical residuals, a smaller $M$ toward a coin flip whose
 reward carries no information; keeping an adversarial critic in a band of
 moderate confidence is standard practice \cite{karras2020ada}. The
 convention is fixed a priori and is not selected from task outcomes.
-Its empirical effect is assessed through the matched training curves and
-tracking metrics in Section~\ref{sec:learning}.
+The same calibration procedure is used in all DARE experiments below.
 
-DARE achieves $M=w$ with one scalar applied to the raw critic $g_\theta$
-of Section~\ref{sec:critic}:
-\begin{equation}
- \begin{aligned}
+DARE uses the measured gap $M_f$ to set the global logit scale relative to
+the target width $w$:
+\begin{align}
  f_\theta(\Delta)&=\kappa\,g_\theta(\Delta),
  \qquad
- \kappa=\frac{w}{M_f},\\
- M_f&=g_\theta(0)-\sigma^{-1}\bigl(\mathbb{E}_{q_\pi}\sigma(g_\theta(\Delta))\bigr)\Big|_{t=t_f}.
- \end{aligned}
- \label{eq:kappa}
-\end{equation}
+ \kappa=\frac{w}{M_f}, \notag\\
+ M_f&=g_\theta(0)-\sigma^{-1}\bigl(\mathbb{E}_{q_\pi}\sigma(g_\theta(\Delta))\bigr)\Big|_{t=t_f},
+\label{eq:kappa}
+\end{align}
 The gap $M_f$ is measured once, at the iteration $t_f$ at which the input
 normalizer $\mathcal{N}$ is fixed, over the same mixture of current and
 replayed residuals that forms the negative class of~\eqref{eq:dare_loss};
@@ -543,11 +532,11 @@ loss~\eqref{eq:dare_loss} and the reward~\eqref{eq:reward} use the
 calibrated $f_\theta$, so the critic is trained and read out at one
 scale.
 
-Three properties follow. The anchor is untouched: $\kappa\cdot0=0$, and
-$f_\theta(0)=\kappa g_\theta(0)$ is still trained by the positive sample
-through every layer. The geometry is untouched: $\kappa$ rescales the
-critic uniformly, so the ordering of residuals is preserved
-and~\eqref{eq:bound} becomes
+Three properties follow. The anchor remains the same input point,
+$\Delta=0$, while the global rescaling is applied uniformly to both anchor
+and residual scores. The rescaling preserves score ordering and the shape of
+the raw critic up to a global multiplicative factor; the corresponding
+Lipschitz bound becomes
 $|f_\theta(0)-f_\theta(\Delta)|\le\kappa\|\Delta\|_2$, a Lipschitz
 constant derived from the data rather than assumed to be one. And the
 rule contains no motion-specific number: $w$ is a constant of the reward
@@ -566,7 +555,9 @@ point presented once per minibatch as the positive class; at $t_f$,
 before the rewards of that iteration are computed, $M_f$ is measured with
 the critic in evaluation mode and $\kappa$ is set by~\eqref{eq:kappa}. One
 critic, one reward, one policy, and one calibration rule make up the whole
-loop, and every quantity in it is shared across motions.
+loop. The same critic architecture, reward definition, and calibration
+procedure are used across motions; motion-dependent statistics are obtained
+automatically from the training data.
 
 \begin{algorithm}[t]
 \caption{DARE Training}
@@ -663,35 +654,34 @@ Lateral drift $\downarrow$ & $0.1127\!\pm\!0.019$ & $0.0277\!\pm\!0.007$ & $0.04
 \setlength{\tabcolsep}{2pt}
 \renewcommand{\arraystretch}{0.8}
 \begin{tabular}{@{}c@{}}
-\includegraphics[width=0.99\textwidth]{figures/dare_climb_10.png}\\[-1pt]
+\includegraphics[width=0.95\textwidth]{figures/dare_climb_10.png}\\[-1pt]
 {\footnotesize (a) Climb}\\[2pt]
-\includegraphics[width=0.99\textwidth]{figures/dare_spinkick_10.png}\\[-1pt]
+\includegraphics[width=0.95\textwidth]{figures/dare_spinkick_10.png}\\[-1pt]
 {\footnotesize (b) Spin Kick}\\[2pt]
 \begin{tabular}{@{}c@{\hspace{4pt}}c@{}}
-\includegraphics[width=0.49\textwidth]{figures/dare_roll_5.png} &
-\includegraphics[width=0.49\textwidth]{figures/dare_backflip_5.png}\\[-1pt]
+\includegraphics[width=0.47\textwidth]{figures/dare_roll_5.png} &
+\includegraphics[width=0.47\textwidth]{figures/dare_backflip_5.png}\\[-1pt]
 {\footnotesize (c) Roll} & {\footnotesize (d) Backflip}\\[2pt]
-\includegraphics[width=0.49\textwidth]{figures/dare_crawl_5.png} &
-\includegraphics[width=0.49\textwidth]{figures/dare_getup_5.png}\\[-1pt]
+\includegraphics[width=0.47\textwidth]{figures/dare_crawl_5.png} &
+\includegraphics[width=0.47\textwidth]{figures/dare_getup_5.png}\\[-1pt]
 {\footnotesize (e) Crawl} & {\footnotesize (f) Get-Up}
 \end{tabular}
 \end{tabular}
-\caption{DARE policies executing the six skills in Isaac Lab. Panels use a
-consistent front-view crop; Climb and Spin Kick are shown with ten panels and
-the four other skills with five. All panels use the same fixed camera and
-aspect ratio. All controllers use the shared DARE configuration
-in Table~\ref{tab:config}.}
+\caption{DARE policies executing the six skills in Isaac Lab using the shared
+configuration in Table~\ref{tab:config}. Frames are uniformly sampled from
+each rollout and rendered from a fixed front-view camera. Climb and Spin Kick
+are shown with ten frames, and the remaining skills with five.}
 \label{fig:snapshots}
 \end{figure*}
 
-\begin{figure*}[!t]
+\begin{figure*}[!b]
 \centering
 \includegraphics[width=0.98\textwidth]{figures/fig_learning_curves.pdf}
-\caption{Five-seed mean learning curves for Roll and Climb under the matched
-training protocol. The plotted curves show the mean over five independent
-seeds. The four panels pair body-position and root-rotation errors, exposing
-translational and orientation fidelity for short and long, contact-rich
-skills. The macro-average summary is reported in Table~\ref{tab:main}.}
+\caption{Learning curves for Roll and Climb under the matched training
+budget. Curves show the mean over five independent seeds. The four panels
+report body-position and root-rotation errors versus environment samples,
+representing articulated translational fidelity and global orientation
+tracking, respectively. Lower is better.}
 \label{fig:learning}
 \end{figure*}
 
@@ -725,42 +715,48 @@ padded with synthetic states. For the macro-averages in Table~\ref{tab:main},
 the six skills contribute equally before the five-seed statistics are
 computed.
 
-We use six complementary measures. Four describe geometric tracking at two
-spatial levels: root position and root rotation measure global translation
-and orientation, while body position and body rotation measure articulated
-pose fidelity after removing the corresponding root motion. For an evaluation
+We use six complementary measures. The four geometric measures quantify
+frame-wise imitation fidelity, whereas foot progress and lateral drift capture
+trajectory-level behavior that is not summarized by instantaneous pose errors.
+Four describe geometric tracking at two spatial levels: root position and
+root rotation measure global translation and orientation, while body position
+and body rotation measure articulated-body tracking. For an evaluation
 trajectory with $B$ bodies, where $r,p_b$ and $q,q_b$ denote simulated root,
 body positions and orientations and hats denote reference values, these
 quantities are
-\begin{equation}
-\begin{aligned}
- E_{\mathrm{root\text{-}pos}}&=\lVert\hat r-r\rVert_2,\\
- E_{\mathrm{root\text{-}rot}}&=\angle(q,\hat q),\\
+\begingroup
+\setlength{\abovedisplayskip}{0pt plus 1pt minus 1pt}
+\setlength{\belowdisplayskip}{0pt plus 1pt minus 1pt}
+\begin{align}
+ E_{\mathrm{root\text{-}pos}}&=\lVert\hat r-r\rVert_2,
+ \quad
+ E_{\mathrm{root\text{-}rot}}=\angle(q,\hat q), \notag\\
  E_{\mathrm{body\text{-}pos}}&=\frac{1}{B}\sum_{b=1}^{B}
-   \left\lVert(\hat p_b-\hat r)-(p_b-r)\right\rVert_2,\\
+   \left\lVert(\hat p_b-\hat r)-(p_b-r)\right\rVert_2, \notag\\
  E_{\mathrm{body\text{-}rot}}&=\frac{1}{B}\sum_{b=1}^{B}\angle(q_b,\hat q_b).
-\end{aligned}
 \label{eq:geometric_metrics}
-\end{equation}
+\end{align}
+\endgroup
 where $\angle(\cdot,\cdot)$ is the shortest angle between normalized
-quaternions. The remaining two measures describe motion-level behavior.
+quaternions. Geometric quantities are evaluated at each reference-aligned
+timestep and then averaged over executed timesteps and episodes; the two
+behavior measures are computed per trajectory and then averaged over episodes.
+The remaining two measures describe motion-level behavior.
 Let $\Delta r$ and $\Delta\hat r$ be the simulated and reference root
 displacements over the evaluated trajectory, and let
 $\Delta p_j,\Delta\hat p_j$ be the corresponding displacements of foot $j$.
 The reference-projected progress and transverse drift are
-\begin{equation}
-\begin{aligned}
+\begin{align}
  \rho_{\mathrm{foot}}&=\min_j
  \frac{\Delta p_j^{\top}\Delta\hat p_j}
-      {\lVert\Delta\hat p_j\rVert_2^2},\\
+      {\lVert\Delta\hat p_j\rVert_2^2}, \notag\\
  \rho_r&=\frac{\Delta r^{\top}\Delta\hat r}
-                 {\lVert\Delta\hat r\rVert_2^2},\\
+                 {\lVert\Delta\hat r\rVert_2^2}, \notag\\
  E_{\mathrm{lat}}&=
  \frac{\left\lVert\Delta r-
  \rho_r\Delta\hat r\right\rVert_2}{\lVert\Delta\hat r\rVert_2}.
-\end{aligned}
- \label{eq:behavior_metrics}
-\end{equation}
+\label{eq:behavior_metrics}
+\end{align}
 Foot progress is ideal at one, while lateral drift is minimized at zero.
 All six quantities are averaged over the evaluation trajectories; lower is
 better except for foot progress, whose target value is one.
@@ -772,17 +768,27 @@ Fig.~\ref{fig:snapshots} shows the resulting controllers executing the
 six skills in Isaac Lab. Using one shared configuration, DARE is evaluated
 against the three baselines under the matched protocol of
 Section~\ref{sec:setup}. Table~\ref{tab:main} reports the macro-average
-geometric errors and motion-level behavior across the six skills; DARE has
-the lowest value in every geometric metric and the closest-to-one foot
-progress ratio, while also giving the smallest lateral drift.
+geometric errors and motion-level behavior across the six skills. Using one
+unchanged configuration across all six skills, DARE obtains the best
+macro-averaged result on all six reported measures. The improvement is
+consistent across the two levels of geometric tracking: DARE achieves the
+lowest root- and body-level position errors as well as the lowest root- and
+body-level rotation errors. The advantage also extends beyond frame-wise pose
+fidelity: its foot-progress ratio is closest to the reference value of one,
+while its normalized lateral drift is the smallest among all methods.
+Relative to the strongest baseline for each measure, DARE reduces
+root-position error by about $25\%$, root-rotation error by about $21\%$, and
+lateral drift by about $38\%$.
 
 \subsection{Learning Dynamics}
 \label{sec:learning}
 Figure~\ref{fig:learning} compares the five-seed mean body-position and
 root-rotation errors against environment samples under a matched budget.
-DARE reaches a lower plateau than the baselines on both skills while retaining
-the same trend across the short Roll and contact-rich Climb clips. The curves
-therefore complement the final-checkpoint comparison in Table~\ref{tab:main}.
+Roll and Climb provide contrasting motion durations and contact structures.
+Across both motions, the five-seed mean curves converge to lower
+body-position and root-rotation errors for DARE under the same sample budget.
+The learning curves therefore complement the final-checkpoint comparison in
+Table~\ref{tab:main}.
 
 \subsection{Hardware Deployment}
 \label{sec:hardware}
@@ -801,18 +807,17 @@ critic's geometric sensitivity to the score range seen by the policy.
 DARE treats these as separate design quantities: the factorized critic
 specifies the geometry, and one closed-form calibration sets the score
 scale without a motion-specific coefficient.
-Every objective enters through its own spectrally normalized slot, so a
-three-dimensional root residual and an eighty-four-dimensional rotation
-residual stand on equal footing and the score change relative to the
-unique zero differential is bounded by the residual; the critic is then
+Every objective enters through its own spectrally normalized slot, so feature
+blocks of unequal dimension enter through equal-width, independently
+normalized representations, and the score change relative to the unique
+zero differential is bounded by the residual; the critic is then
 rescaled once, in closed form, so that the anchor and the typical
 residual sit at the two ends of the reward slope's transition.
 Across the six skills, DARE attains the lowest macro-average for all four
 geometric errors, the foot-progress ratio closest to one, and the smallest
 lateral drift in Table~\ref{tab:main}.
-Extending DARE to multi-clip datasets and to other
-morphologies requires no change to the rule, and the factorized critic
-offers a direct place to attach task objectives as further semantic
+The formulation also provides a direct path toward multi-clip training and
+other morphologies, where additional objectives can be introduced as semantic
 blocks.
 
 \FloatBarrier
