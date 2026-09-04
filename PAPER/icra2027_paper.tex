@@ -233,9 +233,10 @@ vector $\Delta=(l^1,\ldots,l^n)$ that records the gap between ideal and
 actual performance on every objective. The ideal solution is the single
 point $\Delta=0$. A discriminator $D(\Delta)$ trained to separate this
 point from the differentials of the current model is a learned, nonlinear
-aggregation of the objectives, and its gradient $\partial D/\partial l^i$
-is the weight the aggregation currently assigns to objective $i$; this
-sensitivity may vary over the residual space and during training. For
+aggregation of the objectives, and the derivative
+$\partial D/\partial l^i$ describes the local sensitivity of the learned
+aggregation to objective $i$. Unlike a fixed scalarization coefficient,
+this sensitivity may vary over the residual space and during training. For
 synchronized motion imitation the same
 construction is applied to the feature differential
 $\phi(\hat{s}_t)-\phi(s_t)$. Perfect tracking maps every pair onto one
@@ -500,18 +501,18 @@ $80\%$ of its maximum. For the slope~\eqref{eq:slope} this span is
  w=\sigma^{-1}(0.8)-\sigma^{-1}(0.2)=\ln4-(-\ln4)=\ln 16\approx 2.77 .
  \label{eq:width}
 \end{equation}
-Placing the anchor at the upper end of the transition and the typical
-residual at the lower end means, by~\eqref{eq:symmetric}, $M=w$. The
-choice has a direct reading in terms of the critic itself:
-$D_\theta(0)=\sigma(\ln4)=0.8$ and $D_\theta(\bar\Delta)=0.2$, so the
-calibrated critic assigns the anchor an $80\%$ probability of being ideal
-and the typical residual $20\%$---a confident but not categorical
-classifier. A larger $M$ drives it toward a hard classifier whose reward
-vanishes on typical residuals, a smaller $M$ toward a coin flip whose
-reward carries no information; keeping an adversarial critic in a band of
-moderate confidence is standard practice \cite{karras2020ada}. The
-convention is fixed a priori and is not selected from task outcomes.
-The same calibration procedure is used in all DARE experiments below.
+We therefore use the $20$--$80\%$ transition width $w$ as the target
+operating gap. Under the symmetric reference placement, the corresponding
+scores are $+w/2$ and $-w/2$, for which the sigmoid values are $0.8$ and
+$0.2$, respectively: a confident but not categorical classifier, in line
+with the common practice of keeping an adversarial critic in a band of
+moderate confidence \cite{karras2020ada}. A larger gap drives it toward a
+hard classifier whose reward vanishes on typical residuals, a smaller one
+toward a coin flip whose reward carries no information. The convention is
+fixed a priori and is not selected from task outcomes. The calibration
+below uses the measured pre-calibration gap to set the global logit scale
+toward this operating range; the same calibration procedure is used in all
+DARE experiments below.
 
 DARE uses the measured gap $M_f$ to set the global logit scale relative to
 the target width $w$:
@@ -589,7 +590,8 @@ normalizer $\mathcal{N}$; $\kappa\leftarrow 1$
 
 \section{Experiments}
 \begin{table}[t]
-\caption{DARE configuration shared across all six skills.}
+\caption{DARE configuration shared across all six skills. The calibration
+rule is shared; the resulting $\kappa$ is data-dependent.}
 \label{tab:config}
 \centering
 \small
@@ -613,16 +615,17 @@ Critic optimizer & SGD, lr $2.5{\times}10^{-4}$, momentum $0.9$ \\
 Critic minibatch & $16384$ current $+$ $16384$ replay \\
 Replay buffer & $2\times 10^{5}$ differentials \\
 Reward amplitude $\beta$ & $2$ \\
-\multicolumn{2}{l}{\emph{Calibration rule shared; resulting $\kappa$ is data-dependent.}} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \begin{table*}[t]
 \caption{Macro-average tracking and motion-level behavior under the matched
-training and evaluation protocol. Entries are mean $\pm$ standard deviation
-over five seeds and six skills. Lower is better except for Foot Progress,
-which is ideal at one. DARE uses the same configuration on all skills.}
+training and evaluation protocol. For each seed, each metric is
+macro-averaged equally over the six skills; entries report the mean $\pm$
+one standard deviation across five seeds. Lower is better except for Foot
+Progress, which is ideal at one. DARE uses the same configuration on all
+skills.}
 \label{tab:main}
 \centering
 \setlength{\tabcolsep}{5pt}
@@ -711,7 +714,9 @@ method's environment configuration (pose termination is enabled for
 DeepMimic, ADD, and DARE and disabled for AMP). The evaluation harness
 accumulates each metric over the executed reference-aligned steps and uses
 the same aggregation rule for every method; terminated trajectories are not
-padded with synthetic states. For the macro-averages in Table~\ref{tab:main},
+padded with synthetic states. Final policies reach essentially the full
+prescribed evaluation horizon, so early termination has negligible effect
+on the reported averages. For the macro-averages in Table~\ref{tab:main},
 the six skills contribute equally before the five-seed statistics are
 computed.
 
