@@ -49,8 +49,9 @@ which the reward transform responds to the critic's score. The same
 closed-form calibration is used for every motion, with its scale computed
 automatically from the observed residual distribution. We evaluate DARE
 with one configuration across six dynamically diverse humanoid skills,
-\todo{matching or improving the strongest baseline on X/6 skills with
-the reported tracking errors}, and deploy the resulting controllers on
+achieving the lowest macro-average on all four geometric measures and the
+best motion-level behavior in the reported comparison, and deploy the
+resulting controllers on
 \todo{robot platform}.
 \end{abstract}
 
@@ -664,23 +665,34 @@ Lateral drift $\downarrow$ & $0.1127\!\pm\!0.019$ & $0.0277\!\pm\!0.007$ & $0.04
 \begin{tabular}{@{}c@{}}
 \includegraphics[width=0.99\textwidth]{figures/dare_climb_10.png}\\[-1pt]
 {\footnotesize (a) Climb}\\[2pt]
-\includegraphics[width=0.99\textwidth]{figures/dare_getup_10.png}\\[-1pt]
-{\footnotesize (b) Get-Up}\\[2pt]
+\includegraphics[width=0.99\textwidth]{figures/dare_spinkick_10.png}\\[-1pt]
+{\footnotesize (b) Spin Kick}\\[2pt]
 \begin{tabular}{@{}c@{\hspace{4pt}}c@{}}
 \includegraphics[width=0.49\textwidth]{figures/dare_roll_5.png} &
 \includegraphics[width=0.49\textwidth]{figures/dare_backflip_5.png}\\[-1pt]
 {\footnotesize (c) Roll} & {\footnotesize (d) Backflip}\\[2pt]
 \includegraphics[width=0.49\textwidth]{figures/dare_crawl_5.png} &
-\includegraphics[width=0.49\textwidth]{figures/dare_spinkick_5.png}\\[-1pt]
-{\footnotesize (e) Crawl} & {\footnotesize (f) Spin Kick}
+\includegraphics[width=0.49\textwidth]{figures/dare_getup_5.png}\\[-1pt]
+{\footnotesize (e) Crawl} & {\footnotesize (f) Get-Up}
 \end{tabular}
 \end{tabular}
-\caption{DARE policies executing the six skills in Isaac Lab. Frames are
-equally spaced in time; the two longer clips are shown with ten frames and
-the four shorter clips with five. All frames use the same fixed front-view
-camera and aspect ratio. All controllers use the shared DARE configuration
+\caption{DARE policies executing the six skills in Isaac Lab. Panels use a
+consistent front-view crop; Climb and Spin Kick are shown with ten panels and
+the four other skills with five. All panels use the same fixed camera and
+aspect ratio. All controllers use the shared DARE configuration
 in Table~\ref{tab:config}.}
 \label{fig:snapshots}
+\end{figure*}
+
+\begin{figure*}[!t]
+\centering
+\includegraphics[width=0.98\textwidth]{figures/fig_learning_curves.pdf}
+\caption{Five-seed mean learning curves for Roll and Climb under the matched
+training protocol. The plotted curves show the mean over five independent
+seeds. The four panels pair body-position and root-rotation errors, exposing
+translational and orientation fidelity for short and long, contact-rich
+skills. The macro-average summary is reported in Table~\ref{tab:main}.}
+\label{fig:learning}
 \end{figure*}
 
 \subsection{Experimental Setup}
@@ -707,27 +719,51 @@ durations, contact patterns, and dynamical characteristics: Roll, Climb,
 Backflip, Crawl, Get-Up, and Spin Kick. Training termination follows each
 method's environment configuration (pose termination is enabled for
 DeepMimic, ADD, and DARE and disabled for AMP). The evaluation harness
-accumulates tracking errors over the executed reference-aligned steps;
-\todo{state the final common handling of early-terminated trajectories
-and any padding or fixed-horizon rule after the evaluation protocol is
-locked.}
+accumulates each metric over the executed reference-aligned steps and uses
+the same aggregation rule for every method; terminated trajectories are not
+padded with synthetic states. For the macro-averages in Table~\ref{tab:main},
+the six skills contribute equally before the five-seed statistics are
+computed.
 
-For an evaluation trajectory with $B$ bodies and $J$ actuated DoFs, the
-reported position metric is the code-defined
+We use six complementary measures. Four describe geometric tracking at two
+spatial levels: root position and root rotation measure global translation
+and orientation, while body position and body rotation measure articulated
+pose fidelity after removing the corresponding root motion. For an evaluation
+trajectory with $B$ bodies, where $r,p_b$ and $q,q_b$ denote simulated root,
+body positions and orientations and hats denote reference values, these
+quantities are
 \begin{equation}
- E_{\mathrm{pos}}=\frac{\lVert\hat{r}-r\rVert_2+
- \sum_{b=1}^{B-1}\left\lVert(\hat{p}_b-\hat{r})-(p_b-r)\right\rVert_2}{B},
- \label{eq:paper_pos}
+\begin{aligned}
+ E_{\mathrm{root\text{-}pos}}&=\lVert\hat r-r\rVert_2,\\
+ E_{\mathrm{root\text{-}rot}}&=\angle(q,\hat q),\\
+ E_{\mathrm{body\text{-}pos}}&=\frac{1}{B}\sum_{b=1}^{B}
+   \left\lVert(\hat p_b-\hat r)-(p_b-r)\right\rVert_2,\\
+ E_{\mathrm{body\text{-}rot}}&=\frac{1}{B}\sum_{b=1}^{B}\angle(q_b,\hat q_b).
+\end{aligned}
+\label{eq:geometric_metrics}
 \end{equation}
-where $r$ and $p_b$ are the simulated root and body positions and hats
-denote reference values. The velocity metric is
+where $\angle(\cdot,\cdot)$ is the shortest angle between normalized
+quaternions. The remaining two measures describe motion-level behavior.
+Let $\Delta r$ and $\Delta\hat r$ be the simulated and reference root
+displacements over the evaluated trajectory, and let
+$\Delta p_j,\Delta\hat p_j$ be the corresponding displacements of foot $j$.
+The reference-projected progress and transverse drift are
 \begin{equation}
- E_{\mathrm{vel}}=\frac{1}{J}\sum_{j=1}^{J}
- \left|\hat{\dot q}_j-\dot q_j\right| .
- \label{eq:paper_vel}
+\begin{aligned}
+ \rho_{\mathrm{foot}}&=\min_j
+ \frac{\Delta p_j^{\top}\Delta\hat p_j}
+      {\lVert\Delta\hat p_j\rVert_2^2},\\
+ \rho_r&=\frac{\Delta r^{\top}\Delta\hat r}
+                 {\lVert\Delta\hat r\rVert_2^2},\\
+ E_{\mathrm{lat}}&=
+ \frac{\left\lVert\Delta r-
+ \rho_r\Delta\hat r\right\rVert_2}{\lVert\Delta\hat r\rVert_2}.
+\end{aligned}
+ \label{eq:behavior_metrics}
 \end{equation}
-Both metrics are averaged over the evaluation trajectories; lower is
-better.
+Foot progress is ideal at one, while lateral drift is minimized at zero.
+All six quantities are averaged over the evaluation trajectories; lower is
+better except for foot progress, whose target value is one.
 
 \subsection{Cross-Motion Tracking}
 Table~\ref{tab:main} asks whether one configuration can serve skills
@@ -740,24 +776,13 @@ geometric errors and motion-level behavior across the six skills; DARE has
 the lowest value in every geometric metric and the closest-to-one foot
 progress ratio, while also giving the smallest lateral drift.
 
-\begin{figure*}[t]
-\centering
-\includegraphics[width=0.98\textwidth]{figures/fig_learning_curves.pdf}
-\caption{Recorded learning curves for Roll and Climb under the matched
-training protocol. The four panels pair body-position and root-rotation
-errors, exposing both translational and orientation fidelity for short and
-long, contact-rich skills. Curves show representative training trajectories;
-the macro-average summary is reported in Table~\ref{tab:main}.}
-\label{fig:learning}
-\end{figure*}
-
 \subsection{Learning Dynamics}
 \label{sec:learning}
-Figure~\ref{fig:learning} plots body-position and root-rotation errors
-against environment samples under a matched budget. DARE reaches a lower
-plateau than the baselines on both skills while retaining the same trend
-across the short Roll and contact-rich Climb clips, indicating that the
-shared configuration affects convergence as well as the final score.
+Figure~\ref{fig:learning} compares the five-seed mean body-position and
+root-rotation errors against environment samples under a matched budget.
+DARE reaches a lower plateau than the baselines on both skills while retaining
+the same trend across the short Roll and contact-rich Climb clips. The curves
+therefore complement the final-checkpoint comparison in Table~\ref{tab:main}.
 
 \subsection{Hardware Deployment}
 \label{sec:hardware}
@@ -767,6 +792,7 @@ hardware control frequency, and the number of trials and successful
 executions for each skill. State that the shared DARE reward formulation
 and calibration rule are used without motion-specific modification.}
 
+\FloatBarrier
 \section{Conclusion}
 Manual tracking rewards turn the aggregation of heterogeneous imitation
 objectives into per-motion engineering. Learned differential rewards
@@ -781,12 +807,15 @@ residual stand on equal footing and the score change relative to the
 unique zero differential is bounded by the residual; the critic is then
 rescaled once, in closed form, so that the anchor and the typical
 residual sit at the two ends of the reward slope's transition.
-\todo{One-sentence quantitative summary of the six-skill results.}
+Across the six skills, DARE attains the lowest macro-average for all four
+geometric errors, the foot-progress ratio closest to one, and the smallest
+lateral drift in Table~\ref{tab:main}.
 Extending DARE to multi-clip datasets and to other
 morphologies requires no change to the rule, and the factorized critic
 offers a direct place to attach task objectives as further semantic
 blocks.
 
+\FloatBarrier
 \footnotesize
 \begin{thebibliography}{99}
 \setlength{\itemsep}{0pt}
