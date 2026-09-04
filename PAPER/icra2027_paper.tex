@@ -845,6 +845,10 @@ regimes.}
 
 \subsection{Operating Point and Learning Curves}
 \label{sec:opexp}
+The operating-point analysis complements the cross-motion results by
+measuring the score separation targeted by DARE's calibration. The
+equalized critic supplies the corresponding geometric constraint by
+construction, separating scale control from critic geometry.
 Figure~\ref{fig:operating}(a) shows the anchor gap $M$ over training:
 before $t_f$ each skill's critic separates the anchor from its residuals
 by a different amount, at $t_f$ the rule brings every skill to $\ln16$,
@@ -862,54 +866,6 @@ under a matched budget; solid curves are seed means, shaded regions
 standard deviations. \todo{Describe convergence speed, final plateau, and
 seed consistency of DARE relative to AMP, DeepMimic, and ADD.}
 
-\subsection{Ablation}
-DARE makes two structural choices about the critic's geometry, the
-direct-sum first layer and the spectral parameterization of the trunk,
-and Table~\ref{tab:ablation} varies each on Roll and Climb,
-representative short-cycle and long-horizon regimes. All variants share
-the actor, PPO, budget, differential~\eqref{eq:delta}, and critic width,
-and all are calibrated by~\eqref{eq:kappa}, so the rows differ in
-geometry alone; the scale that calibration sets, and what it would have
-been without it, is read from the pre-calibration gaps in
-Fig.~\ref{fig:operating}(a). \emph{Flat$+$SN} replaces the direct-sum layer by one spectrally
-normalized dense map of the same output width, so the first nonlinearity
-already mixes every coordinate; it tests whether factorization before
-interaction matters. \emph{Factorized$+$GP} keeps the direct-sum layer but
-replaces the spectral parameterization of the trunk by a gradient penalty
-with one coefficient shared by both skills; it tests whether the
-architectural bound does more than a coefficient-controlled penalty of
-the same intent.
-
-\begin{table}[t]
-\caption{Ablation on two representative skills. Mean $\pm$ std over five
-seeds; lower is better. \todo{fill from the formal ablation runs}}
-\label{tab:ablation}
-\centering
-\setlength{\tabcolsep}{2.8pt}
-\small
-\begin{tabular}{l cc cc}
-\toprule
- & \multicolumn{2}{c}{Position [m] $\downarrow$}
- & \multicolumn{2}{c}{DoF vel.\ [rad/s] $\downarrow$} \\
-\cmidrule(lr){2-3}\cmidrule(lr){4-5}
-Variant & Roll & Climb & Roll & Climb \\
-\midrule
-Flat$+$SN         & \tbd & \tbd & \tbd & \tbd \\
-Factorized$+$GP   & \tbd & \tbd & \tbd & \tbd \\
-DARE              & \tbd & \tbd & \tbd & \tbd \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-The Flat$+$SN row is the direct test of Section~\ref{sec:critic}:
-\eqref{eq:budget} predicts that the single spectral budget of the dense
-map is consumed by the long blocks, so the critic prices coordinate
-cardinality rather than contact, balance, or timing. \todo{Report the
-measured degradation and whether it is larger on Roll, where root travel
-and body rotation compete directly.} The Factorized$+$GP row keeps the
-semantic channels and controls sensitivity with a coefficient instead of
-through the maps. \todo{Report.}
-
 \section{Conclusion}
 Manual tracking rewards turn the aggregation of heterogeneous imitation
 objectives into per-motion engineering, and learned differential rewards,
@@ -923,8 +879,8 @@ residual stand on equal footing and the score change relative to the
 unique zero differential is bounded by the residual; the critic is then
 rescaled once, in closed form, so that the anchor and the typical
 residual sit at the two ends of the reward slope's transition.
-\todo{One-sentence quantitative summary of the six-skill results and the
-ablation.} Extending DARE to multi-clip datasets and to other
+\todo{One-sentence quantitative summary of the six-skill results.}
+Extending DARE to multi-clip datasets and to other
 morphologies requires no change to the rule, and the factorized critic
 offers a direct place to attach task objectives as further semantic
 blocks.
