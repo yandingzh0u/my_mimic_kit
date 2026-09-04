@@ -33,10 +33,8 @@ objectives at once: global root motion, articulated pose, and velocity all
 have to agree with a synchronized reference. Handcrafted tracking rewards
 combine these objectives with weights and scales chosen per motion.
 Learned differential rewards remove the weights, but they keep the
-discriminator from collapsing onto its single positive example with a
-gradient penalty whose strength must again be chosen per motion, because
-that one coefficient decides both how sharp the discriminator may be and
-how far typical policy residuals are pushed from the ideal. We introduce
+discriminator usable through regularization whose strength can affect both
+the critic's local geometry and the scale of its scores. We introduce
 DARE, a differential adversarial reward that fixes these two properties
 separately, with no motion-specific coefficient. The geometry of the critic is
 fixed by construction: every semantic block of the differential enters
@@ -47,12 +45,12 @@ the residual. The scale of the critic is fixed once, in closed form, from
 the reward transform: the balanced adversarial loss places the anchor and
 the typical policy residual symmetrically around zero, and DARE rescales
 the critic so that this separation equals the width of the window over
-which the reward transform responds to the critic's score. The rule is
-shared by every motion; only the measured separation depends on the
-data. We evaluate DARE with one configuration
-on six humanoid skills with distinct dynamical regimes---Roll, Climb,
-Backflip, Crawl, Get-Up, and Spin Kick---\todo{one-sentence quantitative
-summary from the formal runs}, and deploy the resulting controllers on
+which the reward transform responds to the critic's score. The same
+closed-form calibration is used for every motion, with its scale computed
+automatically from the observed residual distribution. We evaluate DARE
+with one configuration across six dynamically diverse humanoid skills,
+\todo{matching or improving the strongest baseline on X/6 skills with
+the reported tracking errors}, and deploy the resulting controllers on
 \todo{robot platform}.
 \end{abstract}
 
@@ -95,28 +93,17 @@ whether it is the ideal zero vector, so the aggregation of tracking
 objectives is learned rather than specified \cite{zhang2025add}. The
 weights and scales of~\eqref{eq:hand} disappear.
 
-One coefficient remains, and it inherits the tuning burden. The
-differential formulation has exactly one positive example, the origin,
-and the optimal discriminator for a single positive point is a delta
-function: it scores the origin as ideal and every other differential as
-equally hopeless, and the policy receives no gradient. The discriminator
-must therefore be kept from becoming arbitrarily sharp, and the standard
-tool is a gradient penalty of strength $\lambda$. The coefficient is
-delicate in both directions, because the policy's reward is a saturating
-function of the discriminator's score. If $\lambda$ is too small, the
-discriminator sharpens until the residuals the policy actually produces
-are all scored far below the ideal; the reward saturates at zero across
-the states the policy visits, and neither staying alive nor tracking
-slightly better is rewarded. If $\lambda$ is too large, the discriminator is smoothed until
-it can no longer separate residuals that differ in the details a skill
-depends on; the reward is nearly the same on every state, survival is
-rewarded, and tracking is not. Where the usable range lies depends on the
-residual distribution of the motion being learned, and the published
-configurations accordingly use different penalty strengths for different
-clips and characters. The coefficient must be found again for every skill
-because it controls two things at once: how steep the discriminator may
-be anywhere, which is a property of its geometry, and how far the typical
-residual is pushed from the ideal, which is a property of its scale.
+Existing differential adversarial formulations still rely on
+motion-dependent regularization to maintain a usable discriminator. The
+differential formulation has exactly one positive example, the origin, and
+without a suitable constraint a discriminator can become arbitrarily sharp:
+it scores the origin as ideal and gives nearly identical scores to the
+residuals visited by the policy. Regularization therefore affects the
+effective learning signal in two coupled ways. It changes the critic's
+local geometry and it changes the numerical range of the scores passed to
+the saturating reward transform. This coupling makes the effective
+regularization motion-dependent: as the residual distribution changes, the
+same setting can induce different critic geometries and score ranges.
 
 DARE fixes each of these with no motion-specific coefficient. The
 geometry is fixed by construction, using two structural facts of the
@@ -149,8 +136,8 @@ only inside a window of fixed width, and the two failure modes above are
 $M$ overshooting or undershooting that window. DARE measures $M$ once,
 when the input units become fixed, and rescales the critic so that anchor
 and typical residual sit at the two ends of the window. The rule is the same for every
-motion; only the measured $M$, like the input normalization it follows,
-depends on the data.
+motion; only the measured separation, like the input normalization it
+follows, depends on the data.
 
 The contributions are as follows. First, we identify that the
 regularization coefficient of differential adversarial rewards conflates
@@ -164,45 +151,50 @@ heterogeneous skills and execute the resulting controllers on
 \todo{robot platform}.
 
 \section{Related Work}
-\textbf{Physics-based humanoid imitation.} DeepMimic reproduces diverse
-motion-capture clips by combining pose, velocity, root, and end-effector
-tracking kernels with user-chosen coefficients \cite{peng2018deepmimic};
-later systems scale tracking through architecture and data
-\cite{won2020scadiver,luo2023phc,tessler2023maskedmimic,peng2018sfv}
-while their imitation objectives still rest on manual scales and weights.
-Our concern is the objective itself: a reward that can be reused across
-motions.
+\textbf{Physics-based motion tracking and learned imitation objectives.}
+Physics-based character control has progressed from skill-specific,
+carefully engineered tracking objectives to learning-based systems that
+cover larger motion collections. DeepMimic combines pose, velocity, root,
+and end-effector tracking terms for physics-based skills
+\cite{peng2018deepmimic}; subsequent work improves scalability and motion
+coverage through architectures, representations, and data
+\cite{won2020scadiver,luo2023phc,tessler2023maskedmimic,peng2018sfv}.
+Adversarial imitation provides a learned alternative to a manually written
+reward: GAIL matches expert and policy occupancies
+\cite{ho2016gail}, while AMP learns a motion prior by discriminating short
+state transitions in physics-based characters \cite{peng2021amp}. These
+distribution-level objectives encourage plausible behavior, whereas
+reference-conditioned tracking requires agreement with a synchronized
+trajectory. ADD addresses this setting by presenting the reference--policy
+differential to an adversarial discriminator and learning a nonlinear
+aggregation of tracking objectives without component-wise reward weights
+\cite{zhang2025add}.
 
-\textbf{Adversarial imitation and learned rewards.} GAIL casts imitation
-as adversarial occupancy matching \cite{ho2016gail}, and AMP adapts this
-idea to physics-based characters by discriminating short state
-transitions \cite{peng2021amp}; a reward that scores ``looking like the
-dataset'' suits stylized behavior but can accept a plausible yet
-incomplete motion. Differential rewards hand the reference--policy error
-itself to a discriminator \cite{zhang2025add}: ADD composes the tracking
-objectives into one differential, treats the zero vector as the sole
-positive example, and learns a nonlinear aggregation without component
-weights, stabilized by a gradient penalty whose strength is set per
-motion. DARE continues this program and removes that coefficient.
+\textbf{Multi-objective learning and objective aggregation.} Competing
+objectives are commonly combined by weighted scalarization, Pareto
+optimization, gradient balancing, adaptive loss weighting, or multiple
+objective critics
+\cite{sener2018multitask,kendall2018multi,abdolmaleki2020distributional}.
+These approaches differ in whether preferences are specified explicitly,
+adapted from objective statistics, or retained as separate signals.
+Adversarial differential learning offers another form of scalarization in
+which the aggregation is represented by a learned nonlinear function
+\cite{zhang2025add}. Motion tracking adds a representation issue to this
+problem: one physical objective can occupy a feature block with many more
+coordinates than another, even when both are conceptually single
+objectives.
 
-\textbf{Stable adversarial learning.} Gradient penalties, Lipschitz
-constraints, and spectral parameterization keep adversarial critics from
-becoming either brittle or saturated
-\cite{gulrajani2017improved,miyato2018spectral,mescheder2018convergence};
-for losses other than the Wasserstein loss, what such a constraint
-controls is the range of scores the loss operates on, and the scale of
-that range determines whether training succeeds \cite{qin2020lipschitz}.
-DARE uses the constraint for geometry alone and fixes the score range
-separately.
-
-\textbf{Multi-objective optimization.} Weighted sums, Pareto methods,
-adaptive loss balancing, and multi-critic RL all address competing
-objectives and typically require explicit preferences or multiple
-objective gradients
-\cite{sener2018multitask,kendall2018multi,abdolmaleki2020distributional};
-differential adversarial learning instead learns a nonlinear
-scalarization from data, and DARE performs it with one critic and one
-configuration for every motion.
+\textbf{Regularization of adversarial critics.} Adversarial critics are
+regularized with gradient penalties, Lipschitz constraints, or spectral
+normalization to control sensitivity and improve optimization
+\cite{gulrajani2017improved,miyato2018spectral,mescheder2018convergence}.
+Gradient penalties constrain sampled input derivatives, whereas spectral
+normalization bounds the gain of individual network maps by construction.
+For non-Wasserstein adversarial losses, the numerical score range also
+determines the operating regime of the loss and its reward transform
+\cite{qin2020lipschitz,karras2020ada}. Geometry and score calibration are
+therefore related but distinct considerations when a critic supplies the
+learning signal.
 
 \section{Background}
 \subsection{Reference-Conditioned Humanoid Control}
@@ -225,15 +217,11 @@ aspect of the motion: global root position, root rotation, root-relative
 body positions, body rotations, root linear and angular velocity, and
 joint velocity. A handcrafted reward first compresses each group into a
 distance $e_{g,t}=\|\phi_g(\hat{s}_t)-\phi_g(s_t)\|_2$ and then applies
-the fixed map~\eqref{eq:hand}. The widely used DeepMimic reward does this
-with five terms whose weights $(0.5,0.1,0.15,0.1,0.15)$ and scales
-$(0.25,0.01,5,1,10)$ were selected by hand, together with fourteen
-joint-specific weights inside the pose and velocity terms
-\cite{peng2018deepmimic,zhang2025add}: twenty-four coefficients, each
-encoding an assumption about how large an error of one kind is worth
-relative to another, frozen before the residual distribution of any
-policy is seen. A learned scalarization can instead adapt the trade-off
-to the residuals the current policy actually produces.
+the fixed map~\eqref{eq:hand}. DeepMimic is a representative instance of
+this design: the relative weights and scales are specified before training
+and remain fixed while the policy visits its residual distribution
+\cite{peng2018deepmimic}. A learned scalarization can instead adapt the
+trade-off to the residuals the current policy actually produces.
 
 \subsection{Learned Differential Objectives}
 \label{sec:learned}
@@ -257,28 +245,15 @@ occupancy. The policy is rewarded at each step with
 $-\log(1-D(\Delta_t))$, as in AMP: large when the discriminator finds the
 residual $\Delta_t$ close to ideal, and vanishing when it does not.
 
-A single positive point has a consequence. Without regularization the
-optimal discriminator is a delta function at the origin, which scores
-every policy residual as equally hopeless, so the reward vanishes on
-every state the policy visits and provides no gradient. The
-discriminator is therefore trained with a gradient penalty
+A single positive point makes critic regularity important. Differential
+adversarial implementations therefore constrain the critic, for example
+with a sampled gradient penalty
 $\lambda\,\mathbb{E}_{\Delta\sim q_\pi}\|\nabla_\Delta D(\Delta)\|_2^2$
-added to the classification objective, where $q_\pi$ denotes the
-distribution of policy residuals. The penalty acts on sampled residuals,
-so its effect depends on where those residuals lie, and a fixed $\lambda$
-yields a differently shaped discriminator on every motion. Small $\lambda$
-lets the discriminator approach the delta function and saturate the
-reward; large $\lambda$ smooths it until residuals that differ in
-skill-relevant detail receive the same score. The published
-configurations bear this out: $\lambda$ is set to $0.1$ for the Climb
-clip and to $1$ for the other humanoid clips, and to different values
-again for a biped, a quadruped, and a planar walker, while removing the
-penalty altogether fails \cite{zhang2025add}. How those values were
-chosen is not reported; what they document is that no single value served
-all settings. Locating the window between the two failures is the tuning
-that the learned aggregation was meant to remove; the next section shows
-that $\lambda$ is asked to do two separable jobs and does each without
-it.
+or with a Lipschitz-bounded parameterization, where $q_\pi$ denotes the
+policy-residual distribution \cite{zhang2025add}. These controls shape
+how the critic responds over the sampled differential space; the numerical
+score range is a separate property of the learned function and of the
+reward transform.
 
 \section{DARE: Differential Adversarial Reward Equalization}
 \label{sec:dare}
@@ -312,27 +287,25 @@ motion or its phase. Differentials produced by the current policy,
 together with recently visited differentials kept in a replay buffer,
 form the distribution $q_\pi$ of non-ideal residuals.
 
-The remaining question is how to turn $\Delta$ into a scalar the policy
-can maximize. Rather than assigning a price to each block, we ask a critic
-to recognize the ideal point. Let
+DARE learns a scalar reward from this differential by training a critic to
+recognize the ideal point. Let
 $D_\theta(\Delta)=\sigma\bigl(f_\theta(\Delta)\bigr)$ be the probability
 that a differential is ideal, where $\sigma$ is the logistic sigmoid and
 $f_\theta:\mathbb{R}^d\to\mathbb{R}$ is a scalar score. The origin is the
-positive class and residuals drawn from $q_\pi$ are the negative class, so
-the critic plays the usual two-player game,
+ideal class and residuals drawn from $q_\pi$ form the non-ideal class, so
+the critic is trained with
 \begin{equation}
  \max_{\theta}\;
  \log D_\theta(0)
  +\mathbb{E}_{\Delta\sim q_\pi}\bigl[\log\bigl(1-D_\theta(\Delta)\bigr)\bigr].
  \label{eq:game}
 \end{equation}
-The first term asks the critic to accept perfect imitation; the second
-asks it to reject the residuals of the current controller and, through
-the replay in $q_\pi$, its recent history. Maximizing~\eqref{eq:game} is
-the same as minimizing the balanced Bernoulli negative log-likelihood of
-the labeling; writing $-\log\sigma(z)=\operatorname{softplus}(-z)$ and
-$-\log\bigl(1-\sigma(z)\bigr)=\operatorname{softplus}(z)$ puts it in the
-form we work with,
+The first term accepts perfect imitation and the second rejects residuals
+from the current controller and its recent replay history. Maximizing
+\eqref{eq:game} is equivalent to minimizing the balanced Bernoulli
+negative log-likelihood. Using
+$-\log\sigma(z)=\operatorname{softplus}(-z)$ and
+$-\log\bigl(1-\sigma(z)\bigr)=\operatorname{softplus}(z)$ gives
 \begin{equation}
  \mathcal{L}_{\mathrm{DARE}}(\theta)
  =\tfrac12\operatorname{softplus}\bigl[-f_\theta(0)\bigr]
@@ -340,67 +313,61 @@ form we work with,
   \operatorname{softplus}\bigl[f_\theta(\Delta)\bigr].
  \label{eq:dare_loss}
 \end{equation}
-This is the differential objective of Section~\ref{sec:learned} without
-its penalty. The labels state only whether a differential is ideal; the
-relative importance of root, pose, and velocity residuals is left to
-$f_\theta$, which estimates it from the residual distribution of the
-current policy and re-estimates it as $q_\pi$ concentrates; this adaptive
-aggregation is what replaces the manual scalarization~\eqref{eq:hand}.
+The labels specify only whether a differential is ideal; they do not
+prescribe how root, pose, and velocity errors should be traded against one
+another. Their aggregation is represented by $f_\theta$ and adapts as the
+residual distribution $q_\pi$ evolves during policy learning.
 
-The critic's verdict is the reward. $D_\theta(\Delta_t)$ is the
-probability that the residual at step $t$ is ideal, so the policy should
-be paid the more, the smaller $1-D_\theta(\Delta_t)$ is; the conversion
-used by AMP and ADD implements exactly this, and in terms of the score it
-is a softplus:
+The critic score is converted into the policy reward as
 \begin{equation}
  r_t^{\mathrm{DARE}}
  =-\beta\log\bigl[1-D_\theta(\Delta_t)\bigr]
  =\beta\operatorname{softplus}\bigl[f_\theta(\Delta_t)\bigr],
  \label{eq:reward}
 \end{equation}
-with a fixed amplitude $\beta$ shared by every skill. The reward is
-non-negative, so it also pays the policy for staying alive, and it grows
-without bound as the critic becomes more confident that the residual is
-ideal; the same $f_\theta$ aggregates every tracking objective, so the
-policy never consults a component distance, a success threshold, or a
-component coefficient. What keeps~\eqref{eq:dare_loss} from producing the
-delta function---and~\eqref{eq:reward} from collapsing to zero on every
-state the policy visits---is not a penalty but the function class of
-$f_\theta$; the next two subsections choose that class so that its
-geometry treats the objectives fairly and its scale suits the reward.
+where the reward amplitude $\beta$ is fixed and shared across all motions.
+Higher critic scores correspond to residuals judged closer to the ideal and
+therefore produce larger rewards. The same learned scalar function
+aggregates all tracking feature groups, without component-wise reward
+weights or success thresholds.
+
+This formulation leaves two design requirements for the critic. First,
+feature groups with different dimensionalities should enter the learned
+aggregation on comparable footing rather than being favored by their
+representation size. Second, the numerical range of the critic score
+should remain compatible with the region in which~\eqref{eq:reward} is
+informative. Sections~\ref{sec:critic} and~\ref{sec:calib} address these
+requirements separately through critic equalization and score calibration.
 
 \subsection{Equalized Critic: Geometry by Construction}
 \label{sec:critic}
-In the general differential of Section~\ref{sec:learned}, every objective
-contributes one entry. For the $g$-th motion feature that entry is the
-distance $l^g=\|\Delta_g\|_2$: a scalar that is $1$-Lipschitz in
-$\Delta_g$ and vanishes exactly at the ideal point, and whose partial
-derivative is the objective's weight. The tracking differential drops the
-scalar and hands the critic the $d_g$ coordinates of $\Delta_g$ directly,
-and a dense first layer treats them as follows. After per-coordinate
-normalization every coordinate has unit typical magnitude, so
-$\|\Delta_g\|_2$ grows like $\sqrt{d_g}$: an $84$-dimensional
-body-rotation residual is about five times longer than a $3$-dimensional
-root-position residual of the same per-coordinate size. Suppose the first
-layer is a single dense map $W=[W_1\;\cdots\;W_G]$ whose gain is bounded,
-$\sigma_{\max}(W)\le1$---the constraint we impose on every layer below to
-obtain the geometric guarantee. Along any unit output direction $u$,
+We use ``critic geometry'' to mean how rapidly its score can change when a
+differential changes, namely its local sensitivity and global Lipschitz
+bound. In the general differential of Section~\ref{sec:learned}, each
+objective contributes one entry. Tracking instead exposes the $d_g$
+coordinates of each feature block $\Delta_g$ directly. After
+per-coordinate normalization, if coordinates have comparable typical
+magnitudes, the block norm $\|\Delta_g\|_2$ grows with $\sqrt{d_g}$.
+Consequently, a shared first layer can couple representation dimensionality
+to the sensitivity allocated to each semantic block. Let that layer be the
+dense map $W=[W_1\;\cdots\;W_G]$ and let $\sigma_{\max}(W)$ denote its
+largest possible input amplification. Imposing $\sigma_{\max}(W)\le1$
+limits the gain of the complete map. Along any unit output direction $u$,
 \begin{equation}
  \sum_{g=1}^{G}\bigl\|W_g^{\!\top}u\bigr\|_2^2
  =\bigl\|W^{\!\top}u\bigr\|_2^2\le 1,
  \label{eq:budget}
 \end{equation}
-so the $G$ blocks share one unit of gain in every output unit, and
-gradient descent allocates that unit in proportion to the raw norms of
-the blocks. The critic sees anonymous coordinates rather than objectives,
-and the weights it learns follow the feature layout rather than the
-skill. Root tracking is indeed where differential discriminators have
-been reported to be least precise \cite{zhang2025add}.
+so the blocks share one overall sensitivity budget in each output
+direction. A dense layer therefore does not provide independent gain
+bounds for the semantic blocks; its effective allocation is entangled with
+the representation presented to it.
 
-DARE restores the per-objective structure without returning to a scalar.
-Each factor $\Delta_g\in\mathbb{R}^{d_g}$ is mapped by its own affine map
-and a $1$-Lipschitz activation $\rho$ to an equal-width latent, and the
-latents are concatenated:
+DARE preserves the vector differential while separating the semantic
+blocks before they interact. Each factor $\Delta_g\in\mathbb{R}^{d_g}$
+is mapped by its own affine map and a $1$-Lipschitz activation $\rho$ to a
+latent representation of a common width, and the representations are
+concatenated:
 \begin{equation}
  \begin{aligned}
  \Phi_\oplus(\Delta)
@@ -412,13 +379,12 @@ latents are concatenated:
  \label{eq:directsum}
 \end{equation}
 where $W_g\in\mathbb{R}^{m\times d_g}$ and every factor receives the same
-latent width $m$. Each $\psi_g$ is $1$-Lipschitz in $\Delta_g$, exactly as
-$l^g$ was; with $m=1$ and $W_g$ fixed to a unit row it reduces to a scalar
-loss, and with $m>1$ and learned $W_g$ it is a vector-valued loss that
-keeps the direction of the residual and adapts to the geometry of its
-block. The direct sum keeps each $\psi_g$ in its own slot, so what follows
-receives one equal-width entry per objective, as in the general form. A
-shared trunk then scores the
+latent width $m$. Each $\psi_g$ is a scalar- or vector-valued representation
+of its block with a $1$-Lipschitz bound; $m=1$ gives a scalar-valued map,
+whereas $m>1$ retains a vector representation and can preserve more of the
+block's residual structure. The direct sum keeps each representation in
+its own slot, so the next stage receives one equal-width entry per
+objective. A shared trunk then scores the
 concatenation, $g_\theta(\Delta)=\bar{T}(\Phi_\oplus(\Delta))$ with
 $\bar{T}(h)=\bar{w}^{\!\top}\rho(\bar{V}h+c)+b$, whose linear maps are
 spectrally normalized in the same way so that
@@ -432,12 +398,13 @@ lives; the anchor $g_\theta(0)$ thus depends on every layer and is trained
 by the positive sample like any other point, while spectral normalization
 keeps each map non-expansive regardless of the offsets.
 
-Equalization gives every objective the same latent capacity and the same
-gain bound before interaction. In contrast to~\eqref{eq:budget}, each
-factor in~\eqref{eq:directsum} owns its output coordinates and attains
-$\sigma_{\max}(\bar{W}_g)=1$ independently of the others. Because the
-blocks act on disjoint outputs, their gains add in quadrature instead of
-competing: for any two differentials,
+The direct-sum construction gives every objective the same latent width and
+an independent gain bound before interaction; it does not assert that the
+objectives have equal importance or equal residual norm. In contrast to
+the shared bound in~\eqref{eq:budget}, each factor in~\eqref{eq:directsum}
+has its own normalized map. Because the outputs are disjoint, their
+distances combine by a root-sum-square identity: for any two
+differentials,
 \begin{equation}
  \begin{aligned}
  \bigl\|\Phi_\oplus(\Delta)-\Phi_\oplus(\Delta')\bigr\|_2^2
@@ -447,22 +414,11 @@ competing: for any two differentials,
  \end{aligned}
  \label{eq:nonexp}
 \end{equation}
-since each block has Lipschitz constant at most one and the norm of a
-concatenation is the root-sum of the block norms. The Jacobian of
-$\Phi_\oplus$ is block diagonal across factors, so a perturbation in one
-semantic subspace cannot be amplified through the coordinates of another,
-and all $G$ factors attain unit gain simultaneously while the layer as a
-whole stays non-expansive. The weight of objective $g$,
-$\omega_g=\|\partial g_\theta/\partial\Delta_g\|_2$, is then bounded by
-the trunk's sensitivity to its slot,
-$\omega_g\le\|\partial g_\theta/\partial h_g\|_2$ with
-$h_g=\psi_g(\Delta_g)$. The trunk still divides one unit of sensitivity
-among the slots, but that division is now learned from the residual
-distribution rather than dictated by coordinate count: the first layer no
-longer lets a long block crowd out a short one before the trunk has seen
-either. Equalization equalizes capacity and gain; it does not equalize
-the norms $\|\Delta_g\|$, which are the sufficient statistics of each
-block's evidence and are left intact.
+since each block has Lipschitz constant at most one. Thus a perturbation in
+one semantic subspace cannot be amplified through the coordinates of
+another before the shared trunk processes the slots. The trunk can still
+learn different sensitivities from the residual distribution, but this
+allocation is no longer forced by unequal input widths at the first map.
 
 The unique ideal point now gives the geometric guarantee. Because every
 perfect pair occupies the origin, the quantity that governs reward
@@ -474,32 +430,32 @@ combining~\eqref{eq:nonexp} with $\operatorname{Lip}(\bar{T})\le1$ gives
  \label{eq:bound}
 \end{equation}
 If the realized motion changes only slightly relative to the reference,
-the score changes by no more than the normalized residual; the biases
-cancel in every difference, so they move the critic's activation
-boundaries without loosening the bound. This is the geometric job of the
-gradient penalty in Section~\ref{sec:learned}---nearby residuals must not
-receive arbitrarily different scores---done by the parameterization: it
-holds at initialization, at every training step, and for every motion,
-with no coefficient.
+the score changes by no more than the normalized residual. The biases
+cancel in score differences, so they move activation boundaries without
+loosening the bound. The parameterization therefore provides a
+motion-independent constraint on the score landscape. This is the
+geometric property needed before choosing the numerical score range; the
+next subsection addresses that scale separately.
 
 \subsection{Anchor Calibration: Scale in Closed Form}
 \label{sec:calib}
-The bound~\eqref{eq:bound} says how steep the critic may be. It does not
-say how steep the critic is, and the policy is sensitive to the
-difference, because it receives the score through the fixed
-transform~\eqref{eq:reward}. How much that reward responds to a change in
-the score is its slope,
+The bound~\eqref{eq:bound} limits how steep the critic may be, but it does
+not determine the score range that the trained critic actually uses. The
+policy receives the score through the fixed transform~\eqref{eq:reward},
+so this range determines how sensitive the reward is to tracking quality.
+We therefore measure the score gap between the ideal anchor and a typical
+policy residual. The reward's response to a score change is its slope,
 \begin{equation}
  \frac{\partial r^{\mathrm{DARE}}}{\partial f_\theta}
  =\beta\,\sigma(f_\theta),
  \label{eq:slope}
 \end{equation}
 a sigmoid that rises from $0$ for very negative scores to $\beta$ for very
-positive ones. Only over the transition of this sigmoid does a change in
-the score change the reward. Far below the transition the reward is zero
-however the residual changes; far above it the reward is linear in the
-score and the transform has stopped shaping anything. The critic is
-useful to the policy only where its scores fall on the transition.
+positive ones. Only over this transition does a score change produce a
+substantial change in reward. Far below it the reward is nearly zero even
+when the residual changes; far above it the transform is nearly linear and
+no longer provides a nonlinear shaping signal. The critic is most useful
+when the scores visited by the policy lie across this transition.
 
 Where they fall is decided by the loss, not by the bound. The output bias
 of the critic shifts every score by the same amount, and the
@@ -536,10 +492,10 @@ residual earns nothing either. If $M$ is too small, the ratio of the
 reward slope at the anchor to that at the typical residual,
 $\sigma(M/2)/\sigma(-M/2)=e^{M/2}$, approaches one: the reward is close to
 the constant $\beta\log2$ on every state, survival is rewarded, and the
-differences that distinguish good tracking from bad are compressed. A
-gradient penalty moves $M$ only indirectly, through the critic's slope on
-sampled residuals, so the same $\lambda$ lands $M$ in different places
-for different motions. DARE sets $M$ directly.
+differences that distinguish good tracking from bad are compressed. Any
+regularizer that acts on sampled residuals can move $M$ only indirectly
+through the critic's local slope. DARE instead sets the target score gap
+directly.
 
 Both endpoints must therefore lie on the part of the transition where the
 slope is neither negligible nor saturated, and the question is how wide
@@ -561,11 +517,9 @@ classifier. A larger $M$ drives it toward a hard classifier whose reward
 vanishes on typical residuals, a smaller $M$ toward a coin flip whose
 reward carries no information; keeping an adversarial critic in a band of
 moderate confidence is standard practice \cite{karras2020ada}. The
-convention is fixed a priori and never selected by task outcome, and it
-passes an independent check: on the hardest skill in our benchmark
-(Section~\ref{sec:opexp}), an uncalibrated critic that succeeded reached
-a gap at $t_f$ within $2\%$ of $\ln16$, without either quantity having
-been fitted to the other.
+convention is fixed a priori and is not selected from task outcomes.
+Its empirical effect is assessed through the matched training curves and
+tracking metrics in Section~\ref{sec:learning}.
 
 DARE achieves $M=w$ with one scalar applied to the raw critic $g_\theta$
 of Section~\ref{sec:critic}:
@@ -643,8 +597,7 @@ normalizer $\mathcal{N}$; $\kappa\leftarrow 1$
 
 \section{Experiments}
 \begin{table}[t]
-\caption{DARE configuration, identical for all skills. The calibrated
-scale $\kappa$ is not a setting but the output of~\eqref{eq:kappa}.}
+\caption{DARE configuration shared across all six skills.}
 \label{tab:config}
 \centering
 \small
@@ -663,7 +616,7 @@ Activation $\rho$ & ReLU ($1$-Lipschitz) \\
 Spectral norm.\ & all linear maps, one power iteration \\
 Normalizer $\mathcal{N}$ & per-coordinate mean-abs scale, \\
  & fixed after $10^{8}$ samples (iter.\ $382$) \\
-Calibration & $\kappa=\ln 16/M_f$ at that moment, once \\
+Logit calibration & $\kappa=\ln 16/M_f$, once at iter.~382 \\
 Critic optimizer & SGD, lr $2.5{\times}10^{-4}$, momentum $0.9$ \\
 Critic minibatch & $16384$ current $+$ $16384$ replay \\
 Replay buffer & $2\times 10^{5}$ differentials \\
@@ -673,47 +626,41 @@ Reward amplitude $\beta$ & $2$ \\
 \end{table}
 
 \begin{table*}[t]
-\caption{Tracking performance on six heterogeneous skills. DARE uses one
-configuration on every row. AMP, DeepMimic, and ADD are the results
-published by Zhang \textit{et al.} on the same clips and metrics
-\cite{zhang2025add}; completion is the fraction of DARE episodes that
-satisfy the skill-specific criterion of Section~\ref{sec:setup}. Mean
-$\pm$ std over five seeds; lower error is better. \todo{DARE columns:
-five-seed, random-start evaluation; the Climb and Roll entries shown are
-single-seed, phase-0 preliminary values.}}
+\caption{Tracking performance under the matched training and evaluation
+protocol. All four methods are trained with five seeds and evaluated from
+random reference phases. Lower is better; DARE uses the same configuration
+on all six skills. \todo{Fill all method entries with the five-seed means
+and standard deviations from the matched reruns.}}
 \label{tab:main}
 \centering
 \setlength{\tabcolsep}{3.0pt}
-\begin{tabular}{l c cccc cccc c}
+\begin{tabular}{l c cccc cccc}
 \toprule
  & & \multicolumn{4}{c}{Position [m] $\downarrow$}
- & \multicolumn{4}{c}{DoF vel.\ [rad/s] $\downarrow$}
- & Compl.\ [\%] \\
-\cmidrule(lr){3-6}\cmidrule(lr){7-10}\cmidrule(lr){11-11}
+ & \multicolumn{4}{c}{DoF vel.\ [rad/s] $\downarrow$} \\
+\cmidrule(lr){3-6}\cmidrule(lr){7-10}
 Skill & Len.\ (s)
  & AMP & DeepMimic & ADD & DARE
- & AMP & DeepMimic & ADD & DARE & DARE \\
+ & AMP & DeepMimic & ADD & DARE \\
 \midrule
 Roll      & $2.00$
- & $.141{\pm}.031$ & $.115{\pm}.132$ & $.152{\pm}.005$ & \textcolor{red}{$.047$}
- & $1.576{\pm}.318$ & $.994{\pm}.051$ & $1.330{\pm}.101$ & \textcolor{red}{$.897$}
- & \textcolor{red}{$100$} \\
+ & \tbd & \tbd & \tbd & \tbd
+ & \tbd & \tbd & \tbd & \tbd \\
 Climb     & $9.97$
- & $.185{\pm}.021$ & $.066{\pm}.004$ & $.046{\pm}.031$ & \textcolor{red}{$.029$}
- & $1.190{\pm}.012$ & $.567{\pm}.015$ & $.374{\pm}.071$ & \textcolor{red}{$.496$}
- & \textcolor{red}{$100$} \\
+ & \tbd & \tbd & \tbd & \tbd
+ & \tbd & \tbd & \tbd & \tbd \\
 Backflip  & $1.75$
- & $.267{\pm}.015$ & $.111{\pm}.054$ & $.062{\pm}.001$ & \tbd
- & $2.243{\pm}.113$ & $1.103{\pm}.024$ & $.878{\pm}.013$ & \tbd & \tbd \\
+ & \tbd & \tbd & \tbd & \tbd
+ & \tbd & \tbd & \tbd & \tbd \\
 Crawl     & $2.93$
- & $.050{\pm}.006$ & $.027{\pm}.000$ & $.028{\pm}.002$ & \tbd
- & $.646{\pm}.089$ & $.430{\pm}.006$ & $.283{\pm}.002$ & \tbd & \tbd \\
+ & \tbd & \tbd & \tbd & \tbd
+ & \tbd & \tbd & \tbd & \tbd \\
 Get-Up    & $3.03$
- & $.096{\pm}.018$ & $.023{\pm}.001$ & $.022{\pm}.001$ & \tbd
- & $.838{\pm}.029$ & $.433{\pm}.008$ & $.325{\pm}.005$ & \tbd & \tbd \\
+ & \tbd & \tbd & \tbd & \tbd
+ & \tbd & \tbd & \tbd & \tbd \\
 Spin Kick & $1.28$
- & $.064{\pm}.010$ & $.078{\pm}.062$ & $.025{\pm}.000$ & \tbd
- & $1.453{\pm}.327$ & $1.222{\pm}.233$ & $.774{\pm}.007$ & \tbd & \tbd \\
+ & \tbd & \tbd & \tbd & \tbd
+ & \tbd & \tbd & \tbd & \tbd \\
 \bottomrule
 \end{tabular}
 \end{table*}
@@ -722,9 +669,8 @@ Spin Kick & $1.28$
 \centering
 \setlength{\tabcolsep}{2pt}
 \renewcommand{\arraystretch}{0.8}
-% TODO: the six strips below are cropped from Fig. 2 of Zhang et al. (ADD)
-% and serve only as layout placeholders. Replace every strip with our own
-% real-robot photographs before submission.
+% TODO: the six strips below are layout placeholders. Replace every strip
+% with our own real-robot photographs before submission.
 \begin{tabular}{@{}c@{}}
 \includegraphics[width=0.99\textwidth]{figures/ph_climb_10.png}\\[-1pt]
 {\footnotesize (a) Climb}\\[2pt]
@@ -741,138 +687,109 @@ Spin Kick & $1.28$
 \end{tabular}
 \caption{DARE policies executing the six skills on hardware
 \todo{platform}. Frames are equally spaced in time; the two longer clips
-are shown with ten frames, the four shorter clips with five. One
-configuration produced every controller shown. \todo{All strips are
-placeholders cropped from the ADD paper's Fig.~2 and must be replaced by
-our own robot photographs, with the reference motion overlaid or shown
-alongside.}}
+are shown with ten frames, the four shorter clips with five. All controllers
+are trained using the shared DARE configuration in Table~\ref{tab:config}.
+\todo{Replace the placeholder strips with our own robot photographs, with
+the reference motion overlaid or shown alongside.}}
 \label{fig:snapshots}
 \end{figure*}
 
-\subsection{Setup}
+\subsection{Experimental Setup}
 \label{sec:setup}
-All methods control the $28$-DoF, $15$-body simulated humanoid of
-DeepMimic and ADD with PD joint targets at $30\,\mathrm{Hz}$ in Isaac Lab
-($120\,\mathrm{Hz}$ physics) \cite{mittal2023isaaclab,makoviychuk2021isaacgym}.
-Episodes start at a random reference phase and terminate on undesired
-ground contact; DeepMimic, ADD, and DARE use pose termination with a unit
-threshold, AMP follows its standard protocol without it. Each policy is
-trained for $2000$ iterations of $8192$ environments $\times$ $32$ steps
-($5.24\times10^8$ samples); the input normalizer is fixed after $10^{8}$
-samples, at iteration $382$, where DARE calibrates. Actor and value
-networks are two-layer MLPs ($1024$, $512$); PPO settings (clip $0.2$, GAE
-$0.95$, $\gamma=0.99$, SGD with momentum $0.9$) are shared by all
-learned-reward methods.
+All methods are evaluated using the same $28$-DoF, $15$-body humanoid
+model adopted in prior physics-based motion-imitation studies. Simulation
+runs in Isaac Lab at $120\,\mathrm{Hz}$, with policy actions applied at
+$30\,\mathrm{Hz}$ through PD joint-position control
+\cite{mittal2023isaaclab,makoviychuk2021isaacgym}. All four methods are
+trained under the same simulation environment, training budget, motion
+clips, random-phase initialization, and evaluation protocol. Each policy
+is trained for $2000$ iterations of $8192$ environments $\times$ $32$
+steps ($5.24\times10^8$ samples), with five independent seeds, and is
+evaluated on $4096$ episodes per seed from randomly sampled reference
+phases. Actor and value networks are two-layer MLPs ($1024$, $512$), and
+the PPO settings (clip $0.2$, GAE $0.95$, $\gamma=0.99$, SGD with
+momentum $0.9$) are fixed across methods. DARE additionally uses the
+normalizer and one-shot logit calibration specified in
+Table~\ref{tab:config}; the normalizer is fixed after $10^8$ samples
+(iteration $382$).
 
-The six skills span distinct dynamical regimes: cyclic ground rotation
-(Roll, $2.00\,\mathrm{s}$), long-horizon object interaction (Climb,
-$9.97\,\mathrm{s}$), aerial inversion (Backflip, $1.75\,\mathrm{s}$),
-prone locomotion (Crawl, $2.93\,\mathrm{s}$), recumbent recovery (Get-Up,
-$3.03\,\mathrm{s}$), and a ballistic kick (Spin Kick, $1.28\,\mathrm{s}$).
-We report position tracking error in meters---the root displacement and
-the root-relative joint displacements averaged over joints and
-frames---and DoF-velocity error in radians per second, the two quantities
-used by prior humanoid tracking studies \cite{zhang2025add}. In
-Table~\ref{tab:main} the AMP, DeepMimic, and ADD entries are the
-published results on the same clips and metrics; the curves in
-Fig.~\ref{fig:operating} come from our own runs of all four methods under
-the protocol above, each baseline with its published training settings,
-and every DARE run uses Table~\ref{tab:config}. Each method is trained
-with five seeds and evaluated on $4096$ episodes from random reference
-phases per seed (mean $\pm$ std over seeds). Because a frame error can
-stay moderate while the motion is never performed, we also report
-completion: an episode counts as complete if it survives to the end of
-the clip and passes a skill-specific test fixed in advance---one full
-signed revolution of the root for Roll; ascent, descent, and foot
-clearance of the box for Climb; height gain and an upright landing for
-Backflip; forward progress for Crawl; a standing final height for Get-Up;
-root yaw progress for Spin Kick. \todo{confirm the Spin Kick criterion
-against the evaluation code}
+The benchmark contains six skills with substantially different motion
+durations, contact patterns, and dynamical characteristics: Roll, Climb,
+Backflip, Crawl, Get-Up, and Spin Kick. Training termination follows each
+method's environment configuration (pose termination is enabled for
+DeepMimic, ADD, and DARE and disabled for AMP). The evaluation harness
+accumulates tracking errors over the executed reference-aligned steps;
+\todo{state the final common handling of early-terminated trajectories
+and any padding or fixed-horizon rule after the evaluation protocol is
+locked.}
 
-\todo{Hardware paragraph, to be written once deployment is done: name the
-robot and its degrees of freedom; how the six reference clips were
-retargeted to it; that the same DARE configuration of
-Table~\ref{tab:config} was used to train the deployed policies on the
-robot's model without any change to the reward or the calibration rule;
-the sim-to-real measures (domain randomization, observation noise, action
-filtering) and the control frequency on hardware; and how many trials per
-skill were executed and how many completed.}
+For an evaluation trajectory with $B$ bodies and $J$ actuated DoFs, the
+reported position metric is the code-defined
+\begin{equation}
+ E_{\mathrm{pos}}=\frac{\lVert\hat{r}-r\rVert_2+
+ \sum_{b=1}^{B-1}\left\lVert(\hat{p}_b-\hat{r})-(p_b-r)\right\rVert_2}{B},
+ \label{eq:paper_pos}
+\end{equation}
+where $r$ and $p_b$ are the simulated root and body positions and hats
+denote reference values. The velocity metric is
+\begin{equation}
+ E_{\mathrm{vel}}=\frac{1}{J}\sum_{j=1}^{J}
+ \left|\hat{\dot q}_j-\dot q_j\right| .
+ \label{eq:paper_vel}
+\end{equation}
+Both metrics are averaged over the evaluation trajectories; lower is
+better.
 
 \subsection{Cross-Motion Tracking}
 Table~\ref{tab:main} asks whether one configuration can serve skills
 whose contacts, horizons, and velocity profiles differ, and
 Fig.~\ref{fig:snapshots} shows the resulting controllers executing the
-six skills on hardware. Roll is
-a cyclic ground skill in which root travel and body rotation must stay in
-phase; a policy that lies down and stands up again achieves a moderate
-frame error while missing the motion entirely, and this is the reported
-failure mode of differential discriminators on this clip
-\cite{zhang2025add}. Climb is a ten-second sequence of hand and foot
-contacts with a box, where an early slip forecloses the rest of the clip;
-Backflip demands a precise landing velocity, Crawl turns small orientation
-errors into large position errors, Get-Up must discover a contact sequence
-that restores stance, Spin Kick is short and ballistic.
-
-On Roll, DARE completes the revolution (winding ratio $1.02$, phase
-alignment $1.0$) with a position error of $0.047\,\mathrm{m}$, less than
-half the best published value for this clip. On Climb, all evaluated
-episodes complete the ascent and descent, with position error
-$0.029\,\mathrm{m}$ against the published $0.046\,\mathrm{m}$ and
-DoF-velocity error $0.496\,\mathrm{rad/s}$ against $0.374\,\mathrm{rad/s}$. \todo{Replace with five-seed, random-start
-statistics; report the remaining four skills; state on how many skills
-DARE matches or improves the best published tracking error and where the
-equalized differential helps most; compare seed spreads with DeepMimic on
-Roll, Backflip, and Spin Kick, where handcrafted rewards show wide seed
-bands in the published results.} \todo{Hardware results: trials and
-completions per skill on the robot, and which skills transferred without
-adjustment.}
+six skills on hardware. Using one shared configuration, DARE is evaluated
+against the three baselines under the matched protocol of
+Section~\ref{sec:setup}. \todo{Summarize the five-seed position and
+velocity results across all six skills, including the number of motions on
+which DARE is competitive with the strongest baseline and the observed
+seed variation.}
 
 \begin{figure*}[t]
 \centering
 \fbox{\parbox[c][1.6in][c]{0.97\textwidth}{\centering
-\todo{Figure, two panels. (a)~Anchor gap $M$ versus iteration for the six
-skills (one curve each); mark $t_f$ and the level $\ln16$. Before $t_f$
-the curves sit at skill-dependent heights, at $t_f$ they all land on the
-line, afterwards they contract together. (b)~Position tracking error
-versus environment samples for AMP, DeepMimic, ADD, and DARE on Roll and
-Climb; seed means with standard-deviation bands; matched budget.}}}
-\caption{(a)~Where the critic operates: calibration places the anchor and
-the typical residual at the ends of the reward slope's transition at
-$t_f$, whatever the skill. (b)~Learning curves on two representative
-regimes.}
-\label{fig:operating}
+\todo{Learning curves: position tracking error versus environment samples
+for AMP, DeepMimic, ADD, and DARE on Roll and Climb; seed means with
+standard-deviation bands under a matched sample budget.}}}
+\caption{Learning curves under the matched training and evaluation
+protocol. Roll and Climb represent substantially different motion
+durations and contact structures; curves show seed means and shaded regions
+show standard deviations.}
+\label{fig:learning}
 \end{figure*}
 
-\subsection{Operating Point and Learning Curves}
-\label{sec:opexp}
-The operating-point analysis complements the cross-motion results by
-measuring the score separation targeted by DARE's calibration. The
-equalized critic supplies the corresponding geometric constraint by
-construction, separating scale control from critic geometry.
-Figure~\ref{fig:operating}(a) shows the anchor gap $M$ over training:
-before $t_f$ each skill's critic separates the anchor from its residuals
-by a different amount, at $t_f$ the rule brings every skill to $\ln16$,
-and afterwards the gaps contract together as the residuals shrink toward
-the anchor. \todo{Report
-the range of uncalibrated gaps at $t_f$ across the six skills, and the
-fraction $M_f/\mathbb{E}\|\Delta\|$ of the bound the trained critic uses
-(about $0.2$--$0.3$ on Climb in preliminary measurements).} On the two
-skills completed so far the uncalibrated gap was within $2\%$ of $\ln16$
-on Climb and $13\%$ above it on Roll, and by the end of training both had
-settled to the same typical-residual score, $-1.01$: the scale fixed at
-$t_f$ is thereafter motion-agnostic in the reward slope on the states the
-policy visits. Panel~(b) plots position error against environment samples
-under a matched budget; solid curves are seed means, shaded regions
-standard deviations. \todo{Describe convergence speed, final plateau, and
-seed consistency of DARE relative to AMP, DeepMimic, and ADD.}
+\subsection{Learning Dynamics}
+\label{sec:learning}
+Figure~\ref{fig:learning} plots position error against environment samples
+under a matched budget. The two displayed skills differ in duration and
+contact structure, so the figure tests whether one configuration yields a
+consistent learning trajectory rather than only a final score.
+\todo{Describe convergence speed, final plateau, and seed consistency of
+DARE relative to AMP, DeepMimic, and ADD after the matched multi-seed
+runs.}
+
+\subsection{Hardware Deployment}
+\label{sec:hardware}
+\todo{Report the robot platform and its degrees of freedom, reference
+retargeting, domain randomization, observation noise, action filtering,
+hardware control frequency, and the number of trials and successful
+executions for each skill. State that the shared DARE reward formulation
+and calibration rule are used without motion-specific modification.}
 
 \section{Conclusion}
 Manual tracking rewards turn the aggregation of heterogeneous imitation
-objectives into per-motion engineering, and learned differential rewards,
-having removed the weights, leave one coefficient that must still be
-found per motion because it decides two things at once: how steep the
-critic may be and how far the typical residual is pushed from the anchor.
-DARE decides each separately, with no coefficient chosen per motion.
+objectives into per-motion engineering. Learned differential rewards
+remove the component-wise weights, but regularization can still couple the
+critic's geometric sensitivity to the score range seen by the policy.
+DARE treats these as separate design quantities: the factorized critic
+specifies the geometry, and one closed-form calibration sets the score
+scale without a motion-specific coefficient.
 Every objective enters through its own spectrally normalized slot, so a
 three-dimensional root residual and an eighty-four-dimensional rotation
 residual stand on equal footing and the score change relative to the
