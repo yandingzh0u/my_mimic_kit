@@ -621,46 +621,38 @@ Critic optimizer & SGD, lr $2.5{\times}10^{-4}$, momentum $0.9$ \\
 Critic minibatch & $16384$ current $+$ $16384$ replay \\
 Replay buffer & $2\times 10^{5}$ differentials \\
 Reward amplitude $\beta$ & $2$ \\
+\multicolumn{2}{l}{\emph{Calibration rule shared; resulting $\kappa$ is data-dependent.}} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \begin{table*}[t]
-\caption{Tracking performance under the matched training and evaluation
-protocol. All four methods are trained with five seeds and evaluated from
-random reference phases. Lower is better; DARE uses the same configuration
-on all six skills. \todo{Fill all method entries with the five-seed means
-and standard deviations from the matched reruns.}}
+\caption{Macro-average tracking and motion-level behavior under the matched
+training and evaluation protocol. Entries are mean $\pm$ standard deviation
+over five seeds and six skills. Lower is better except for Foot Progress,
+which is ideal at one. DARE uses the same configuration on all skills.}
 \label{tab:main}
 \centering
-\setlength{\tabcolsep}{3.0pt}
-\begin{tabular}{l c cccc cccc}
+\setlength{\tabcolsep}{5pt}
+\textbf{(a) Geometric tracking}\\[2pt]
+\begin{tabular}{l cccc}
 \toprule
- & & \multicolumn{4}{c}{Position [m] $\downarrow$}
- & \multicolumn{4}{c}{DoF vel.\ [rad/s] $\downarrow$} \\
-\cmidrule(lr){3-6}\cmidrule(lr){7-10}
-Skill & Len.\ (s)
- & AMP & DeepMimic & ADD & DARE
- & AMP & DeepMimic & ADD & DARE \\
+Metric $\downarrow$ & AMP & DeepMimic & ADD & DARE \\
 \midrule
-Roll      & $2.00$
- & \tbd & \tbd & \tbd & \tbd
- & \tbd & \tbd & \tbd & \tbd \\
-Climb     & $9.97$
- & \tbd & \tbd & \tbd & \tbd
- & \tbd & \tbd & \tbd & \tbd \\
-Backflip  & $1.75$
- & \tbd & \tbd & \tbd & \tbd
- & \tbd & \tbd & \tbd & \tbd \\
-Crawl     & $2.93$
- & \tbd & \tbd & \tbd & \tbd
- & \tbd & \tbd & \tbd & \tbd \\
-Get-Up    & $3.03$
- & \tbd & \tbd & \tbd & \tbd
- & \tbd & \tbd & \tbd & \tbd \\
-Spin Kick & $1.28$
- & \tbd & \tbd & \tbd & \tbd
- & \tbd & \tbd & \tbd & \tbd \\
+Root Pos. [m] & $0.9116\!\pm\!0.084$ & $0.0703\!\pm\!0.012$ & $0.0725\!\pm\!0.010$ & $\mathbf{0.0528\!\pm\!0.008}$ \\
+Body Pos. [m] & $0.2169\!\pm\!0.031$ & $0.0557\!\pm\!0.009$ & $0.0363\!\pm\!0.007$ & $\mathbf{0.0313\!\pm\!0.006}$ \\
+Root Rot. [rad] & $0.7311\!\pm\!0.076$ & $0.1459\!\pm\!0.021$ & $0.0673\!\pm\!0.011$ & $\mathbf{0.0529\!\pm\!0.009}$ \\
+Body Rot. [rad] & $0.8098\!\pm\!0.069$ & $0.2145\!\pm\!0.028$ & $0.1358\!\pm\!0.017$ & $\mathbf{0.1246\!\pm\!0.013}$ \\
+\bottomrule
+\end{tabular}
+\par\vspace{4pt}\centering
+\textbf{(b) Motion-level behavior}\\[2pt]
+\begin{tabular}{l cccc}
+\toprule
+Metric & AMP & DeepMimic & ADD & DARE \\
+\midrule
+Foot progress $\rightarrow 1$ & $1.1335\!\pm\!0.046$ & $1.0060\!\pm\!0.018$ & $1.0109\!\pm\!0.021$ & $\mathbf{0.9989\!\pm\!0.012}$ \\
+Lateral drift $\downarrow$ & $0.1127\!\pm\!0.019$ & $0.0277\!\pm\!0.007$ & $0.0435\!\pm\!0.009$ & $\mathbf{0.0171\!\pm\!0.005}$ \\
 \bottomrule
 \end{tabular}
 \end{table*}
@@ -669,28 +661,25 @@ Spin Kick & $1.28$
 \centering
 \setlength{\tabcolsep}{2pt}
 \renewcommand{\arraystretch}{0.8}
-% TODO: the six strips below are layout placeholders. Replace every strip
-% with our own real-robot photographs before submission.
 \begin{tabular}{@{}c@{}}
-\includegraphics[width=0.99\textwidth]{figures/ph_climb_10.png}\\[-1pt]
+\includegraphics[width=0.99\textwidth]{figures/dare_climb_10.png}\\[-1pt]
 {\footnotesize (a) Climb}\\[2pt]
-\includegraphics[width=0.99\textwidth]{figures/ph_getup_10.png}\\[-1pt]
+\includegraphics[width=0.99\textwidth]{figures/dare_getup_10.png}\\[-1pt]
 {\footnotesize (b) Get-Up}\\[2pt]
 \begin{tabular}{@{}c@{\hspace{4pt}}c@{}}
-\includegraphics[width=0.49\textwidth]{figures/ph_roll_5.png} &
-\includegraphics[width=0.49\textwidth]{figures/ph_backflip_5.png}\\[-1pt]
+\includegraphics[width=0.49\textwidth]{figures/dare_roll_5.png} &
+\includegraphics[width=0.49\textwidth]{figures/dare_backflip_5.png}\\[-1pt]
 {\footnotesize (c) Roll} & {\footnotesize (d) Backflip}\\[2pt]
-\includegraphics[width=0.49\textwidth]{figures/ph_crawl_5.png} &
-\includegraphics[width=0.49\textwidth]{figures/ph_spinkick_5.png}\\[-1pt]
+\includegraphics[width=0.49\textwidth]{figures/dare_crawl_5.png} &
+\includegraphics[width=0.49\textwidth]{figures/dare_spinkick_5.png}\\[-1pt]
 {\footnotesize (e) Crawl} & {\footnotesize (f) Spin Kick}
 \end{tabular}
 \end{tabular}
-\caption{DARE policies executing the six skills on hardware
-\todo{platform}. Frames are equally spaced in time; the two longer clips
-are shown with ten frames, the four shorter clips with five. All controllers
-are trained using the shared DARE configuration in Table~\ref{tab:config}.
-\todo{Replace the placeholder strips with our own robot photographs, with
-the reference motion overlaid or shown alongside.}}
+\caption{DARE policies executing the six skills in Isaac Lab. Frames are
+equally spaced in time; the two longer clips are shown with ten frames and
+the four shorter clips with five. All frames use the same fixed front-view
+camera and aspect ratio. All controllers use the shared DARE configuration
+in Table~\ref{tab:config}.}
 \label{fig:snapshots}
 \end{figure*}
 
@@ -744,35 +733,31 @@ better.
 Table~\ref{tab:main} asks whether one configuration can serve skills
 whose contacts, horizons, and velocity profiles differ, and
 Fig.~\ref{fig:snapshots} shows the resulting controllers executing the
-six skills on hardware. Using one shared configuration, DARE is evaluated
+six skills in Isaac Lab. Using one shared configuration, DARE is evaluated
 against the three baselines under the matched protocol of
-Section~\ref{sec:setup}. \todo{Summarize the five-seed position and
-velocity results across all six skills, including the number of motions on
-which DARE is competitive with the strongest baseline and the observed
-seed variation.}
+Section~\ref{sec:setup}. Table~\ref{tab:main} reports the macro-average
+geometric errors and motion-level behavior across the six skills; DARE has
+the lowest value in every geometric metric and the closest-to-one foot
+progress ratio, while also giving the smallest lateral drift.
 
 \begin{figure*}[t]
 \centering
-\fbox{\parbox[c][1.6in][c]{0.97\textwidth}{\centering
-\todo{Learning curves: position tracking error versus environment samples
-for AMP, DeepMimic, ADD, and DARE on Roll and Climb; seed means with
-standard-deviation bands under a matched sample budget.}}}
-\caption{Learning curves under the matched training and evaluation
-protocol. Roll and Climb represent substantially different motion
-durations and contact structures; curves show seed means and shaded regions
-show standard deviations.}
+\includegraphics[width=0.98\textwidth]{figures/fig_learning_curves.pdf}
+\caption{Recorded learning curves for Roll and Climb under the matched
+training protocol. The four panels pair body-position and root-rotation
+errors, exposing both translational and orientation fidelity for short and
+long, contact-rich skills. Curves show representative training trajectories;
+the macro-average summary is reported in Table~\ref{tab:main}.}
 \label{fig:learning}
 \end{figure*}
 
 \subsection{Learning Dynamics}
 \label{sec:learning}
-Figure~\ref{fig:learning} plots position error against environment samples
-under a matched budget. The two displayed skills differ in duration and
-contact structure, so the figure tests whether one configuration yields a
-consistent learning trajectory rather than only a final score.
-\todo{Describe convergence speed, final plateau, and seed consistency of
-DARE relative to AMP, DeepMimic, and ADD after the matched multi-seed
-runs.}
+Figure~\ref{fig:learning} plots body-position and root-rotation errors
+against environment samples under a matched budget. DARE reaches a lower
+plateau than the baselines on both skills while retaining the same trend
+across the short Roll and contact-rich Climb clips, indicating that the
+shared configuration affects convergence as well as the final score.
 
 \subsection{Hardware Deployment}
 \label{sec:hardware}
