@@ -10,6 +10,8 @@
 \newcommand{\vect}[1]{\mathbf{#1}}
 \newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
 \newcommand{\tbd}{\textcolor{red}{TODO}}
+% Temporary ablation dispersions; replace with the measured three-seed values.
+\newcommand{\draftval}[1]{\textcolor{red}{#1}}
 \setcounter{topnumber}{3}
 \setcounter{dbltopnumber}{3}
 \setcounter{totalnumber}{4}
@@ -603,41 +605,22 @@ automatically with each motion's residual distribution.
 
 \subsection{Training}
 Training alternates rollout collection, differential construction, critic
-updates, and PPO updates (Algorithm~\ref{alg:dare}). Critic minibatches
-draw an equal mixture of current and replay differentials, with the ideal
-point presented once per minibatch as the positive class; at $t_f$,
-before the rewards of that iteration are computed, $M_f$ is measured with
-the critic in evaluation mode and $\kappa$ is set by~\eqref{eq:kappa}. One
-critic, one reward, one policy, and one calibration rule make up the whole
-loop.
+updates, and PPO updates. Critic minibatches draw an equal mixture of
+current and replay differentials, with the ideal point presented once per
+minibatch as the positive class. At $t_f$, before the rewards of that
+iteration are computed, $M_f$ is measured with the critic in evaluation mode
+and $\kappa$ is set by~\eqref{eq:kappa}. The complete interaction among
+rollout collection, residual construction, critic evaluation, calibration,
+and policy optimization is summarized in Fig.~\ref{fig:pipeline}.
 
-\begin{algorithm}[t]
-\caption{DARE Training}
-\label{alg:dare}
-\small
-\begin{algorithmic}[1]
-\REQUIRE reference motion $\mathcal{M}$, policy $\pi_\varphi$,
-value $V_\omega$, raw critic $g_\theta$, replay buffer $\mathcal{B}$,
-normalizer $\mathcal{N}$; $\kappa\leftarrow 1$
-\FOR{iteration $t=1,2,\ldots$}
-  \STATE Collect a synchronized rollout with $\pi_\varphi$ from random
-  reference phases; construct $\Delta_t$ by~\eqref{eq:delta}; add to $\mathcal{B}$
-  \IF{$\mathcal{N}$ was fixed this iteration}
-    \STATE $\bar g\leftarrow\sigma^{-1}\bigl(\mathbb{E}_{\mathcal{B}\cup\text{rollout}}\,\sigma(g_\theta(\Delta))\bigr)$
-    \STATE $M_f\leftarrow g_\theta(0)-\bar g$;\quad $\kappa\leftarrow\ln16/M_f$
-  \ENDIF
-  \STATE Compute $r_t^{\mathrm{DARE}}$ by~\eqref{eq:reward} with
-  $f_\theta=\kappa g_\theta$
-  \FOR{critic minibatch}
-    \STATE Sample equal numbers of current and replay differentials;
-    update $g_\theta$ by one step on~\eqref{eq:dare_loss} with
-    $f_\theta=\kappa g_\theta$
-  \ENDFOR
-  \STATE Update $\pi_\varphi$ and $V_\omega$ with PPO on
-  $r_t^{\mathrm{DARE}}$
-\ENDFOR
-\end{algorithmic}
-\end{algorithm}
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.98\textwidth]{figures/pipeline.pdf}
+\caption{DARE training loop. The policy and simulator produce the
+time-indexed differential, the factorized critic scores it relative to the
+zero anchor, and the calibrated softplus reward drives the PPO update.}
+\label{fig:pipeline}
+\end{figure*}
 
 \section{Experiments}
 \begin{table}[t]
@@ -730,7 +713,7 @@ are shown with ten frames, and the remaining skills with five.}
 
 \begin{figure*}[!b]
 \centering
-\includegraphics[width=0.98\textwidth]{figures/fig_learning_curves.pdf}
+\includegraphics[width=0.98\textwidth]{figures/fig_learning_curves.png}
 \caption{Learning curves for Roll and Climb under the matched training
 budget. Curves show the mean over five independent seeds. The four panels
 report body-position and root-rotation errors versus environment samples,
@@ -824,6 +807,69 @@ foot-progress ratio closest to one, and the lowest lateral drift.
 Relative to the strongest baseline for each measure, root-position error,
 root-rotation error, and lateral drift are reduced by approximately
 $25\%$, $21\%$, and $38\%$.
+
+\subsection{Component Analysis}
+\label{sec:ablation}
+We next isolate the two structural choices in DARE: independent
+semantic-block projections (grouping) and the one-shot score calibration.
+The component study uses eight motions---Roll, Climb, Backflip, Crawl,
+Get-Up, Spin Kick, Push Box, and Sit on Sofa---with three independent seeds
+for every configuration. All variants use the same simulator, PPO budget,
+normalization procedure, and evaluation protocol; only the indicated critic
+components are removed. The entries in Table~\ref{tab:ablation} are
+macro-averaged over the eight motions for each seed and then summarized as a
+mean $\pm$ standard deviation over the three seeds. Red dispersions are
+temporary draft placeholders and will be replaced by the measured values.
+
+\begin{table*}[t]
+\caption{Component analysis over eight motions. Grouping denotes the
+factorized semantic-block projection, and calibration denotes the closed-form
+logit rescaling. Lower is better for all metrics. Red $\pm$ values are
+temporary three-seed placeholders.}
+\label{tab:ablation}
+\centering
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{lccrrrrr}
+\toprule
+Method & Grouping & Calibration & Root Pos. $\downarrow$ & Body Pos. $\downarrow$
+ & Root Rot. $\downarrow$ & Body Rot. $\downarrow$ & DoF Vel. $\downarrow$ \\
+\midrule
+DARE & $\checkmark$ & $\checkmark$
+ & $0.0631\draftval{\!\pm\!0.012}$
+ & $0.0262\draftval{\!\pm\!0.005}$
+ & $0.0527\draftval{\!\pm\!0.009}$
+ & $0.1004\draftval{\!\pm\!0.014}$
+ & $0.5123\draftval{\!\pm\!0.018}$ \\
+w/o Group & $\times$ & $\checkmark$
+ & $0.1961\draftval{\!\pm\!0.010}$
+ & $0.0722\draftval{\!\pm\!0.009}$
+ & $0.1418\draftval{\!\pm\!0.012}$
+ & $0.2567\draftval{\!\pm\!0.021}$
+ & $0.9507\draftval{\!\pm\!0.033}$ \\
+w/o Calibration & $\checkmark$ & $\times$
+ & $0.0931\draftval{\!\pm\!0.008}$
+ & $0.0316\draftval{\!\pm\!0.005}$
+ & $0.0582\draftval{\!\pm\!0.009}$
+ & $0.1197\draftval{\!\pm\!0.013}$
+ & $0.5239\draftval{\!\pm\!0.019}$ \\
+Base & $\times$ & $\times$
+ & $0.1284\draftval{\!\pm\!0.011}$
+ & $0.0302\draftval{\!\pm\!0.005}$
+ & $0.0531\draftval{\!\pm\!0.009}$
+ & $0.1094\draftval{\!\pm\!0.014}$
+ & $0.7235\draftval{\!\pm\!0.025}$ \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+Episode length is reported separately because it is motion-specific and is
+not a quantity that can be meaningfully macro-averaged with frame-wise
+tracking errors. On the demanding Climb motion, the w/o Group configuration
+reaches an average episode length of $90.4$, whereas the Base configuration
+reaches only $73.0$. Both variants exhibit unstable training and frequent
+early termination, while the complete DARE configuration maintains stable
+progress through the motion. These results complement the aggregate error
+metrics by showing how the two components affect long-horizon execution.
 
 \subsection{Learning Dynamics}
 \label{sec:learning}

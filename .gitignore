@@ -17,3 +17,7 @@ PAPER/*.aux
 PAPER/*.log
 PAPER/*.synctex.gz
 PAPER/build/
+
+# Licensed third-party interaction assets are available to local experiments,
+# but their upstream licenses do not permit redistribution from this repo.
+data/external_interaction_assets/raw/

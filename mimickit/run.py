@@ -142,6 +142,15 @@ def run(rank, num_procs, device, master_port, args):
         agent.load(model_file)
     elif (resume_file != ""):
         agent.resume(resume_file)
+        # Diagnostic only: match the phase-zero reset following an output
+        # checkpoint in uninterrupted training. This does not restore PhysX.
+        resume_initial_reset = args.parse_string("resume_initial_reset", "train")
+        if resume_initial_reset not in ("train", "test"):
+            raise ValueError("resume_initial_reset must be train or test")
+        if resume_initial_reset == "test":
+            agent.eval()
+            agent.set_mode(type(agent._mode).TEST)
+        print("Resume initial reset mode: {}".format(resume_initial_reset), flush=True)
 
     if (mode == "train"):
         save_config_files(args, out_dir)

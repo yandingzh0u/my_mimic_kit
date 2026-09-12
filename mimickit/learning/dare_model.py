@@ -70,20 +70,30 @@ class DAREModel(add_model.ADDModel):
         input_dict = {"disc_obs": env.get_disc_obs_space()}
         base_layers, _ = net_builder.build_net(
             config["disc_net"], input_dict, activation=self._activation)
-        linears = [layer for layer in base_layers
+        linears = [layer for layer in base_layers.modules()
                    if isinstance(layer, torch.nn.Linear)]
         if len(linears) < 2:
             raise ValueError(
-                "Group-separable front-end requires a shared trunk")
+                "DARE requires a shared discriminator trunk")
 
-        self._disc_layers = GroupSeparableDiscLayers(
-            groups=env.get_disc_error_groups(),
-            first_width=linears[0].out_features,
-            trunk_widths=[layer.out_features for layer in linears[1:]],
-            activation=self._activation)
+        self._disc_group_embedding = bool(
+            config.get("disc_group_embedding", True))
+        if self._disc_group_embedding:
+            self._disc_layers = GroupSeparableDiscLayers(
+                groups=env.get_disc_error_groups(),
+                first_width=linears[0].out_features,
+                trunk_widths=[layer.out_features for layer in linears[1:]],
+                activation=self._activation)
+        else:
+            # The ablation retains DARE's Full-SN critic and all subsequent
+            # training machinery, but replaces the semantic direct sum by the
+            # ordinary dense first layer used by a flat discriminator.
+            self._disc_layers = base_layers
+            for layer in linears:
+                torch.nn.utils.parametrizations.spectral_norm(layer)
 
         self._disc_logits = torch.nn.Linear(
-            self._disc_layers.out_features, 1, bias=True)
+            linears[-1].out_features, 1, bias=True)
         torch.nn.init.uniform_(self._disc_logits.weight, -1.0, 1.0)
         torch.nn.init.zeros_(self._disc_logits.bias)
         torch.nn.utils.parametrizations.spectral_norm(self._disc_logits)
@@ -118,9 +128,16 @@ class DAREModel(add_model.ADDModel):
             unexpected_keys, error_msgs)
 
     def get_disc_group_width(self):
+        if not self._disc_group_embedding:
+            return self._disc_logits.weight.new_zeros(())
         return self._disc_logits.weight.new_tensor(
             float(self._disc_layers.group_width))
 
     def get_disc_group_total_width(self):
+        if not self._disc_group_embedding:
+            return self._disc_logits.weight.new_zeros(())
         return self._disc_logits.weight.new_tensor(
             float(self._disc_layers.total_width))
+
+    def uses_disc_group_embedding(self):
+        return self._disc_group_embedding

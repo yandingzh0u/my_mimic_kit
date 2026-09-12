@@ -577,6 +577,50 @@ class IsaacLabEngine(engine.Engine):
         masses = obj.root_physx_view.get_masses()[env_id]
         total_mass = masses.sum().item()
         return total_mass
+
+    def randomize_obj_physics(self, env_ids, obj_id, mass_scale=None,
+                              friction=None, stiffness_scale=None,
+                              damping_scale=None):
+        """Apply per-environment sim-to-real randomization from defaults."""
+        obj = self._objs[obj_id]
+        env_ids_cpu = env_ids.detach().to(device="cpu", dtype=torch.long)
+
+        if mass_scale is not None:
+            scales = mass_scale.detach().to(device="cpu").reshape(-1, 1)
+            masses = obj.root_physx_view.get_masses()
+            default_mass = obj.data.default_mass.detach().to(device="cpu")
+            masses[env_ids_cpu] = default_mass[env_ids_cpu] * scales
+            obj.root_physx_view.set_masses(masses, env_ids_cpu)
+
+            inertias = obj.root_physx_view.get_inertias()
+            default_inertia = obj.data.default_inertia.detach().to(device="cpu")
+            if self.get_obj_type(obj_id) == engine.ObjType.articulated:
+                inertia_scale = scales.unsqueeze(-1)
+            else:
+                inertia_scale = scales
+            inertias[env_ids_cpu] = default_inertia[env_ids_cpu] * inertia_scale
+            obj.root_physx_view.set_inertias(inertias, env_ids_cpu)
+
+        if friction is not None:
+            values = friction.detach().to(device="cpu").reshape(-1, 1)
+            materials = obj.root_physx_view.get_material_properties()
+            materials[env_ids_cpu, :, 0] = values
+            materials[env_ids_cpu, :, 1] = values
+            obj.root_physx_view.set_material_properties(materials, env_ids_cpu)
+
+        if self.get_obj_type(obj_id) == engine.ObjType.articulated:
+            env_ids_device = env_ids.to(device=self._device, dtype=torch.long)
+            if stiffness_scale is not None:
+                scale = stiffness_scale.to(self._device).reshape(-1, 1)
+                stiffness = obj.data.default_joint_stiffness[env_ids_device] * scale
+                obj.write_joint_stiffness_to_sim(
+                    stiffness, env_ids=env_ids_device)
+            if damping_scale is not None:
+                scale = damping_scale.to(self._device).reshape(-1, 1)
+                damping = obj.data.default_joint_damping[env_ids_device] * scale
+                obj.write_joint_damping_to_sim(
+                    damping, env_ids=env_ids_device)
+        return
     
     def get_control_mode(self):
         return self._control_mode

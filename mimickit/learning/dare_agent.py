@@ -32,13 +32,19 @@ class DAREAgent(add_agent.ADDAgent):
         super().__init__(config, env, device)
         if self._disc_grad_penalty != 0:
             raise ValueError("DARE requires disc_grad_penalty=0")
+        self._enable_anchor_calibration = bool(
+            config.get("disc_anchor_calibration", True))
         self._calibration_gap_raw = float("nan")
+        if not self._enable_anchor_calibration:
+            Logger.print(
+                "DARE anchor calibration disabled: fixed kappa=1.0000")
 
     def _build_model(self, config):
         self._model = dare_model.DAREModel(config["model"], self._env)
 
     def _compute_rewards(self):
-        if (not self._need_normalizer_update()
+        if (self._enable_anchor_calibration
+                and not self._need_normalizer_update()
                 and not self._model.is_disc_logit_calibrated()):
             self._calibrate_disc_logit_scale()
         return super()._compute_rewards()
@@ -111,6 +117,11 @@ class DAREAgent(add_agent.ADDAgent):
             "disc_group_width": self._model.get_disc_group_width(),
             "disc_group_total_width": (
                 self._model.get_disc_group_total_width()),
+            "disc_group_embedding_enabled": torch.tensor(
+                float(self._model.uses_disc_group_embedding()),
+                device=self._device),
+            "disc_anchor_calibration_enabled": torch.tensor(
+                float(self._enable_anchor_calibration), device=self._device),
             "disc_logit_scale": self._model.get_disc_logit_scale(),
             "disc_anchor_gap": (
                 pos_logit.mean() - neg_logit.mean()).detach(),

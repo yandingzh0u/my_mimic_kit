@@ -76,6 +76,29 @@ def test_all_discriminator_linears_use_pytorch_spectral_norm():
                for layer in linears)
 
 
+def test_flat_ablation_removes_only_group_embedding():
+    config = _config()
+    config["disc_group_embedding"] = False
+    model = DAREModel(config, _Env()).train()
+
+    assert not isinstance(model._disc_layers, GroupSeparableDiscLayers)
+    assert not model.uses_disc_group_embedding()
+    assert float(model.get_disc_group_width()) == 0.0
+    assert float(model.get_disc_group_total_width()) == 0.0
+
+    linears = _sn_linears(model._disc_layers) + [model._disc_logits]
+    assert len(linears) == 3
+    assert all(hasattr(layer.parametrizations, "weight")
+               for layer in linears)
+
+    logits = model.eval_disc(torch.randn(32, 172)).squeeze(-1)
+    logits.square().mean().backward()
+    assert torch.isfinite(logits).all()
+    assert all(parameter.grad is None
+               or torch.isfinite(parameter.grad).all()
+               for parameter in model.get_disc_params())
+
+
 def test_model_forward_backward_is_finite():
     model = DAREModel(_config(), _Env()).train()
     logits = model.eval_disc(torch.randn(32, 172)).squeeze(-1)
@@ -185,6 +208,23 @@ def test_config_restores_a30_gp_and_reward_batch_semantics():
     assert "disc_grad_penalty: 0" in text
     assert "disc_eval_batch_size: 0" in text
     assert "iters_per_output: 100" in text
+
+
+def test_getup_ablation_configs_form_the_requested_two_by_two_grid():
+    root = ROOT / "data/agents/ablations"
+    expected = {
+        "dare_getup_wogroup_agent.yaml": ("disc_group_embedding: false",
+                                            "disc_anchor_calibration: true"),
+        "dare_getup_wocalibration_agent.yaml": (
+            "disc_group_embedding: true", "disc_anchor_calibration: false"),
+        "dare_getup_base_agent.yaml": ("disc_group_embedding: false",
+                                         "disc_anchor_calibration: false"),
+    }
+    for filename, flags in expected.items():
+        text = (root / filename).read_text()
+        assert 'agent_name: "DARE"' in text
+        for flag in flags:
+            assert flag in text
 
 
 def test_official_add_is_not_modified_by_dare():

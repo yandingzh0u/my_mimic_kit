@@ -208,6 +208,13 @@ class Engine:
     @abc.abstractmethod
     def calc_obj_mass(self, env_id, obj_id):
         return
+
+    def randomize_obj_physics(self, env_ids, obj_id, mass_scale=None,
+                              friction=None, stiffness_scale=None,
+                              damping_scale=None):
+        """Randomize physical parameters when supported by the backend."""
+        raise NotImplementedError(
+            "Physics randomization is not implemented by this engine")
     
     @abc.abstractmethod
     def get_control_mode(self):
