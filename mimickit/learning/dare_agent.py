@@ -32,6 +32,7 @@ class DAREAgent(add_agent.ADDAgent):
         # This flag is needed while the base constructor builds normalizers.
         self._disc_group_energy_norm = bool(
             config.get("disc_group_energy_norm", False))
+        self._disc_raw_bce = bool(config.get("disc_raw_bce", True))
         super().__init__(config, env, device)
         if self._disc_grad_penalty != 0:
             raise ValueError("DARE requires disc_grad_penalty=0")
@@ -49,6 +50,11 @@ class DAREAgent(add_agent.ADDAgent):
         if self._disc_group_energy_norm:
             return self._env.get_disc_error_groups()
         return None
+
+    def _eval_disc_for_bce(self, disc_obs):
+        if self._disc_raw_bce:
+            return self._model.eval_disc_bce(disc_obs)
+        return self._model.eval_disc_reward(disc_obs)
 
     def _compute_rewards(self):
         if (self._enable_anchor_calibration
@@ -90,7 +96,7 @@ class DAREAgent(add_agent.ADDAgent):
     def _compute_disc_loss(self, batch):
         # Keep a30's forward order. PyTorch spectral_norm updates its power
         # iteration buffers on every training-mode forward, so order matters.
-        pos_logit = self._model.eval_disc_bce(
+        pos_logit = self._eval_disc_for_bce(
             self._pos_diff.unsqueeze(0)).squeeze(-1)
 
         current_diff = batch["disc_obs_demo"] - batch["disc_obs"]
@@ -99,7 +105,7 @@ class DAREAgent(add_agent.ADDAgent):
         raw_diff = torch.cat((current_diff, replay_diff), dim=0)
         norm_diff = self._disc_obs_norm.normalize(raw_diff)
 
-        neg_logit = self._model.eval_disc_bce(norm_diff).squeeze(-1)
+        neg_logit = self._eval_disc_for_bce(norm_diff).squeeze(-1)
         pos_loss = self._disc_loss_pos(pos_logit)
         neg_loss = self._disc_loss_neg(neg_logit)
         cls_loss = 0.5 * (pos_loss + neg_loss)
@@ -110,8 +116,10 @@ class DAREAgent(add_agent.ADDAgent):
         disc_loss = cls_loss + logit_reg_loss
         neg_acc, pos_acc = self._compute_disc_acc(neg_logit, pos_logit)
         zero = torch.zeros((), device=self._device)
-        raw_gap = (pos_logit.mean() - neg_logit.mean()).detach()
-        reward_gap = raw_gap * self._model.get_disc_logit_scale()
+        bce_gap = (pos_logit.mean() - neg_logit.mean()).detach()
+        scale = self._model.get_disc_logit_scale()
+        raw_gap = bce_gap if self._disc_raw_bce else bce_gap / scale
+        reward_gap = raw_gap * scale
         return {
             "disc_loss": disc_loss,
             "disc_cls_loss": cls_loss.detach(),
@@ -132,9 +140,11 @@ class DAREAgent(add_agent.ADDAgent):
                 device=self._device),
             "disc_group_energy_norm_enabled": torch.tensor(
                 float(self._disc_group_energy_norm), device=self._device),
+            "disc_raw_bce_enabled": torch.tensor(
+                float(self._disc_raw_bce), device=self._device),
             "disc_anchor_calibration_enabled": torch.tensor(
                 float(self._enable_anchor_calibration), device=self._device),
-            "disc_logit_scale": self._model.get_disc_logit_scale(),
+            "disc_logit_scale": scale,
             "disc_anchor_gap": reward_gap,
             "disc_anchor_gap_raw": raw_gap,
         }

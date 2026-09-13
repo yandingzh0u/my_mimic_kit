@@ -1,3 +1,5 @@
+# Clean Step-2 control: v6 calibrated-BCE semantics under the same
+# RNG-preserving evaluation protocol as the raw-BCE treatment.
 agent_name: "DARE"
 
 model:
@@ -36,7 +38,7 @@ disc_logit_reg: 0.01
 disc_grad_penalty: 0
 disc_eval_batch_size: 0
 disc_group_energy_norm: false
-disc_raw_bce: true
+disc_raw_bce: false
 disc_reward_scale: 2
 task_reward_weight: 0.0
 disc_reward_weight: 1.0

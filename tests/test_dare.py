@@ -4,6 +4,7 @@ import pathlib
 import gymnasium.spaces as spaces
 import pytest
 import torch
+import yaml
 
 import learning.diff_normalizer as diff_normalizer
 from learning.dare_agent import DAREAgent, anchor_gap
@@ -186,6 +187,29 @@ def test_bce_and_reward_readouts_only_diverge_after_calibration():
                                rtol=0.0, atol=0.0)
 
 
+def test_raw_bce_switch_is_identical_at_unit_scale_and_diverges_only_after():
+    agent = object.__new__(DAREAgent)
+    torch.nn.Module.__init__(agent)
+    agent._model = DAREModel(_config(), _Env()).eval()
+    inputs = torch.randn(32, 172)
+
+    agent._disc_raw_bce = True
+    raw_before = agent._eval_disc_for_bce(inputs)
+    agent._disc_raw_bce = False
+    scaled_before = agent._eval_disc_for_bce(inputs)
+    torch.testing.assert_close(raw_before, scaled_before,
+                               rtol=0.0, atol=0.0)
+
+    agent._model.set_disc_logit_scale(1.5)
+    agent._disc_raw_bce = True
+    raw_after = agent._eval_disc_for_bce(inputs)
+    agent._disc_raw_bce = False
+    scaled_after = agent._eval_disc_for_bce(inputs)
+    torch.testing.assert_close(raw_after, raw_before, rtol=0.0, atol=0.0)
+    torch.testing.assert_close(scaled_after, 1.5 * raw_before,
+                               rtol=0.0, atol=1e-6)
+
+
 def test_group_energy_normalization_is_opt_in():
     agent = object.__new__(DAREAgent)
     agent._env = _Env()
@@ -281,6 +305,17 @@ def test_config_restores_a30_gp_and_reward_batch_semantics():
     assert "disc_grad_penalty: 0" in text
     assert "disc_eval_batch_size: 0" in text
     assert "iters_per_output: 100" in text
+
+
+def test_step2_control_changes_only_the_bce_readout():
+    treatment = yaml.safe_load(
+        (ROOT / "data/agents/dare_humanoid_agent.yaml").read_text())
+    control = yaml.safe_load((
+        ROOT / "data/agents/ablations/dare_climb_scaled_bce_control_agent.yaml"
+    ).read_text())
+    assert treatment.pop("disc_raw_bce") is True
+    assert control.pop("disc_raw_bce") is False
+    assert treatment == control
 
 
 def test_getup_ablation_configs_form_the_requested_two_by_two_grid():
