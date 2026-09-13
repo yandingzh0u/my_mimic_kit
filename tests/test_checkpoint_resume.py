@@ -15,6 +15,7 @@ if str(MIMICKIT) not in sys.path:
 
 import learning.base_agent as base_agent
 import learning.amp_agent as amp_agent
+import learning.diff_normalizer as diff_normalizer
 import learning.experience_buffer as experience_buffer
 import learning.mp_optimizer as mp_optimizer
 import learning.ppo_agent as ppo_agent
@@ -230,6 +231,29 @@ def test_full_checkpoint_restores_training_state_and_keeps_model_compatible(
     restored_next_sample_idx = restored._exp_buffer._sample_buf[
         restored._exp_buffer._sample_buf_head:].clone()
     assert torch.equal(restored_next_sample_idx, expected_next_sample_idx)
+
+
+def test_checkpoint_restores_differential_group_pending_statistics(tmp_path):
+    groups = (("a", (0, 1)), ("b", (2, 3)))
+    agent = _TinyAgent(_config(), _TinyEnv(), "cpu")
+    agent._disc_obs_norm = diff_normalizer.DiffNormalizer(
+        (4,), device="cpu", groups=groups)
+    pending = torch.tensor([[1.0, -2.0, 3.0, -4.0]])
+    agent._disc_obs_norm.record(pending)
+    checkpoint_file = tmp_path / "group_checkpoint.pt"
+    agent.save_checkpoint(checkpoint_file, next_iter=1)
+
+    restored = _TinyAgent(_config(), _TinyEnv(), "cpu")
+    restored._disc_obs_norm = diff_normalizer.DiffNormalizer(
+        (4,), device="cpu", groups=groups)
+    restored.resume(checkpoint_file)
+
+    state = restored._disc_obs_norm.training_state_dict()
+    assert state["new_count"] == 1
+    torch.testing.assert_close(state["new_sum_abs"],
+                               agent._disc_obs_norm._new_sum_abs.cpu())
+    torch.testing.assert_close(state["new_sum_sq"],
+                               agent._disc_obs_norm._new_sum_sq.cpu())
 
 
 def test_resume_rejects_weights_only_and_incompatible_num_envs(tmp_path):

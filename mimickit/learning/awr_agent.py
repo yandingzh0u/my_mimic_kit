@@ -277,7 +277,10 @@ class AWRAgent(base_agent.BaseAgent):
         
         return info
 
-    def _log_train_info(self, train_info, test_info, env_diag_info, start_time):
-        super()._log_train_info(train_info, test_info, env_diag_info, start_time)
+    def _log_train_info(self, train_info, test_info, env_diag_info, start_time,
+                        test_random_info=None):
+        super()._log_train_info(
+            train_info, test_info, env_diag_info, start_time,
+            test_random_info=test_random_info)
         self._logger.log("Exp_Prob", self._get_exp_prob())
         return

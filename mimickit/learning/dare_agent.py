@@ -42,6 +42,9 @@ class DAREAgent(add_agent.ADDAgent):
     def _build_model(self, config):
         self._model = dare_model.DAREModel(config["model"], self._env)
 
+    def _get_disc_normalizer_groups(self):
+        return self._env.get_disc_error_groups()
+
     def _compute_rewards(self):
         if (self._enable_anchor_calibration
                 and not self._need_normalizer_update()

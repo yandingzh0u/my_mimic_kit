@@ -12,6 +12,7 @@ import torch
 
 import envs.base_env as base_env
 import learning.experience_buffer as experience_buffer
+import learning.diff_normalizer as diff_normalizer
 import learning.mp_optimizer as mp_optimizer
 import learning.normalizer as normalizer
 import learning.return_tracker as return_tracker
@@ -59,6 +60,7 @@ class BaseAgent(torch.nn.Module):
             "mean_ep_len": 0.0,
             "num_eps": 0,
         }
+        self._last_test_random_info = dict(self._last_test_info)
         self._resume_pending = False
         self._resume_exp_total_samples = 0
         self._resume_exp_sampling_state = None
@@ -98,6 +100,7 @@ class BaseAgent(torch.nn.Module):
         self._curr_obs, self._curr_info = self._reset_envs()
         self._init_train()
         test_info = self._last_test_info
+        test_random_info = self._last_test_random_info
 
         while self._sample_count < max_samples:
             train_info = self._train_iter()
@@ -106,11 +109,21 @@ class BaseAgent(torch.nn.Module):
             output_iter = (self._iter % self._iters_per_output == 0) or (self._sample_count >= max_samples)
 
             if (output_iter):
-                test_info = self.test_model(self._test_episodes)
+                test_random_info = self.test_model(
+                    self._test_episodes, random_start=True)
+                self._last_test_random_info = test_random_info
+                # Run phase zero last so the environment diagnostics below
+                # unambiguously describe the fixed-start evaluation.
+                test_info = self.test_model(
+                    self._test_episodes, random_start=False)
                 self._last_test_info = test_info
-            
-            env_diag_info = self._env.record_diagnostics()
-            self._log_train_info(train_info, test_info, env_diag_info, start_time) 
+                env_diag_info = self._env.record_diagnostics()
+            else:
+                env_diag_info = self._env.record_diagnostics()
+
+            self._log_train_info(
+                train_info, test_info, env_diag_info, start_time,
+                test_random_info=test_random_info)
             self._logger.print_log()
 
             if (output_iter):
@@ -129,16 +142,24 @@ class BaseAgent(torch.nn.Module):
 
         return
 
-    def test_model(self, num_episodes):
+    def test_model(self, num_episodes, random_start=False):
         self.eval()
         self.set_mode(AgentMode.TEST)
-        
-        num_procs = mp_util.get_num_procs()
-        num_eps_proc = int(np.ceil(num_episodes / num_procs))
 
-        with torch.no_grad():
-            self._curr_obs, self._curr_info = self._reset_envs()
-            test_info = self._rollout_test(num_eps_proc)
+        set_random_start = getattr(self._env, "set_test_random_start", None)
+        if (set_random_start is not None):
+            set_random_start(random_start)
+        
+        try:
+            num_procs = mp_util.get_num_procs()
+            num_eps_proc = int(np.ceil(num_episodes / num_procs))
+
+            with torch.no_grad():
+                self._curr_obs, self._curr_info = self._reset_envs()
+                test_info = self._rollout_test(num_eps_proc)
+        finally:
+            if (set_random_start is not None):
+                set_random_start(False)
 
         return test_info
     
@@ -203,7 +224,7 @@ class BaseAgent(torch.nn.Module):
             "normalizer_training_states": {
                 name: module.training_state_dict()
                 for name, module in self.named_modules()
-                if isinstance(module, normalizer.Normalizer)
+                if self._is_training_normalizer(module)
             },
             "trainer_state": {
                 "next_iter": int(next_iter),
@@ -211,6 +232,7 @@ class BaseAgent(torch.nn.Module):
                 "exp_total_samples": int(self._exp_buffer.get_total_samples()),
                 "elapsed_train_time": float(self._elapsed_train_time),
                 "last_test_info": dict(self._last_test_info),
+                "last_test_random_info": dict(self._last_test_random_info),
                 "resume_count": int(self._resume_count),
                 "last_output_sample_count": int(
                     self._last_output_sample_count),
@@ -269,7 +291,7 @@ class BaseAgent(torch.nn.Module):
         normalizers = {
             name: module
             for name, module in self.named_modules()
-            if isinstance(module, normalizer.Normalizer)
+            if self._is_training_normalizer(module)
         }
         saved_normalizers = checkpoint.get("normalizer_training_states", {})
         if set(normalizers.keys()) != set(saved_normalizers.keys()):
@@ -311,6 +333,8 @@ class BaseAgent(torch.nn.Module):
             trainer_state.get("elapsed_train_time", 0.0))
         self._last_test_info = dict(trainer_state.get(
             "last_test_info", self._last_test_info))
+        self._last_test_random_info = dict(trainer_state.get(
+            "last_test_random_info", self._last_test_random_info))
         self._resume_count = int(trainer_state.get("resume_count", 0)) + 1
         self._last_output_sample_count = int(trainer_state.get(
             "last_output_sample_count", self._sample_count))
@@ -403,6 +427,12 @@ class BaseAgent(torch.nn.Module):
                 log.configure_output_file(log_file)
         
         return log
+
+    @staticmethod
+    def _is_training_normalizer(module):
+        return (isinstance(module, normalizer.Normalizer)
+                or (isinstance(module, diff_normalizer.DiffNormalizer)
+                    and module.get_group_scales() is not None))
 
     def _update_sample_count(self):
         sample_count = self._exp_buffer.get_total_samples()
@@ -556,7 +586,8 @@ class BaseAgent(torch.nn.Module):
         val_fail = r_fail / (1.0 - self._discount)
         return val_fail
 
-    def _log_train_info(self, train_info, test_info, env_diag_info, start_time):
+    def _log_train_info(self, train_info, test_info, env_diag_info, start_time,
+                        test_random_info=None):
         wall_time_secs = time.time() - start_time
         wall_time_hrs = wall_time_secs / (60 * 60) # store time in hours
         
@@ -588,6 +619,19 @@ class BaseAgent(torch.nn.Module):
         self._logger.log(test_return_key, test_return, collection="0_Main")
         self._logger.log("Test_Episode_Length", test_ep_len, collection="0_Main", quiet=True)
         self._logger.log("Test_Episodes", test_eps, collection="1_Info", quiet=True)
+
+        if (test_random_info is None):
+            test_random_info = test_info
+        random_ep_len = test_random_info["mean_ep_len"]
+        random_eps = mp_util.reduce_sum(test_random_info["num_eps"])
+        self._logger.log("Test_Episode_Length_Start0", test_ep_len,
+                         collection="0_Main", quiet=True)
+        self._logger.log("Test_Episode_Length_Random", random_ep_len,
+                         collection="0_Main", quiet=True)
+        self._logger.log("Test_Episodes_Start0", test_eps,
+                         collection="1_Info", quiet=True)
+        self._logger.log("Test_Episodes_Random", random_eps,
+                         collection="1_Info", quiet=True)
 
         train_return = train_info.pop("mean_return")
         train_ep_len = train_info.pop("mean_ep_len")

@@ -2,6 +2,7 @@ import inspect
 import pathlib
 
 import gymnasium.spaces as spaces
+import pytest
 import torch
 
 import learning.diff_normalizer as diff_normalizer
@@ -50,6 +51,53 @@ def _config():
 def _sn_linears(module):
     return [child for child in module.modules()
             if isinstance(child, torch.nn.Linear)]
+
+
+def test_group_normalizer_zero_anchor_and_unit_group_energy():
+    groups = (("a", (0, 1)), ("b", (2, 3, 4)))
+    norm = diff_normalizer.DiffNormalizer(
+        (5,), device="cpu", groups=groups)
+    data = torch.tensor([
+        [1.0, -2.0, 3.0, -4.0, 5.0],
+        [-1.0, 2.0, -3.0, 4.0, -5.0],
+    ])
+    norm.record(data)
+    norm.update()
+
+    expected_scales = torch.tensor([
+        torch.sqrt(torch.tensor(2.0)),
+        torch.sqrt(torch.tensor(3.0)),
+    ])
+    torch.testing.assert_close(norm.get_group_scales(), expected_scales)
+    normalized = norm.normalize(data)
+    for group_id, (_, indices) in enumerate(groups):
+        energy = torch.square(normalized[:, indices]).sum(dim=-1).mean()
+        torch.testing.assert_close(energy, torch.tensor(1.0))
+    torch.testing.assert_close(norm.normalize(torch.zeros(5)),
+                               torch.zeros(5))
+    torch.testing.assert_close(norm.unnormalize(normalized), data)
+
+
+def test_group_normalizer_rejects_incomplete_or_overlapping_groups():
+    with pytest.raises(ValueError):
+        diff_normalizer.DiffNormalizer(
+            (3,), device="cpu", groups=(("a", (0, 1)),))
+    with pytest.raises(ValueError):
+        diff_normalizer.DiffNormalizer(
+            (3,), device="cpu",
+            groups=(("a", (0, 1)), ("b", (1, 2))))
+
+
+def test_group_normalizer_training_state_round_trip():
+    groups = (("a", (0, 1)), ("b", (2, 3)))
+    source = diff_normalizer.DiffNormalizer((4,), device="cpu", groups=groups)
+    source.record(torch.tensor([[1.0, 2.0, 3.0, 4.0]]))
+    state = source.training_state_dict()
+    restored = diff_normalizer.DiffNormalizer((4,), device="cpu", groups=groups)
+    restored.load_training_state_dict(state)
+    assert restored._new_count == source._new_count
+    torch.testing.assert_close(restored._new_sum_abs, source._new_sum_abs)
+    torch.testing.assert_close(restored._new_sum_sq, source._new_sum_sq)
 
 
 def test_model_restores_explicit_a30_group_frontend():

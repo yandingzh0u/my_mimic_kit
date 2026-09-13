@@ -50,6 +50,10 @@ class BaseEnv(abc.ABC):
         self._mode = mode
         return
 
+    def set_test_random_start(self, enabled):
+        """Select random motion phases for explicit test rollouts."""
+        return
+
     def get_num_envs(self):
         return int(1)
 

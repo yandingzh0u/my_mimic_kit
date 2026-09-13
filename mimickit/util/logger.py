@@ -190,7 +190,9 @@ class Logger:
         for key in self.log_headers:
             entry = self.log_current_row[key]
             if (isinstance(entry.val, numbers.Number)):
-                template += "{:<25}"
+                # Keep adjacent long diagnostic names whitespace-separated so
+                # text logs remain machine-readable as the schema evolves.
+                template += "{:<" + str(max(25, len(key) + 1)) + "}"
         return template
 
     def _mp_aggregate(self):

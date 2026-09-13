@@ -111,7 +111,7 @@ def test_legacy_static_object_env_does_not_build_objects_twice():
     assert "_build_env" not in static_objects_env.StaticObjectsEnv.__dict__
 
 
-def test_test_mode_always_starts_reference_motion_at_phase_zero():
+def test_test_mode_defaults_to_phase_zero_and_supports_random_start():
     env = object.__new__(deepmimic_env.DeepMimicEnv)
     env._device = torch.device("cpu")
     env._rand_reset = True
@@ -123,6 +123,12 @@ def test_test_mode_always_starts_reference_motion_at_phase_zero():
 
     assert torch.equal(motion_times, torch.zeros(2))
     env._motion_lib.sample_time.assert_not_called()
+
+    env.set_test_random_start(True)
+    env._motion_lib.sample_time.return_value = torch.tensor([0.25, 0.75])
+    _, motion_times = env._sample_motion_times(2)
+    assert torch.equal(motion_times, torch.tensor([0.25, 0.75]))
+    env._motion_lib.sample_time.assert_called_once()
 
 
 def test_train_mode_preserves_random_reference_initialization():

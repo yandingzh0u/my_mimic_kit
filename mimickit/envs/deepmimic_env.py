@@ -52,6 +52,7 @@ class DeepMimicEnv(char_env.CharEnv):
         self._tar_obs_steps = env_config.get("tar_obs_steps", [1])
         self._tar_obs_steps = torch.tensor(self._tar_obs_steps, device=device, dtype=torch.int)
         self._rand_reset = env_config.get("rand_reset", True)
+        self._test_random_start = False
         
         self._ref_char_offset = torch.tensor(env_config["ref_char_offset"], device=device, dtype=torch.float)
         self._log_tracking_error = env_config.get("log_tracking_error", False)
@@ -89,6 +90,10 @@ class DeepMimicEnv(char_env.CharEnv):
         if (self._mode == base_env.EnvMode.TEST):
             if (self._log_tracking_error):
                 self._error_tracker.reset()
+        return
+
+    def set_test_random_start(self, enabled):
+        self._test_random_start = bool(enabled)
         return
     
     def record_diagnostics(self):
@@ -308,7 +313,10 @@ class DeepMimicEnv(char_env.CharEnv):
     def _sample_motion_times(self, n):
         motion_ids = self._motion_lib.sample_motions(n)
 
-        if (self._rand_reset and self._mode == base_env.EnvMode.TRAIN):
+        random_start = (self._mode == base_env.EnvMode.TRAIN
+                        or (self._mode == base_env.EnvMode.TEST
+                            and getattr(self, "_test_random_start", False)))
+        if (self._rand_reset and random_start):
             motion_times = self._motion_lib.sample_time(motion_ids)
         else:
             motion_times = torch.zeros(n, dtype=torch.float, device=self._device)
