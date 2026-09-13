@@ -170,6 +170,31 @@ def test_uncalibrated_model_is_bitwise_v6():
         rtol=0.0, atol=0.0)
 
 
+def test_bce_and_reward_readouts_only_diverge_after_calibration():
+    model = DAREModel(_config(), _Env()).eval()
+    inputs = torch.randn(32, 172)
+    raw = model.eval_disc_bce(inputs)
+    torch.testing.assert_close(model.eval_disc_reward(inputs), raw,
+                               rtol=0.0, atol=0.0)
+    model.set_disc_logit_scale(3.5)
+    torch.testing.assert_close(model.eval_disc_bce(inputs), raw,
+                               rtol=0.0, atol=0.0)
+    torch.testing.assert_close(model.eval_disc_reward(inputs), 3.5 * raw,
+                               rtol=0.0, atol=1e-6)
+    torch.testing.assert_close(model.eval_disc(inputs),
+                               model.eval_disc_reward(inputs),
+                               rtol=0.0, atol=0.0)
+
+
+def test_group_energy_normalization_is_opt_in():
+    agent = object.__new__(DAREAgent)
+    agent._env = _Env()
+    agent._disc_group_energy_norm = False
+    assert agent._get_disc_normalizer_groups() is None
+    agent._disc_group_energy_norm = True
+    assert agent._get_disc_normalizer_groups() == agent._env.get_disc_error_groups()
+
+
 def test_anchor_gap_calibration_hits_ln16():
     torch.manual_seed(0)
     model = DAREModel(_config(), _Env()).eval()

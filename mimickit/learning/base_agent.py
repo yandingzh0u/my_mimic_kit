@@ -1,4 +1,5 @@
 import abc
+import contextlib
 import enum
 import gymnasium.spaces as spaces
 import json
@@ -109,14 +110,17 @@ class BaseAgent(torch.nn.Module):
             output_iter = (self._iter % self._iters_per_output == 0) or (self._sample_count >= max_samples)
 
             if (output_iter):
-                test_random_info = self.test_model(
-                    self._test_episodes, random_start=True)
-                self._last_test_random_info = test_random_info
-                # Run phase zero last so the environment diagnostics below
-                # unambiguously describe the fixed-start evaluation.
-                test_info = self.test_model(
-                    self._test_episodes, random_start=False)
-                self._last_test_info = test_info
+                # Evaluation must not perturb the stochastic stream used by
+                # subsequent training iterations.
+                with self._preserve_rng_state():
+                    test_random_info = self.test_model(
+                        self._test_episodes, random_start=True)
+                    self._last_test_random_info = test_random_info
+                    # Run phase zero last so diagnostics below describe the
+                    # fixed-start evaluation.
+                    test_info = self.test_model(
+                        self._test_episodes, random_start=False)
+                    self._last_test_info = test_info
                 env_diag_info = self._env.record_diagnostics()
             else:
                 env_diag_info = self._env.record_diagnostics()
@@ -747,6 +751,14 @@ class BaseAgent(torch.nn.Module):
         if (torch.cuda.is_available()):
             state["cuda"] = torch.cuda.get_rng_state_all()
         return state
+
+    @contextlib.contextmanager
+    def _preserve_rng_state(self):
+        state = self._get_rng_state()
+        try:
+            yield
+        finally:
+            self._set_rng_state(state)
 
     def _set_rng_state(self, state):
         random.setstate(state["python"])

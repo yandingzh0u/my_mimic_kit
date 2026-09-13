@@ -58,7 +58,7 @@ class GroupSeparableDiscLayers(torch.nn.Module):
 
 
 class DAREModel(add_model.ADDModel):
-    """DARE critic with a one-shot, anchor-relative output calibration."""
+    """DARE critic with separate classifier and reward readouts."""
 
     def __init__(self, config, env):
         super().__init__(config, env)
@@ -101,8 +101,17 @@ class DAREModel(add_model.ADDModel):
     def eval_disc_raw(self, disc_obs):
         return self._disc_logits(self._disc_layers(disc_obs))
 
-    def eval_disc(self, disc_obs):
+    def eval_disc_bce(self, disc_obs):
+        """Raw critic logit used by the discriminator objective."""
+        return self.eval_disc_raw(disc_obs)
+
+    def eval_disc_reward(self, disc_obs):
+        """Calibrated critic logit used only by the policy reward."""
         return self._disc_logit_scale * self.eval_disc_raw(disc_obs)
+
+    def eval_disc(self, disc_obs):
+        """Backward-compatible alias for the calibrated reward readout."""
+        return self.eval_disc_reward(disc_obs)
 
     @torch.no_grad()
     def set_disc_logit_scale(self, scale):

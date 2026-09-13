@@ -89,6 +89,22 @@ def test_replay_push_over_capacity_and_round_trip():
     assert torch.equal(restored._sample_buf, buffer._sample_buf)
 
 
+def test_training_evaluation_preserves_all_rng_streams():
+    agent = object.__new__(_TinyAgent)
+    random.seed(17)
+    np.random.seed(17)
+    torch.manual_seed(17)
+    expected_state = agent._get_rng_state()
+    with agent._preserve_rng_state():
+        random.random()
+        np.random.rand()
+        torch.rand(8)
+    actual_state = agent._get_rng_state()
+    assert actual_state["python"] == expected_state["python"]
+    assert np.array_equal(actual_state["numpy"][1], expected_state["numpy"][1])
+    assert torch.equal(actual_state["torch"], expected_state["torch"])
+
+
 def test_amp_demo_observations_are_filled_in_bounded_chunks():
     class _DemoEnv:
         def __init__(self):
