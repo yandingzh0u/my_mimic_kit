@@ -1,0 +1,70 @@
+[2026-09-04T13:23:53+08:00] COMMAND /home/y/miniconda3/envs/env_isaaclab/bin/python tools/paper_eval/evaluate_checkpoint.py --model-file output/paper_benchmark/dare_spinkick_2k_8192_seed0/model.pt --env-config data/envs/paper_benchmark/dare_spinkick_env.yaml --agent-config data/agents/dare_humanoid_agent.yaml --engine-config data/engines/isaac_lab_engine.yaml --method dare --motion spinkick --num-envs 256 --steps 300 --start-mode phase0 --condition nominal --seed 0 --out-dir output/paper_benchmark/dare_spinkick_2k_8192_seed0/eval/final
+/home/y/miniconda3/envs/env_isaaclab/lib/python3.11/site-packages/requests/__init__.py:113: RequestsDependencyWarning: urllib3 (2.6.3) or chardet (7.4.3)/charset_normalizer (3.3.2) doesn't match a supported version!
+  warnings.warn(
+Building add env
+[INFO][AppLauncher]: Using device: cuda:0
+[INFO][AppLauncher]: Loading experience file: /home/y/IsaacLab/apps/isaaclab.python.headless.kit
+Loading user config located at: '/home/y/miniconda3/envs/env_isaaclab/lib/python3.11/site-packages/isaacsim/kit/data/Kit/Isaac-Sim/5.1/user.config.json'
+[Info] [carb] Logging to file: /home/y/miniconda3/envs/env_isaaclab/lib/python3.11/site-packages/isaacsim/kit/logs/Kit/Isaac-Sim/5.1/kit_20260904_132355.log
+2026-09-04T05:23:55Z [2ms] [Warning] [omni.ext.plugin] [ext: isaaclab_contrib] Extensions config 'extension.toml' doesn't exist '/home/y/IsaacLab/source/isaaclab_contrib' or '/home/y/IsaacLab/source/isaaclab_contrib/config'
+2026-09-04T05:23:55Z [61ms] [Warning] [omni.usd_config.extension] Enable omni.materialx.libs extension to use MaterialX
+2026-09-04T05:23:55Z [408ms] [Warning] [carb] Acquiring non optional plugin interface which is not listed as dependency: [omni::physx::IPhysxBenchmarks v1.0] (plugin: <default plugin>), by client: omni.physics.physx.plugin. Add it to CARB_PLUGIN_IMPL_DEPS() macro of a client.
+2026-09-04T05:23:56Z [550ms] [Warning] [omni.isaac.dynamic_control] omni.isaac.dynamic_control is deprecated as of Isaac Sim 4.5. No action is needed from end-users.
+2026-09-04T05:23:57Z [1,863ms] [Warning] [gpu.foundation.plugin] Skipping unsupported non-NVIDIA GPU: Intel(R) UHD Graphics 770 (ADL-S GT1)
+2026-09-04T05:23:57Z [1,863ms] [Warning] [gpu.foundation.plugin] Skipping unsupported non-NVIDIA GPU: Intel(R) UHD Graphics 770 (ADL-S GT1)
+
+|---------------------------------------------------------------------------------------------|
+| Driver Version: 580.173.02    | Graphics API: Vulkan
+|=============================================================================================|
+| GPU | Name                             | Active | LDA | GPU Memory | Vendor-ID | LUID       |
+|     |                                  |        |     |            | Device-ID | UUID       |
+|     |                                  |        |     |            | Bus-ID    |            |
+|---------------------------------------------------------------------------------------------|
+| 0   | NVIDIA GeForce RTX 5080          | Yes: 0 |     | 16303   MB | 10de      | 0          |
+|     |                                  |        |     |            | 2c02      | e16ebef7.. |
+|     |                                  |        |     |            | 1         |            |
+|---------------------------------------------------------------------------------------------|
+| 1   | Intel(R) UHD Graphics 770 (ADL.. |        |     | 48013   MB | 8086      | 0          |
+|     |                                  |        |     |            | 4680      | 86808046.. |
+|     |                                  |        |     |            | 0         |            |
+|=============================================================================================|
+| OS: 22.04.5 LTS (Jammy Jellyfish) ubuntu, Version: 22.04.5, Kernel: 6.8.0-136-generic
+| XServer Vendor: The X.Org Foundation, XServer Version: 12101004 (1.21.1.4)
+| Processor: 12th Gen Intel(R) Core(TM) i9-12900K
+| Bare Metal Cores: 16 | Bare Metal Logical Cores: 32
+| Available Cores:  24 
+|---------------------------------------------------------------------------------------------|
+| Total Memory (MB): 64017 | Free Memory: 51236
+| Total Page/Swap (MB): 2047 | Free Page/Swap: 955
+|---------------------------------------------------------------------------------------------|
+2026-09-04T05:23:57Z [2,228ms] [Warning] [gpu.foundation.plugin] CPU performance profile is set to powersave. This profile sets the CPU to the lowest frequency reducing performance.
+2026-09-04T05:23:57Z [2,230ms] [Warning] [gpu.foundation.plugin] PCIe link width current (1) and maximum (16) for device 0 don't match.
+2026-09-04T05:23:57Z [2,230ms] [Warning] [gpu.foundation.plugin] IOMMU is enabled.
+2026-09-04T05:23:57Z [2,230ms] [Warning] [gpu.foundation.plugin] Detected IOMMU is enabled. Running CUDA peer-to-peer bandwidth and latency validation.
+Unidirectional P2P=Enabled Bandwidth (P2P Writes) Matrix (GB/s)
+   D\D     0 
+     0 817.21 
+P2P=Enabled Latency (P2P Writes) Matrix (us)
+   GPU     0 
+     0   2.31 
+
+   CPU     0 
+     0   2.42 
+[INFO] IsaacLab logging to file: /tmp/isaaclab_2026-09-04_13-23-57.log
+Building 1/256 envsBuilding 2/256 envsBuilding 3/256 envsBuilding 4/256 envsBuilding 5/256 envsBuilding 6/256 envsBuilding 7/256 envsBuilding 8/256 envsBuilding 9/256 envsBuilding 10/256 envsBuilding 11/256 envsBuilding 12/256 envsBuilding 13/256 envsBuilding 14/256 envsBuilding 15/256 envsBuilding 16/256 envsBuilding 17/256 envsBuilding 18/256 envsBuilding 19/256 envsBuilding 20/256 envsBuilding 21/256 envsBuilding 22/256 envsBuilding 23/256 envsBuilding 24/256 envsBuilding 25/256 envsBuilding 26/256 envsBuilding 27/256 envsBuilding 28/256 envsBuilding 29/256 envsBuilding 30/256 envsBuilding 31/256 envsBuilding 32/256 envsBuilding 33/256 envsBuilding 34/256 envsBuilding 35/256 envsBuilding 36/256 envsBuilding 37/256 envsBuilding 38/256 envsBuilding 39/256 envsBuilding 40/256 envsBuilding 41/256 envsBuilding 42/256 envsBuilding 43/256 envsBuilding 44/256 envsBuilding 45/256 envsBuilding 46/256 envsBuilding 47/256 envsBuilding 48/256 envsBuilding 49/256 envsBuilding 50/256 envsBuilding 51/256 envsBuilding 52/256 envsBuilding 53/256 envsBuilding 54/256 envsBuilding 55/256 envsBuilding 56/256 envsBuilding 57/256 envsBuilding 58/256 envsBuilding 59/256 envsBuilding 60/256 envsBuilding 61/256 envsBuilding 62/256 envsBuilding 63/256 envsBuilding 64/256 envsBuilding 65/256 envsBuilding 66/256 envsBuilding 67/256 envsBuilding 68/256 envsBuilding 69/256 envsBuilding 70/256 envsBuilding 71/256 envsBuilding 72/256 envsBuilding 73/256 envsBuilding 74/256 envsBuilding 75/256 envsBuilding 76/256 envsBuilding 77/256 envsBuilding 78/256 envsBuilding 79/256 envsBuilding 80/256 envsBuilding 81/256 envsBuilding 82/256 envsBuilding 83/256 envsBuilding 84/256 envsBuilding 85/256 envsBuilding 86/256 envsBuilding 87/256 envsBuilding 88/256 envsBuilding 89/256 envsBuilding 90/256 envsBuilding 91/256 envsBuilding 92/256 envsBuilding 93/256 envsBuilding 94/256 envsBuilding 95/256 envsBuilding 96/256 envsBuilding 97/256 envsBuilding 98/256 envsBuilding 99/256 envsBuilding 100/256 envsBuilding 101/256 envsBuilding 102/256 envsBuilding 103/256 envsBuilding 104/256 envsBuilding 105/256 envsBuilding 106/256 envsBuilding 107/256 envsBuilding 108/256 envsBuilding 109/256 envsBuilding 110/256 envsBuilding 111/256 envsBuilding 112/256 envsBuilding 113/256 envsBuilding 114/256 envsBuilding 115/256 envsBuilding 116/256 envsBuilding 117/256 envsBuilding 118/256 envsBuilding 119/256 envsBuilding 120/256 envsBuilding 121/256 envsBuilding 122/256 envsBuilding 123/256 envsBuilding 124/256 envsBuilding 125/256 envsBuilding 126/256 envsBuilding 127/256 envsBuilding 128/256 envsBuilding 129/256 envsBuilding 130/256 envsBuilding 131/256 envsBuilding 132/256 envsBuilding 133/256 envsBuilding 134/256 envsBuilding 135/256 envsBuilding 136/256 envsBuilding 137/256 envsBuilding 138/256 envsBuilding 139/256 envsBuilding 140/256 envsBuilding 141/256 envsBuilding 142/256 envsBuilding 143/256 envsBuilding 144/256 envsBuilding 145/256 envsBuilding 146/256 envsBuilding 147/256 envsBuilding 148/256 envsBuilding 149/256 envsBuilding 150/256 envsBuilding 151/256 envsBuilding 152/256 envsBuilding 153/256 envsBuilding 154/256 envsBuilding 155/256 envsBuilding 156/256 envsBuilding 157/256 envsBuilding 158/256 envsBuilding 159/256 envsBuilding 160/256 envsBuilding 161/256 envsBuilding 162/256 envsBuilding 163/256 envsBuilding 164/256 envsBuilding 165/256 envsBuilding 166/256 envsBuilding 167/256 envsBuilding 168/256 envsBuilding 169/256 envsBuilding 170/256 envsBuilding 171/256 envsBuilding 172/256 envsBuilding 173/256 envsBuilding 174/256 envsBuilding 175/256 envsBuilding 176/256 envsBuilding 177/256 envsBuilding 178/256 envsBuilding 179/256 envsBuilding 180/256 envsBuilding 181/256 envsBuilding 182/256 envsBuilding 183/256 envsBuilding 184/256 envsBuilding 185/256 envsBuilding 186/256 envsBuilding 187/256 envsBuilding 188/256 envsBuilding 189/256 envsBuilding 190/256 envsBuilding 191/256 envsBuilding 192/256 envsBuilding 193/256 envsBuilding 194/256 envsBuilding 195/256 envsBuilding 196/256 envsBuilding 197/256 envsBuilding 198/256 envsBuilding 199/256 envsBuilding 200/256 envsBuilding 201/256 envsBuilding 202/256 envsBuilding 203/256 envsBuilding 204/256 envsBuilding 205/256 envsBuilding 206/256 envsBuilding 207/256 envsBuilding 208/256 envsBuilding 209/256 envsBuilding 210/256 envsBuilding 211/256 envsBuilding 212/256 envsBuilding 213/256 envsBuilding 214/256 envsBuilding 215/256 envsBuilding 216/256 envsBuilding 217/256 envsBuilding 218/256 envsBuilding 219/256 envsBuilding 220/256 envsBuilding 221/256 envsBuilding 222/256 envsBuilding 223/256 envsBuilding 224/256 envsBuilding 225/256 envsBuilding 226/256 envsBuilding 227/256 envsBuilding 228/256 envsBuilding 229/256 envsBuilding 230/256 envsBuilding 231/256 envsBuilding 232/256 envsBuilding 233/256 envsBuilding 234/256 envsBuilding 235/256 envsBuilding 236/256 envsBuilding 237/256 envsBuilding 238/256 envsBuilding 239/256 envsBuilding 240/256 envsBuilding 241/256 envsBuilding 242/256 envsBuilding 243/256 envsBuilding 244/256 envsBuilding 245/256 envsBuilding 246/256 envsBuilding 247/256 envsBuilding 248/256 envsBuilding 249/256 envsBuilding 250/256 envsBuilding 251/256 envsBuilding 252/256 envsBuilding 253/256 envsBuilding 254/256 envsBuilding 255/256 envsBuilding 256/256 envs
+
+Loading 1/1 motion files: data/motions/humanoid/humanoid_spinkick.pkl
+Loaded motion file: data/motions/humanoid/humanoid_spinkick.pkl
+Loaded 1 motions with a total length of 1.283s.
+Building Obj:0 in 256/256 envs
+Initializing simulation...
+Char 0 properties
+	DoFs: 28
+	Mass: 50.050 kg
+
+Building DARE agent
+Total parameter count: 2567220
+Loaded model parameters from /home/y/my_mimic_mixgrpo/MimicKit/output/paper_benchmark/dare_spinkick_2k_8192_seed0/model.pt
+{"completion_rate": 1.0, "method": "dare", "motion": "spinkick", "summary": "/home/y/my_mimic_mixgrpo/MimicKit/output/paper_benchmark/dare_spinkick_2k_8192_seed0/eval/final/summary.json"}
+2026-09-04T05:24:12Z [16,684ms] [Warning] [omni.physx.plugin] USD stage detach not called, holding a loose ptr to a stage!
+2026-09-04T05:24:12Z [17,071ms] [Warning] [carb] Recursive unloadAllPlugins() detected!

@@ -1,0 +1,23 @@
+*.pyc
+
+.vs/
+__pycache__/
+# Keep large experiment artifacts out of Git, but track auditable logs and
+# compact evaluation summaries by default.
+output/*
+output/**/*
+!output/**/
+!output/**/log.txt
+!output/**/console.log
+!output/**/train_metrics.jsonl
+!output/**/summary.json
+.vscode/
+wandb/
+PAPER/*.aux
+PAPER/*.log
+PAPER/*.synctex.gz
+PAPER/build/
+
+# Licensed third-party interaction assets are available to local experiments,
+# but their upstream licenses do not permit redistribution from this repo.
+data/external_interaction_assets/raw/

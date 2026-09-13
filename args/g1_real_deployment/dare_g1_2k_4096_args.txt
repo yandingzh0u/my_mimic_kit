@@ -1,0 +1,10 @@
+--mode train
+--num_envs 4096
+--devices cuda:0
+--engine_config data/engines/isaac_lab_engine.yaml
+--agent_config data/agents/g1_real_deployment/dare_g1_sim2real_agent.yaml
+--max_samples 262144000
+--rand_seed 0
+--visualize false
+--save_int_models true
+--logger txt
