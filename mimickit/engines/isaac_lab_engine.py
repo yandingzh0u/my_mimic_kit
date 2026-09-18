@@ -935,10 +935,13 @@ class IsaacLabEngine(engine.Engine):
                                                        angular_damping=0.01,
                                                        max_linear_velocity=1000.0,
                                                        max_angular_velocity=1000.0)
+        articulation_props = sim_utils.ArticulationRootPropertiesCfg(
+            articulation_enabled=False)
         usd_asset_file = self._parse_usd_path(obj_cfg.asset_file)
         usd_cfg = sim_utils.UsdFileCfg(usd_path=usd_asset_file, 
                                        visual_material=visual_material, 
                                        rigid_props=rigid_props,
+                                       articulation_props=articulation_props,
                                        activate_contact_sensors=True)
         
         prim_path = OBJ_PATH_TEMPLATE.format(env_id, obj_id)

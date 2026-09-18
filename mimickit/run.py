@@ -128,6 +128,17 @@ def run(rank, num_procs, device, master_port, args):
     save_int_models = args.parse_bool("save_int_models", False)
     max_samples = args.parse_int("max_samples", np.iinfo(np.int64).max)
 
+    if (resume_file != ""):
+        resume_dir = os.path.dirname(os.path.abspath(resume_file))
+        requested_dir = os.path.abspath(out_dir)
+        if requested_dir not in (os.path.abspath("output"),
+                                 os.path.abspath("output/"),
+                                 resume_dir):
+            raise ValueError(
+                "--resume_file must resume in its original directory: {}"
+                .format(resume_dir))
+        out_dir = resume_dir
+
     mp_util.init(rank, num_procs, device, master_port)
 
     set_rand_seed(args)
@@ -153,7 +164,8 @@ def run(rank, num_procs, device, master_port, args):
         print("Resume initial reset mode: {}".format(resume_initial_reset), flush=True)
 
     if (mode == "train"):
-        save_config_files(args, out_dir)
+        if (resume_file == ""):
+            save_config_files(args, out_dir)
         train(agent=agent, max_samples=max_samples, out_dir=out_dir, 
               save_int_models=save_int_models, logger_type=logger_type)
         
