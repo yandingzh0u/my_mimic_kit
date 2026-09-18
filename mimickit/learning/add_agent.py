@@ -31,12 +31,7 @@ class ADDAgent(amp_agent.AMPAgent):
         space = self._env.get_disc_obs_space()
         dtype = torch_util.numpy_dtype_to_torch(space.dtype)
         self._disc_obs_norm = diff_normalizer.DiffNormalizer(
-            space.shape, device=self._device, dtype=dtype,
-            groups=self._get_disc_normalizer_groups())
-
-    def _get_disc_normalizer_groups(self):
-        """Return optional differential-coordinate groups for normalization."""
-        return None
+            space.shape, device=self._device, dtype=dtype)
 
     def _record_data_post_step(self, next_obs, reward, done, next_info):
         super(amp_agent.AMPAgent, self)._record_data_post_step(

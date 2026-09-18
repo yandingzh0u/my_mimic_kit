@@ -1,5 +1,4 @@
 agent_name: "DARE"
-
 model:
   actor_net: "fc_2layers_1024units"
   actor_init_output_scale: 0.01
@@ -7,11 +6,9 @@ model:
   action_std: 0.05
   critic_net: "fc_2layers_1024units"
   disc_net: "fc_2layers_1024units"
-
 actor_optimizer: {type: "SGD", learning_rate: 1e-4}
 critic_optimizer: {type: "SGD", learning_rate: 1e-4}
 disc_optimizer: {type: "SGD", learning_rate: 2.5e-4, weight_decay: 0.0001}
-
 discount: 0.99
 steps_per_iter: 32
 iters_per_output: 100
@@ -38,3 +35,6 @@ disc_eval_batch_size: 0
 disc_reward_scale: 2
 task_reward_weight: 0.0
 disc_reward_weight: 1.0
+disc_anchor_calibration: true
+reward_calibration_mode: "anchor_root"
+reward_target_mode: "conventional"

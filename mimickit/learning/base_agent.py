@@ -246,6 +246,7 @@ class BaseAgent(torch.nn.Module):
             "exp_buffer_sampling_state": (
                 self._exp_buffer.sampling_state_dict()),
             "rng_state": self._get_rng_state(),
+            "agent_extra_state": self._get_checkpoint_extra_state(),
             "replay_buffer_states": {
                 name: buffer.state_dict()
                 for name, buffer in self._get_replay_buffers().items()
@@ -291,6 +292,8 @@ class BaseAgent(torch.nn.Module):
                     saved_context, self._checkpoint_context))
 
         self.load_state_dict(checkpoint["model_state_dict"])
+        self._load_checkpoint_extra_state(
+            checkpoint.get("agent_extra_state", {}))
 
         normalizers = {
             name: module
@@ -435,8 +438,7 @@ class BaseAgent(torch.nn.Module):
     @staticmethod
     def _is_training_normalizer(module):
         return (isinstance(module, normalizer.Normalizer)
-                or (isinstance(module, diff_normalizer.DiffNormalizer)
-                    and module.get_group_scales() is not None))
+                or isinstance(module, diff_normalizer.DiffNormalizer))
 
     def _update_sample_count(self):
         sample_count = self._exp_buffer.get_total_samples()
@@ -751,6 +753,12 @@ class BaseAgent(torch.nn.Module):
         if (torch.cuda.is_available()):
             state["cuda"] = torch.cuda.get_rng_state_all()
         return state
+
+    def _get_checkpoint_extra_state(self):
+        return {}
+
+    def _load_checkpoint_extra_state(self, state):
+        return
 
     @contextlib.contextmanager
     def _preserve_rng_state(self):

@@ -249,11 +249,10 @@ def test_full_checkpoint_restores_training_state_and_keeps_model_compatible(
     assert torch.equal(restored_next_sample_idx, expected_next_sample_idx)
 
 
-def test_checkpoint_restores_differential_group_pending_statistics(tmp_path):
-    groups = (("a", (0, 1)), ("b", (2, 3)))
+def test_checkpoint_restores_differential_pending_statistics(tmp_path):
     agent = _TinyAgent(_config(), _TinyEnv(), "cpu")
     agent._disc_obs_norm = diff_normalizer.DiffNormalizer(
-        (4,), device="cpu", groups=groups)
+        (4,), device="cpu")
     pending = torch.tensor([[1.0, -2.0, 3.0, -4.0]])
     agent._disc_obs_norm.record(pending)
     checkpoint_file = tmp_path / "group_checkpoint.pt"
@@ -261,15 +260,13 @@ def test_checkpoint_restores_differential_group_pending_statistics(tmp_path):
 
     restored = _TinyAgent(_config(), _TinyEnv(), "cpu")
     restored._disc_obs_norm = diff_normalizer.DiffNormalizer(
-        (4,), device="cpu", groups=groups)
+        (4,), device="cpu")
     restored.resume(checkpoint_file)
 
     state = restored._disc_obs_norm.training_state_dict()
     assert state["new_count"] == 1
     torch.testing.assert_close(state["new_sum_abs"],
                                agent._disc_obs_norm._new_sum_abs.cpu())
-    torch.testing.assert_close(state["new_sum_sq"],
-                               agent._disc_obs_norm._new_sum_sq.cpu())
 
 
 def test_resume_rejects_weights_only_and_incompatible_num_envs(tmp_path):

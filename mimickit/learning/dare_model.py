@@ -1,14 +1,7 @@
-import math
-
 import torch
 
 import learning.add_model as add_model
 import learning.nets.net_builder as net_builder
-
-
-# Fixed 20%-80% softplus-slope transition span.  This is a method constant,
-# not a task or motion configuration parameter.
-ANCHOR_GAP_TARGET = math.log(16.0)
 
 
 class GroupSeparableDiscLayers(torch.nn.Module):
@@ -58,11 +51,12 @@ class GroupSeparableDiscLayers(torch.nn.Module):
 
 
 class DAREModel(add_model.ADDModel):
-    """DARE critic with separate classifier and reward readouts."""
+    """DARE critic with the original calibrated classifier output."""
 
     def __init__(self, config, env):
         super().__init__(config, env)
         self.register_buffer("_disc_logit_scale", torch.ones(()))
+        self.register_buffer("_disc_logit_center", torch.zeros(()))
         self.register_buffer(
             "_disc_logit_calibrated", torch.zeros((), dtype=torch.bool))
 
@@ -101,20 +95,24 @@ class DAREModel(add_model.ADDModel):
     def eval_disc_raw(self, disc_obs):
         return self._disc_logits(self._disc_layers(disc_obs))
 
-    def eval_disc_bce(self, disc_obs):
-        """Raw critic logit used by the discriminator objective."""
-        return self.eval_disc_raw(disc_obs)
-
-    def eval_disc_reward(self, disc_obs):
-        """Calibrated critic logit used only by the policy reward."""
-        return self._disc_logit_scale * self.eval_disc_raw(disc_obs)
-
     def eval_disc(self, disc_obs):
-        """Backward-compatible alias for the calibrated reward readout."""
-        return self.eval_disc_reward(disc_obs)
+        # One-shot affine logit standardization: the calibrated logit is
+        # centered on the softplus transition region and unit-scaled by the
+        # balanced calibration spread, i.e. z = (f - c_f) / s_f.
+        return self._disc_logit_scale * (
+            self.eval_disc_raw(disc_obs) - self._disc_logit_center)
+
+    @torch.no_grad()
+    def set_disc_logit_calibration(self, center, scale):
+        """Set the affine calibration (center c_f, kappa = 1 / s_f)."""
+        self._disc_logit_center.fill_(float(center))
+        self._disc_logit_scale.fill_(float(scale))
+        self._disc_logit_calibrated.fill_(True)
 
     @torch.no_grad()
     def set_disc_logit_scale(self, scale):
+        # Legacy scale-only entry point (zero center), kept for compatibility.
+        self._disc_logit_center.fill_(0.0)
         self._disc_logit_scale.fill_(float(scale))
         self._disc_logit_calibrated.fill_(True)
 
@@ -124,11 +122,15 @@ class DAREModel(add_model.ADDModel):
     def get_disc_logit_scale(self):
         return self._disc_logit_scale.clone()
 
+    def get_disc_logit_center(self):
+        return self._disc_logit_center.clone()
+
     def _load_from_state_dict(self, state_dict, prefix, local_metadata,
                               strict, missing_keys, unexpected_keys,
                               error_msgs):
         # Legacy v6 model/checkpoint state dicts have no calibration buffers.
         state_dict.setdefault(prefix + "_disc_logit_scale", torch.ones(()))
+        state_dict.setdefault(prefix + "_disc_logit_center", torch.zeros(()))
         state_dict.setdefault(
             prefix + "_disc_logit_calibrated",
             torch.zeros((), dtype=torch.bool))
