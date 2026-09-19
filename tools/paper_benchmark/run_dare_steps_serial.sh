@@ -86,13 +86,17 @@ run_smoke() {
   touch "$out_dir/DONE"
 }
 
+# NOTE: the step7 (nologitreg) arm was removed.  DARE spectral-normalizes
+# `_disc_logits`, so sum(W_eff^2) == 1 is a constant and `disc_logit_reg`
+# can never produce a gradient: step6 (0.01) and step7 (0) are the SAME
+# model, so running both would only burn 2 x 3.5h and yield a meaningless
+# ablation.  See DAREAgent._compute_disc_loss.
 declare -a jobs=(
   "dare_v6_clean_climb_3000_8192_seed0|data/agents/dare_humanoid_agent.yaml"
   "dare_step3_anchorroot_2080_climb_3000_8192_seed0|data/agents/step_variants/dare_step3_anchorroot_agent.yaml"
   "dare_step4_objective_target_climb_3000_8192_seed0|data/agents/step_variants/dare_step4_objective_agent.yaml"
   "dare_step5_fixedprobe_climb_3000_8192_seed0|data/agents/step_variants/dare_step5_adaptive_agent.yaml"
   "dare_step6_stablefreeze_climb_3000_8192_seed0|data/agents/step_variants/dare_step6_stablefreeze_agent.yaml"
-  "dare_step7_nologitreg_climb_3000_8192_seed0|data/agents/step_variants/dare_step7_nologitreg_agent.yaml"
 )
 
 for job in "${jobs[@]}"; do

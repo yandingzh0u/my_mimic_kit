@@ -2,6 +2,7 @@ import hashlib
 import numpy as np
 import os
 import shutil
+import subprocess
 import sys
 import time
 
@@ -178,9 +179,44 @@ def run(rank, num_procs, device, master_port, args):
 
     return
 
+def check_pcie_link():
+    """Warn when a GPU is running on a degraded PCIe link.
+
+    Simulation throughput and host<->device transfers collapse when a card
+    negotiates fewer lanes than it supports (e.g. a x16 card sitting in a x4
+    slot, or a riser that only wires one lane).  nvidia-smi reports this
+    directly, so the training entry point checks it once and reports it here
+    instead of leaving it to a console warning buried in the startup log.
+    """
+    try:
+        out = subprocess.run(
+            ["nvidia-smi",
+             "--query-gpu=index,name,pcie.link.gen.current,pcie.link.gen.max,"
+             "pcie.link.width.current,pcie.link.width.max",
+             "--format=csv,noheader"],
+            capture_output=True, text=True, timeout=15)
+    except Exception:
+        return
+    for line in out.stdout.strip().splitlines():
+        fields = [field.strip() for field in line.split(",")]
+        if len(fields) != 6:
+            continue
+        index, name, _, _, width_cur, width_max = fields
+        if not (width_cur.isdigit() and width_max.isdigit()):
+            continue
+        if int(width_cur) < int(width_max):
+            Logger.print(
+                "WARNING: GPU {} ({}) negotiated PCIe x{} but supports x{}. "
+                "Check the slot (prefer a CPU x16 slot), any riser/adapter and "
+                "the BIOS bifurcation setting; effective bandwidth is reduced "
+                "up to {}x.".format(index, name, width_cur, width_max,
+                                    int(width_max) // max(int(width_cur), 1)))
+
+
 def main(argv):
     root_rank = 0
     args = load_args(argv)
+    check_pcie_link()
     master_port = args.parse_int("master_port", None)
     devices = args.parse_strings("devices", ["cuda:0"])
     

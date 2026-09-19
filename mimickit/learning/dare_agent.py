@@ -83,6 +83,9 @@ class DAREAgent(add_agent.ADDAgent):
     """DARE with original classifier and optional reward-only calibration."""
 
     CALIBRATION_BATCH = 16384
+    # How often the hidden-isometry diagnostic is evaluated.  It needs one
+    # backward pass per hidden unit, so once per this many iterations.
+    ISO_PROBE_ITERS = 100
 
     def __init__(self, config, env, device):
         self._reward_mode = config.get("reward_calibration_mode", "legacy")
@@ -123,6 +126,7 @@ class DAREAgent(add_agent.ADDAgent):
         self._reward_calibration_success = False
         self._adaptive_calibration_success = False
         self._reward_delta_stats = {}
+        self._logit_reg_warned = False
         super().__init__(config, env, device)
         if self._disc_grad_penalty != 0:
             raise ValueError("DARE requires disc_grad_penalty=0")
@@ -133,6 +137,21 @@ class DAREAgent(add_agent.ADDAgent):
         self._calibration_std_raw = float("nan")
         if not self._enable_anchor_calibration:
             Logger.print("DARE anchor calibration disabled: fixed kappa=1.0000")
+        elif self._reward_mode != "anchor_root":
+            # The two calibration switches have independent defaults
+            # (disc_anchor_calibration=True, reward_calibration_mode="legacy"),
+            # so a config that sets neither silently runs with the classifier
+            # calibrated and the reward scale uncalibrated.  In that state every
+            # reward-side calibration metric stays constant (Reward_Calibrated=0,
+            # Reward_Scale=1) or NaN (Reward_Delta_Logit_*, Reward_Probe_Prob),
+            # which is easy to overlook.  Make the half-configuration loud.
+            Logger.print(
+                "WARNING: disc_anchor_calibration is enabled but "
+                "reward_calibration_mode='{}' (not 'anchor_root'): the "
+                "reward-scale calibration will never run. Set "
+                "reward_calibration_mode: \"anchor_root\" to enable it, or set "
+                "disc_anchor_calibration: false to disable both."
+                .format(self._reward_mode))
 
     def _build_model(self, config):
         self._model = dare_model.DAREModel(config["model"], self._env)
@@ -197,6 +216,8 @@ class DAREAgent(add_agent.ADDAgent):
             self._adapt_reward_scale()
         info = super()._compute_rewards()
         info.update(self._reward_log_info())
+        if self._iter % self.ISO_PROBE_ITERS == 0:
+            info.update(self._disc_isometry_metrics())
         return info
 
     @torch.no_grad()
@@ -335,21 +356,42 @@ class DAREAgent(add_agent.ADDAgent):
     def _compute_disc_loss(self, batch):
         """Original v6 zero-vs-residual BCE objective (without GP)."""
         # Positive first preserves a30's spectral-normalization update order.
-        pos_logit = self._model.eval_disc(
+        # NOTE: discriminator training uses the RAW logit f_raw. The affine
+        # calibration (z = (f - c) / s) is a reward-side transform only; feeding
+        # it into the BCE would make the calibration scale kappa = 1/s_f change
+        # the classifier's effective loss scale as well.
+        pos_logit = self._model.eval_disc_raw(
             self._pos_diff.unsqueeze(0)).squeeze(-1)
         current_diff = batch["disc_obs_demo"] - batch["disc_obs"]
         replay_data = self._disc_buffer.sample(current_diff.shape[0])
         replay_diff = replay_data["disc_obs_demo"] - replay_data["disc_obs"]
         norm_diff = self._disc_obs_norm.normalize(
             torch.cat((current_diff, replay_diff), dim=0))
-        neg_logit = self._model.eval_disc(norm_diff).squeeze(-1)
+        neg_logit = self._model.eval_disc_raw(norm_diff).squeeze(-1)
         pos_loss = self._disc_loss_pos(pos_logit)
         neg_loss = self._disc_loss_neg(neg_logit)
         cls_loss = 0.5 * (pos_loss + neg_loss)
-        logit_weights = self._model.get_disc_logit_weights()
-        logit_loss = torch.sum(torch.square(logit_weights))
-        logit_reg_loss = self._disc_logit_reg * logit_loss
-        disc_loss = cls_loss + logit_reg_loss
+        # `disc_logit_reg` is structurally inert for DARE, so it is NOT added to
+        # the objective.  DARE spectral-normalizes `_disc_logits` (see
+        # DAREModel._build_disc), which makes the effective weight matrix
+        # scale-invariant in the raw parameter: ||W_eff||_2 == 1 holds after
+        # every optimizer step, so sum(W_eff^2) is a constant whose gradient is
+        # exactly zero.  Dropping the term is therefore bit-exact with respect
+        # to the previous objective; reporting it as zero plus the one-time
+        # warning keeps the dead knob visible instead of silently training with
+        # a regularizer that cannot act.  (AMP/ADD do not normalize this layer,
+        # so their term is genuine - this only affects DARE.)
+        if self._disc_logit_reg != 0 and not self._logit_reg_warned:
+            self._logit_reg_warned = True
+            Logger.print(
+                "WARNING: disc_logit_reg={} has no effect for DARE - the logit "
+                "layer is spectral-normalized, so sum(W_eff^2)==1 is a "
+                "constant with zero gradient. Any ablation arm that only "
+                "toggles this value compares two identical models. Set it to 0 "
+                "or redesign the arm.".format(self._disc_logit_reg))
+        logit_loss = torch.zeros((), device=self._device)
+        logit_reg_loss = torch.zeros((), device=self._device)
+        disc_loss = cls_loss
         neg_acc, pos_acc = self._compute_disc_acc(neg_logit, pos_logit)
         zero = torch.zeros((), device=self._device)
         return {
@@ -372,11 +414,55 @@ class DAREAgent(add_agent.ADDAgent):
             "disc_anchor_calibration_enabled": torch.tensor(
                 float(self._enable_anchor_calibration), device=self._device),
             "disc_logit_scale": self._model.get_disc_logit_scale(),
+            # logits above are raw now, so "gap" and "raw gap" coincide; keep
+            # both keys for downstream log tooling compatibility.
             "disc_anchor_gap": (pos_logit.mean() - neg_logit.mean()).detach(),
             "disc_anchor_gap_raw": (
-                (pos_logit.mean() - neg_logit.mean())
-                / self._model.get_disc_logit_scale()).detach(),
+                pos_logit.mean() - neg_logit.mean()).detach(),
         }
+
+    def _disc_isometry_metrics(self):
+        """Hidden-isometry diagnostic: sum(sigma^2(J_h)) / dim.
+
+        This is the metric that says whether the hidden discriminator still
+        preserves every residual direction (1.0) or has contracted them away.
+        Measured on Climb: the historical spectral-norm + ReLU backbone sits at
+        0.020, the semi-orthogonal + GroupSort geometry at 1.000.  Note that
+        ||grad f|| is *not* the right target - the output layer's unit-norm
+        weight is a projection onto the tangent subspace, so ||grad f|| stays
+        below 1 by construction and only says how much sensitivity the
+        discriminator chose to read out.
+
+        Costs one backward pass per hidden unit (1022 here), so it is only
+        evaluated every ISO_PROBE_ITERS iterations.
+        """
+        was_training = self._model.training
+        self._model.eval()
+        try:
+            width = int(self._disc_obs_norm.get_shape()[0])
+            # Probe at a generic (non-zero) point.  At x = 0 every GroupSort
+            # pair is tied, so PyTorch splits the subgradient between the two
+            # entries and the Jacobian is no longer the permutation the
+            # activation actually applies - it reported 0.25 instead of 1.0
+            # with a min/max ratio of 7.6e-08.  A fixed seed keeps the value
+            # reproducible across runs.
+            generator = torch.Generator().manual_seed(0)
+            probe = torch.randn(1, width, generator=generator)
+            probe = probe.to(self._device)
+            with torch.enable_grad():
+                jacobian = torch.autograd.functional.jacobian(
+                    self._model.eval_disc_hidden, probe)
+            jacobian = jacobian.detach()
+            jacobian = jacobian.reshape(jacobian.shape[1], jacobian.shape[3])
+            singular = torch.linalg.svdvals(jacobian)
+            isometry = (singular.square().sum() / singular.numel())
+            return {
+                "disc_hidden_isometry": isometry,
+                "disc_hidden_isometry_min_ratio": (
+                    singular.min() / singular.max().clamp_min(1e-12)),
+            }
+        finally:
+            self._model.train(was_training)
 
     def _reward_log_info(self):
         stats = self._reward_delta_stats

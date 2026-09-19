@@ -156,7 +156,11 @@ def test_reward_scale_solver_reports_no_root():
 
 def test_reward_forward_uses_training_mode_sn_updates_like_a30():
     agent = object.__new__(DAREAgent); torch.nn.Module.__init__(agent)
-    agent._model = DAREModel(_config(), _Env()).train()
+    # Historical SN semantics: pin the legacy geometry, since the default
+    # (semi-orthogonal) backbone has no spectral-norm layers to update.
+    config = _config()
+    config["disc_hidden_geometry"] = "full_sn"
+    agent._model = DAREModel(config, _Env()).train()
     agent._disc_reward_scale = 2.; agent._disc_eval_batch_size = 0
     agent._reward_calibrated = False
     before = {n: v.clone() for n, v in agent._model.named_buffers()
@@ -170,6 +174,127 @@ def test_reward_forward_uses_training_mode_sn_updates_like_a30():
 def test_disc_loss_evaluates_positive_before_negative():
     source = inspect.getsource(DAREAgent._compute_disc_loss)
     assert source.index("pos_logit =") < source.index("neg_logit =")
+
+
+def test_bc_separation_disc_loss_raw_reward_calibrated():
+    """B/C decoupling: discriminator trains on the RAW logit, reward on z.
+
+     B = spectral norm -> normalized geometry (inside the raw network)
+     C = affine calibration z = (f_raw - c_f) / s_f -> reward origin/scale
+    The calibration must therefore never enter the BCE, otherwise kappa = 1/s_f
+    silently rescales the classifier loss too.
+    """
+    disc_src = inspect.getsource(DAREAgent._compute_disc_loss)
+    assert "eval_disc_raw" in disc_src
+    assert "eval_disc(" not in disc_src
+    reward_src = inspect.getsource(DAREAgent._calc_disc_rewards)
+    assert "eval_disc" in reward_src
+
+
+def test_dare_logit_reg_is_removed_not_silently_inert():
+    """DARE's `_disc_logits` is spectral-normalized, so the effective weight
+    always satisfies ||W_eff||_2 == 1 and sum(W_eff^2) is a constant with an
+    exactly zero gradient.  The objective must not add that term (it would be
+    dead weight), and a non-zero config value must be reported rather than
+    silently ignored, otherwise an ablation arm that only toggles it compares
+    two identical models.
+    """
+    disc_src = inspect.getsource(DAREAgent._compute_disc_loss)
+    assert "logit_reg_loss" in disc_src          # still reported in the info dict
+    assert "_disc_logit_reg * logit_loss" not in disc_src
+    assert "has no effect for DARE" in disc_src
+    assert "get_disc_logit_weights" not in disc_src
+
+
+def _build_disc_model(geometry, net="fc_2layers_128units"):
+    config = _config()
+    config["disc_net"] = net
+    config["disc_group_embedding"] = True
+    config["disc_hidden_geometry"] = geometry
+    return DAREModel(config, _Env())
+
+
+# Enough width for the isometry tests: the largest error group has 84 dims and
+# there are 7 groups, so the per-group encoder only stays a tall (isometric
+# embedding) matrix when width // 7 >= 84.  A narrower discriminator turns the
+# big encoder into a wide, direction-dropping map - which is a real property of
+# the construction, not a bug, but it makes the isometry untestable.
+# fc_2layers_1024units (1024 // 7 = 146) is the narrowest registered net that
+# satisfies this; fc_2layers_512units (73 per group) does not.
+ISO_NET = "fc_2layers_1024units"
+
+
+def _hidden_isometry(model, seeds=(0,)):
+    """sum(sigma^2(J_h)) / dim of the hidden discriminator map."""
+    values = []
+    for seed in seeds:
+        torch.manual_seed(seed)
+        probe = torch.randn(1, sum(_Env.dims)) * 0.5
+        jacobian = torch.autograd.functional.jacobian(
+            model.eval_disc_hidden, probe).detach()
+        # jacobian has shape (1, out, 1, in).  Feeding the 4-D array to
+        # numpy.linalg.svd silently stacks the wrong axes and returns garbage
+        # (it reported 1.0000 for a clearly non-isometric map), so reshape.
+        jacobian = jacobian.reshape(jacobian.shape[1], jacobian.shape[3])
+        singular = torch.linalg.svdvals(jacobian)
+        values.append(float(singular.square().sum() / singular.numel()))
+    return sum(values) / len(values)
+
+
+def test_hidden_discriminator_is_isometric():
+    """The new geometry must be norm-preserving as a structural guarantee.
+
+    Every hidden linear is (semi-)orthogonal (all singular values 1) and
+    GroupSort(2) has a permutation Jacobian, so the composite hidden map keeps
+    ||J_h v|| = ||v|| for every v.  This is a property of the construction, not
+    something the checkpoint happens to learn.
+    """
+    assert _hidden_isometry(_build_disc_model("semi_orthogonal", ISO_NET)) > 0.99
+
+
+def test_full_sn_hidden_discriminator_contracts():
+    """The historical backbone must stay reproducible and is NOT isometric.
+
+    Spectral normalization only pins the largest singular value and the ReLU
+    zeroes roughly half the units, so this geometry contracts most directions.
+    Pinning the value documents why the new geometry exists.
+    """
+    assert _hidden_isometry(_build_disc_model("full_sn", ISO_NET)) < 0.5
+
+
+def test_square_trunk_keeps_every_encoder_direction():
+    """The trunk must be square, or the isometry is capped at width / total.
+
+    A rectangular R^total -> R^w trunk is a partial isometry whose row space
+    meets the encoder image in about w / total of its dimensions (measured
+    0.500 for 512/1022 and 1.000 for 1022/1022).
+    """
+    for geometry in ("semi_orthogonal",):
+        layers = _build_disc_model(geometry, ISO_NET)._disc_layers
+        rows, cols = layers.trunk[0].weight.shape
+        assert len(layers.encoders) == 7
+        assert (rows, cols) == (layers.total_width, layers.total_width)
+        assert rows == 7 * layers.group_width
+    # The legacy geometry must remain rectangular (the committed ablations).
+    legacy = _build_disc_model("full_sn", ISO_NET)._disc_layers
+    assert legacy.trunk[0].weight.shape == (512, 1022)
+
+
+def test_dare_configs_state_calibration_switches_explicitly():
+    """disc_anchor_calibration defaults to True while reward_calibration_mode
+    defaults to "legacy" (reward calibration off).  A config that sets neither
+    runs half calibrated with no error, so every DARE config must state both.
+    """
+    import yaml
+    for name in ["dare_humanoid_agent.yaml",
+                 "ablations/dare_climb_base_agent.yaml",
+                 "ablations/dare_climb_wocalibration_agent.yaml",
+                 "ablations/dare_climb_wogroup_agent.yaml"]:
+        path = ROOT / "data/agents" / name
+        config = yaml.safe_load(path.read_text())
+        assert "disc_anchor_calibration" in config, name
+        assert "reward_calibration_mode" in config, name
+        assert config.get("disc_logit_reg") == 0, name
 
 
 def test_config_restores_clean_v6_semantics():
