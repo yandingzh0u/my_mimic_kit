@@ -28,9 +28,7 @@
 \pagestyle{empty}
 
 \begin{abstract}
-Adversarial imitation learning reduces manual reward engineering by learning policy rewards from a discriminator. However, when discriminator scores are reused as rewards, the discriminator is no longer merely a classifier: its sensitivity to input variations and the numerical scale of its outputs jointly determine the shape and strength of the policy learning signal. These properties can vary substantially across motions and objectives, causing a fixed discriminator configuration to produce inconsistent reward shaping even when classification remains stable.
-We present DARE, a differential adversarial reward formulation for reference-conditioned humanoid motion tracking that decouples critic geometry from reward calibration. DARE applies spectral normalization throughout the differential discriminator to bound its sensitivity to tracking residuals, while independently calibrating the reward-producing score scale from residual statistics observed during training. This separation enables a single configuration to be reused across motions without motion-specific reward or discriminator tuning.
-We evaluate DARE on six humanoid skills with diverse dynamics and contact patterns. DARE outperforms DeepMimic, AMP, and ADD on all four macro-averaged geometric tracking metrics, while achieving reference-consistent foot progression and the lowest lateral drift. These results highlight critic geometry and reward calibration as distinct design considerations for learned imitation rewards.
+Physics-based humanoid motion imitation requires simultaneously tracking multiple objectives, including root motion, body pose, and velocities. Existing methods often rely on handcrafted reward terms with manually tuned weights and scales, which can require substantial adjustment across different motions. We propose DARE (Differential Adversarial Reward Equalization), an adversarially learned reward method based on the differential between the reference motion and the policy state. DARE represents perfect tracking as a zero differential and learns a unified tracking reward from policy-generated residuals, while controlling discriminator sensitivity and automatically calibrating its output scale to support a consistent reward configuration across motions. We evaluate DARE on multiple humanoid skills with diverse dynamics and contact patterns. The results show that DARE achieves stable and accurate motion tracking without motion-specific reward tuning.
 \end{abstract}
 
 \section{Introduction}
@@ -191,30 +189,29 @@ actually occurs during training.
 
 \subsection{Differential Adversarial Objectives}
 \label{sec:learned}
+
 Differential adversarial learning provides such a learned aggregation
 \cite{zhang2025add}. Consider $n$ non-negative objective losses
 $l^1,\ldots,l^n$ collected into a differential vector
-$\Delta=(l^1,\ldots,l^n)$, each entry recording the gap between the
-current solution and the ideal on one objective; when all objectives are
-simultaneously ideal, $\Delta=0$. A discriminator $D(\Delta)$ is trained
-to separate the ideal zero differential from the nonzero differentials
-produced by the current policy. Since the discriminator receives the
-differentials of all objectives at once, it can learn a nonlinear
-objective aggregation function without fixed per-objective weights. Its
-local sensitivity to objective $i$ is described by
-$\partial D/\partial l^i$: the extent to which the discriminator output
-responds when objective $i$ changes slightly near the current
-differential. Unlike fixed scalarization weights, this local sensitivity
-can vary with the position in the residual space and during training.
-In synchronized motion tracking, the differential is no longer
-restricted to one scalar loss per objective but can be formed directly
-from the feature residual between the current and reference states.
-Perfect tracking again corresponds to the unique zero differential, while
-nonzero differentials retain the error direction and the relations among
-features. The policy reward is generated from the discriminator's score
-on the current differential, for example
-$r_t=-\log(1-D(\Delta_t))$: the closer the current residual is judged to
-the ideal state, the higher the reward.
+$\Delta=(l^1,\ldots,l^n)$, where each entry records the gap between the
+current solution and the ideal on one objective. When all objectives are
+simultaneously ideal, $\Delta=0$. A discriminator is trained to assign a
+high score to the ideal zero differential and lower scores to the nonzero
+differentials produced by the current policy. Because it receives all
+objective differentials jointly, the discriminator can learn a nonlinear
+aggregation of the objectives without fixed per-objective weights. Its
+sensitivity to individual objectives may vary across the residual space
+and throughout training, allowing the learned aggregation to adapt to the
+differential distribution encountered during optimization.
+
+In synchronized motion tracking, the differential can be formed directly
+from the feature residual between the current and reference states rather
+than from one scalar loss per objective. Perfect tracking again corresponds
+to the unique zero differential, while nonzero differentials preserve the
+magnitude, direction, and correlations of the tracking errors. The
+discriminator score can therefore be used to construct a policy reward
+that increases as the current differential is judged more consistent with
+perfect tracking.
 
 \begin{figure*}[t]
 \centering
@@ -228,14 +225,17 @@ and the resulting softplus reward drives the PPO update.}
 
 \section{DARE: Differential Adversarial Reward Equalization}
 \label{sec:dare}
+
 \subsection{Learned Differential Reward}
 \label{sec:reward}
+
 Motion tracking involves multiple objectives with different physical meanings.
 Rather than compressing them into separately weighted scalar terms, DARE
-forms one full reference--policy residual. Let \(\phi(s_t)\in\mathbb{R}^{d}\)
-collect the tracked quantities and let \(\nu\in\mathbb{R}^{d}\) contain
-their per-coordinate mean-absolute scales, estimated during early training
-and fixed after the first \(10^{8}\) samples. The normalized differential is
+forms one full reference--policy residual. Let
+\(\phi(s_t)\in\mathbb{R}^{d}\) collect the tracked quantities and let
+\(\nu\in\mathbb{R}^{d}\) contain their per-coordinate mean-absolute scales,
+estimated during early training and fixed after the first \(10^{8}\) samples.
+The normalized differential is
 \(\Delta_t=\delta_t\oslash\nu\), where
 \(\delta_t=\phi(\hat{s}_t)-\phi(s_t)\), and perfect tracking is represented
 by \(\Delta^{+}=0\). Here \(\oslash\) denotes element-wise division.
@@ -249,113 +249,269 @@ and correlations. Two states can therefore have the same aggregate distance
 while differing in which tracked quantities deviate from the reference.
 Let \(q_\pi\) denote the distribution of differentials induced by policy
 \(\pi\). During training, recently generated policy differentials are stored
-in a replay buffer and reused as negative samples for critic updates.
+in a replay buffer and reused as negative samples for discriminator updates.
 
-DARE maps the full differential to a scalar discriminator logit, \(f_\theta:\mathbb{R}^{d}\rightarrow\mathbb{R}\). The corresponding discriminator output is \(D_\theta(\Delta)=\sigma\!\left(f_\theta(\Delta)\right)\in(0,1)\). A larger \(D_\theta(\Delta)\) indicates that the differential is classified as more likely to belong to the positive, perfect-tracking class. Perfect tracking defines the positive differential \(\Delta^+=0\), while differentials induced by policy \(\pi\) form the negative class, with \(\Delta^-\sim q_\pi\). The discriminator is trained to distinguish these two classes:
-\begin{equation}
-\max_{\theta}\ \log D_\theta(\Delta^{+})+\mathbb{E}_{\Delta^{-}\sim q_\pi}\left[\log\bigl(1-D_\theta(\Delta^{-})\bigr)\right].
- \label{eq:game}
-\end{equation}
+DARE maps the full differential to a scalar discriminator logit,
+\(f_\theta:\mathbb{R}^{d}\rightarrow\mathbb{R}\). A larger
+\(f_\theta(\Delta)\) indicates that the differential is judged more
+consistent with perfect tracking. We introduce a global logit scale
+\(\kappa>0\), initialized to \(1\) and determined automatically once by the
+anchor calibration described in Sec.~\ref{sec:calibration}. The scaled logit
+used for discriminator training and policy reward is therefore
+\(\kappa f_\theta(\Delta)\).
 
-The first term encourages a high discriminator output for the positive differential \(\Delta^+\), while the second encourages low outputs for policy-induced negative differentials \(\Delta^-\). As the policy changes, the residuals used to train the discriminator also change. Because the discriminator receives all residual coordinates together and produces a single logit, it learns how the different tracking errors contribute to the final score.
-
-To train the discriminator by loss minimization, we use the balanced negative log-likelihood corresponding to the binary classification objective in Eq.~\eqref{eq:game}. Using \(-\log\sigma(z)=\operatorname{softplus}(-z)\) and \(-\log(1-\sigma(z))=\operatorname{softplus}(z)\), the discriminator loss becomes
+Perfect tracking defines the positive differential \(\Delta^+=0\), while
+differentials induced by policy \(\pi\) form the negative class, with
+\(\Delta^-\sim q_\pi\). The discriminator is trained with the balanced
+binary logistic loss
 \begin{align}
 \mathcal{L}_{\mathrm{DARE}}(\theta)
-&=\frac{1}{2}\,\mathrm{softplus}\!\left[-f_\theta(\Delta^{+})\right] \notag\\
-&\quad+\frac{1}{2}\,\mathbb{E}_{\Delta^{-}\sim q_\pi}\,
-\mathrm{softplus}\!\left[f_\theta(\Delta^{-})\right].
+&=
+\frac{1}{2}\,
+\operatorname{softplus}
+\!\left[-\kappa f_\theta(\Delta^{+})\right]
+\notag\\
+&\quad+
+\frac{1}{2}\,
+\mathbb{E}_{\Delta^{-}\sim q_\pi}
+\operatorname{softplus}
+\!\left[\kappa f_\theta(\Delta^{-})\right].
 \label{eq:dare_loss}
 \end{align}
 
-This objective provides only two types of supervision: the positive differential \(\Delta^+=0\) representing perfect tracking and the policy-induced negative differentials \(\Delta^-\sim q_\pi\). The discriminator therefore learns from data how the different tracking components should jointly determine its logit.
+The first term encourages a large logit for the zero differential, while
+the second encourages lower logits for policy-induced residuals. Because
+the discriminator receives all residual coordinates jointly, it learns
+from data how the different tracking errors should contribute to a single
+score.
 
-The policy then constructs its reward directly from the discriminator logit.
-DARE defines
+The policy reward is constructed from the same scaled logit:
 \begin{equation}
- r_t^{\mathrm{DARE}}
- =-\log\bigl[1-D_\theta(\Delta_t)\bigr]
- =\operatorname{softplus}\bigl[f_\theta(\Delta_t)\bigr],
- \label{eq:reward}
+r_t^{\mathrm{DARE}}
+=
+\operatorname{softplus}
+\!\left[\kappa f_\theta(\Delta_t)\right].
+\label{eq:reward}
 \end{equation}
+Since softplus is strictly increasing, a larger discriminator logit produces
+a larger policy reward. The learned reward therefore encourages the policy
+toward residuals that the discriminator judges more consistent with perfect
+tracking, while jointly accounting for root motion, body pose, and
+velocities.
 
-Since the softplus function is strictly increasing, a larger discriminator logit produces a larger policy reward. The discriminator is trained to assign a high output to the positive differential \(\Delta^+\) and lower outputs to policy-induced negative differentials \(\Delta^-\), so the resulting reward encourages the policy toward states that the discriminator judges more consistent with perfect tracking. The policy can thus improve root motion, body pose, and
-velocities simultaneously through one unified scalar reward.
 
 \subsection{Equalized Discriminator: Sensitivity Constrained by Construction}
 \label{sec:critic}
 
-The differential discriminator must not only distinguish perfect tracking from policy-induced residuals, but also provide the policy with a continuous reward signal that reflects tracking quality. Therefore, the sensitivity of the discriminator to the tracking differential must be controlled. Since perfect tracking always corresponds to the unique zero differential \(\Delta^{+}=0\), excessive sensitivity can cause the discriminator to form an overly steep response near the origin, so that the logit drops rapidly once the residual deviates only slightly from zero. Although such a discriminator can still separate positive and negative samples, it may map nonzero residuals of clearly different quality to a similarly low-score region, thereby weakening the ability of the reward to distinguish different tracking qualities.
+The differential discriminator must not only distinguish perfect tracking
+from policy-induced residuals, but also provide the policy with a continuous
+reward signal that reflects differences in tracking quality. Its sensitivity
+to the tracking differential therefore needs to be controlled. Since perfect
+tracking always corresponds to the unique zero differential
+\(\Delta^{+}=0\), excessive sensitivity near the origin can cause the
+discriminator logit to decrease sharply even for a small deviation from
+zero. In this case, although the discriminator may still separate positive
+and negative samples, nonzero residuals of different quality can be compressed
+into a similar low-score region, weakening the ability of the reward to
+distinguish tracking quality.
 
-A common approach is to introduce a gradient penalty during discriminator training to suppress excessive input sensitivity~\cite{zhang2025add}. However, this introduces an additional regularization strength: if the constraint is too weak, the discriminator may remain overly sensitive; if it is too strong, the discriminator may become overly smooth and lose the ability to distinguish different residuals. DARE therefore constrains the maximum sensitivity of the discriminator directly through the network architecture, without introducing this additional balancing parameter.
+A common approach is to introduce a gradient penalty during discriminator
+training to limit excessive input sensitivity~\cite{zhang2025add}. However,
+this introduces an additional regularization strength: if the constraint is
+too weak, the discriminator may remain overly sensitive; if it is too strong,
+the discriminator may become overly smooth and lose its ability to distinguish
+different residuals. DARE instead constrains the maximum response of the
+discriminator directly through its network structure, without introducing an
+additional balancing coefficient.
 
-The normalized full tracking differential \(\Delta\in\mathbb{R}^{d}\) is fed directly into the discriminator network. Let the network contain \(L\) linear layers, and let the weight of the \(\ell\)-th layer be \(W_\ell\). DARE applies spectral normalization to each linear layer, i.e., \(\bar W_\ell=W_\ell/\sigma_{\max}(W_\ell)\), where \(\sigma_{\max}(W_\ell)\) denotes the maximum amplification that this linear map can apply to an input variation. After normalization, \(\sigma_{\max}(\bar W_\ell)=1\). The network uses ReLU as the activation function \(\rho\), and ReLU is also a \(1\)-Lipschitz mapping. Therefore, each linear layer together with its activation does not amplify an input variation by more than a factor of one.
+The normalized full tracking differential
+\(\Delta\in\mathbb{R}^{d}\) is fed directly into the discriminator. Let the
+network contain \(L\) affine layers, with weight matrix \(W_\ell\) and bias
+\(b_\ell\) at layer \(\ell\). DARE applies spectral normalization to every
+weight matrix,
+\[
+\bar W_\ell
+=
+\frac{W_\ell}{\sigma_{\max}(W_\ell)}.
+\]
+Here, \(\sigma_{\max}(W_\ell)\) is the largest singular value of
+\(W_\ell\), defined as
+\[
+\sigma_{\max}(W_\ell)
+=
+\max_{v\neq0}
+\frac{\|W_\ell v\|_2}{\|v\|_2}.
+\]
+It therefore gives the maximum factor by which the linear map can amplify
+an input variation. Consequently, for any vector \(v\),
+\[
+\|W_\ell v\|_2
+\le
+\sigma_{\max}(W_\ell)\|v\|_2.
+\]
+After spectral normalization,
+\(\sigma_{\max}(\bar W_\ell)=1\). The network uses ReLU as the activation
+function \(\rho\), which is also \(1\)-Lipschitz and therefore does not
+increase the Euclidean distance between two inputs.
 
-Let the discriminator logit before scale calibration be \(g_\theta(\Delta)\). Since the entire discriminator is a continuous composition of these non-expansive mappings, its Lipschitz constant satisfies
+Consider an arbitrary hidden layer \(\ell\), and let \(x\) and \(x'\) denote
+two inputs to this layer. Its outputs satisfy
+\begin{align}
+&
+\left\|
+\rho(\bar W_\ell x+b_\ell)
+-
+\rho(\bar W_\ell x'+b_\ell)
+\right\|_2
+\notag\\
+&\qquad\le
+\left\|
+\bar W_\ell(x-x')
+\right\|_2
+\notag\\
+&\qquad\le
+\sigma_{\max}(\bar W_\ell)
+\|x-x'\|_2
+=
+\|x-x'\|_2 .
+\label{eq:layer_bound}
+\end{align}
+
+The first inequality follows from the \(1\)-Lipschitz property of ReLU;
+the common bias \(b_\ell\) cancels when the two pre-activations are compared.
+The second follows directly from the largest-singular-value bound above,
+and the final equality follows from
+\(\sigma_{\max}(\bar W_\ell)=1\). Thus, every hidden layer is
+non-expansive. The final affine output layer obeys the same bound without
+the ReLU activation. Applying this relation successively through all layers
+therefore gives
 \begin{equation}
-\operatorname{Lip}(g_\theta) \le \prod_{\ell=1}^{L} \sigma_{\max}(\bar W_\ell) = 1.
-\label{eq:lipschitz}
-\end{equation}
-Therefore, for any two tracking differentials \(\Delta\) and \(\Delta'\), we have
-\begin{equation}
-\left| g_\theta(\Delta) - g_\theta(\Delta') \right| \le \left\| \Delta-\Delta' \right\|_2.
+\left|
+f_\theta(\Delta)-f_\theta(\Delta')
+\right|
+\le
+\left\|
+\Delta-\Delta'
+\right\|_2 .
 \label{eq:pairwise_bound}
 \end{equation}
-This means that the discriminator cannot arbitrarily amplify a very small change in the tracking residual into a very large change in its logit; its maximum sensitivity is directly constrained by the network architecture.
 
-Since perfect tracking corresponds to \(\Delta^{+}=0\), setting \(\Delta'=0\) in Eq.~\eqref{eq:pairwise_bound} further gives
+Thus, a small change in the tracking differential cannot be arbitrarily
+amplified into a large change in the discriminator logit; its maximum
+sensitivity is directly constrained by the network structure.
+
+Since perfect tracking corresponds to the zero differential
+\(\Delta^{+}=0\), setting \(\Delta'=0\) in
+Eq.~\eqref{eq:pairwise_bound} gives
 \begin{equation}
-\left| g_\theta(\Delta) - g_\theta(0) \right| \le \left\| \Delta \right\|_2.
+\left|
+f_\theta(\Delta)-f_\theta(0)
+\right|
+\le
+\|\Delta\|_2 .
 \label{eq:anchor_bound}
 \end{equation}
 
-Therefore, when the tracking differential is close to the perfect-tracking anchor, its raw discriminator logit cannot change arbitrarily rapidly relative to the logit at zero residual. DARE thus directly constrains the maximum response rate of the discriminator to the tracking residual through layer-wise spectral normalization of the discriminator network.
+Therefore, when the tracking differential is close to the perfect-tracking
+anchor, the discriminator logit cannot change arbitrarily rapidly relative
+to its value at zero residual. DARE thereby constrains the maximum response
+of the discriminator to tracking residuals through layer-wise spectral
+normalization.
+
 
 \subsection{Anchor Calibration: Closed-Form Output Scale}
 \label{sec:calibration}
 
-Spectral normalization constrains the geometric sensitivity of the raw discriminator, but it does not determine the global logit scale that is ultimately used. This scale directly affects how the reward responds to changes in tracking quality. DARE uses \(r^{\mathrm{DARE}}=\operatorname{softplus}(f_\theta)\) to convert the calibrated discriminator logit \(f_\theta\) into the policy reward, so the slope of the reward with respect to the logit is
+Spectral normalization constrains how rapidly the raw discriminator logit
+\(f_\theta(\Delta)\) can change with the tracking differential, but it does
+not determine the global numerical scale of the logit used by the reward.
+DARE controls this remaining degree of freedom through the global scale
+\(\kappa\).
+
+For a scalar logit \(z\), the slope of the softplus reward is
 \begin{equation}
-\frac{\partial r^{\mathrm{DARE}}}{\partial f_\theta} = \sigma(f_\theta).
+\frac{d}{dz}\operatorname{softplus}(z)
+=
+\sigma(z).
 \label{eq:reward_slope}
 \end{equation}
-When \(f_\theta\) is a small negative number, \(\sigma(f_\theta)\) is close to \(0\), and a change in the logit can only produce a very small difference in reward; near \(f_\theta=0\), the reward is more sensitive to changes in the logit; as \(f_\theta\) increases, the slope gradually approaches \(1\). Therefore, in addition to limiting the sensitivity of the discriminator, its logits must be kept within a numerical range in which softplus retains sufficient response capability.
-
-DARE takes the logit interval over which the reward slope grows from \(0.2\) to \(0.8\) as the main response region. Since the reward slope is exactly \(\sigma(f_\theta)\), the width of this interval is
+When \(z\) is sufficiently negative, \(\sigma(z)\) is close to zero, so
+changes in the logit produce only small reward differences. Around
+\(z=0\), the reward becomes more responsive, and as \(z\) increases the
+slope approaches one. DARE therefore uses the interval over which the
+softplus slope increases from \(0.2\) to \(0.8\) as its target response
+region. Its width is
 \begin{equation}
-w = \sigma^{-1}(0.8) - \sigma^{-1}(0.2) = \ln 16 \approx 2.77.
+w
+=
+\sigma^{-1}(0.8)
+-
+\sigma^{-1}(0.2)
+=
+\ln 16
+\approx 2.77 .
 \label{eq:response_width}
 \end{equation}
-Thus, \(w=\ln16\) gives a target logit separation determined by the reward transform itself.
 
-To match the actual output scale of the discriminator to this target range, DARE uses the fixed zero differential \(\Delta=0\) provided by perfect tracking as the calibration anchor. Let the discriminator output before scale calibration be \(g_\theta(\Delta)\), so the raw logit corresponding to perfect tracking is \(g_\theta(0)\). Meanwhile, the nonzero differentials in the current rollout and the replay buffer represent the tracking residuals actually produced by the current policy. DARE describes the position of the current policy residuals in logit space by their mean raw logit, and measures its separation from the zero anchor at calibration time \(t_f\):
+The target width \(w\) specifies the desired separation in scaled-logit
+space. To determine the corresponding scale automatically, DARE measures
+the separation produced by the discriminator itself. At calibration time
+\(t_f\), let
 \begin{equation}
-M_f = g_\theta(0) - \frac{1}{2} \left[ \mathbb{E}_{\Delta\sim q_{\mathrm{cur}}} g_\theta(\Delta) + \mathbb{E}_{\Delta\sim q_{\mathrm{rep}}} g_\theta(\Delta) \right] \Bigg|_{t=t_f}.
+M_f
+=
+f_\theta(0)
+-
+\frac{1}{2}
+\left[
+\mathbb{E}_{\Delta\sim q_{\mathrm{cur}}}
+f_\theta(\Delta)
++
+\mathbb{E}_{\Delta\sim q_{\mathrm{rep}}}
+f_\theta(\Delta)
+\right]
+\Bigg|_{t=t_f},
 \label{eq:anchor_gap}
 \end{equation}
-Here, \(q_{\mathrm{cur}}\) and \(q_{\mathrm{rep}}\) denote the distributions of residual differentials in the current rollout and the replay buffer, respectively. Thus, \(M_f\) measures the actual separation between perfect tracking and policy residuals in raw logit space at the calibration time.
+where \(q_{\mathrm{cur}}\) and \(q_{\mathrm{rep}}\) denote the residual
+differential distributions from the current rollout and replay buffer,
+respectively. Thus, \(M_f\) is the raw-logit separation between the
+zero-differential anchor and the policy residuals observed at calibration.
 
-Given the target separation \(w\) and the measured separation \(M_f\), DARE uniformly rescales the entire discriminator logit through a global scale factor:
+DARE then sets the global logit scale in closed form:
 \begin{equation}
-f_\theta(\Delta) = \kappa g_\theta(\Delta), \qquad \kappa = \frac{w}{M_f}.
+\kappa
+=
+\frac{w}{M_f}.
 \label{eq:kappa}
 \end{equation}
-When \(M_f>w\), we have \(\kappa<1\), and an overly wide logit separation is compressed; when \(M_f<w\), we have \(\kappa>1\), and an overly narrow separation is enlarged. Since all logits are multiplied by the same positive scale factor, this operation preserves the score ordering learned by the discriminator and only adjusts its overall output scale.
+The measured separation is therefore rescaled from \(M_f\) to
+\(\kappa M_f=w\). If \(M_f>w\), then \(\kappa<1\) and an overly wide
+separation is compressed; if \(M_f<w\), then \(\kappa>1\) and an overly
+narrow separation is enlarged. Since the same positive factor multiplies
+every discriminator logit, this operation preserves their ordering and only
+changes the global output scale.
 
-Calibration is performed once after input normalization is fixed. At this point, the numerical scale of the differential coordinates is already stable, so the measured \(M_f\) has a fixed scale meaning. We keep \(\kappa=1\) before calibration; after obtaining \(\kappa\), we fix it and use the calibrated logit \(f_\theta=\kappa g_\theta\) consistently in subsequent discriminator optimization and policy reward computation.
+Calibration is performed once after the input normalization is fixed.
+Before calibration, \(\kappa=1\). After Eq.~\eqref{eq:kappa} is evaluated,
+\(\kappa\) is kept fixed and the scaled logit
+\(\kappa f_\theta(\Delta)\) is used consistently in both discriminator
+optimization and policy reward computation. Spectral normalization therefore
+controls the sensitivity of the raw discriminator mapping, while anchor
+calibration independently sets the global scale at which that mapping is used
+by the reward.
 
-Ultimately, the target width \(w=\ln16\) is determined directly by the response characteristics of the softplus reward, while \(M_f\) is measured from the current training distribution. Therefore, the calibration scale in~\eqref{eq:kappa} is obtained directly in closed form, without introducing an additional tunable reward-scale parameter.
 
 \subsection{Training}
-Training alternates rollout collection, differential construction, critic
-updates, and PPO updates (Algorithm~\ref{alg:dare}). Critic minibatches
-draw an equal mixture of current and replay differentials, with the ideal
-point presented once per minibatch as the positive class; at $t_f$,
-before the rewards of that iteration are computed, $M_f$ is measured with
-the critic in evaluation mode and $\kappa$ is set by~\eqref{eq:kappa}. One
-critic, one reward, one policy, and one calibration rule make up the whole
-loop. Figure~\ref{fig:pipeline} summarizes this information flow from the
-reference and policy states to the calibrated reward and PPO update.
+
+Training alternates rollout collection, differential construction,
+discriminator updates, and PPO updates (Algorithm~\ref{alg:dare}).
+Discriminator minibatches use policy residuals from both the current rollout
+and replay buffer together with the zero differential as the positive class.
+At \(t_f\), before the rewards of that iteration are computed, \(M_f\) is
+measured with the discriminator in evaluation mode and \(\kappa\) is set by
+Eq.~\eqref{eq:kappa}. One discriminator, one reward, one policy, and one
+calibration rule make up the complete training loop.
 
 \begin{algorithm}[t]
 \caption{DARE Training}
@@ -363,23 +519,29 @@ reference and policy states to the calibrated reward and PPO update.
 \small
 \begin{algorithmic}[1]
 \REQUIRE reference motion $\mathcal{M}$, policy $\pi_\varphi$,
-value $V_\omega$, raw critic $g_\theta$, replay buffer $\mathcal{B}$,
+value $V_\omega$, discriminator $f_\theta$, replay buffer $\mathcal{B}$,
 normalizer $\mathcal{N}$; $\kappa\leftarrow 1$
 \FOR{iteration $t=1,2,\ldots$}
   \STATE Collect a synchronized rollout with $\pi_\varphi$ from random
   reference phases; construct $\Delta_t=\delta_t\oslash\nu$; add to $\mathcal{B}$
   \IF{$\mathcal{N}$ was fixed this iteration}
-    \STATE $\bar g_{\mathrm{cur}}\leftarrow\mathbb{E}_{\Delta\sim q_{\mathrm{cur}}}g_\theta(\Delta)$
-    \STATE $\bar g_{\mathrm{rep}}\leftarrow\mathbb{E}_{\Delta\sim q_{\mathrm{rep}}}g_\theta(\Delta)$
-    \STATE $M_f\leftarrow g_\theta(0)-\tfrac12(\bar g_{\mathrm{cur}}+\bar g_{\mathrm{rep}})$;
+    \STATE $\bar f_{\mathrm{cur}}
+    \leftarrow
+    \mathbb{E}_{\Delta\sim q_{\mathrm{cur}}}f_\theta(\Delta)$
+    \STATE $\bar f_{\mathrm{rep}}
+    \leftarrow
+    \mathbb{E}_{\Delta\sim q_{\mathrm{rep}}}f_\theta(\Delta)$
+    \STATE $M_f
+    \leftarrow
+    f_\theta(0)-\tfrac12
+    (\bar f_{\mathrm{cur}}+\bar f_{\mathrm{rep}})$;
     $\kappa\leftarrow\ln16/M_f$
   \ENDIF
-  \STATE Compute $r_t^{\mathrm{DARE}}$ by~\eqref{eq:reward} with
-  $f_\theta=\kappa g_\theta$
-  \FOR{critic minibatch}
-    \STATE Sample equal numbers of current and replay differentials;
-    update $g_\theta$ by one step on~\eqref{eq:dare_loss} with
-    $f_\theta=\kappa g_\theta$
+  \STATE Compute $r_t^{\mathrm{DARE}}$ by~\eqref{eq:reward}
+  \FOR{discriminator minibatch}
+    \STATE Sample current and replay differentials and use $\Delta^+=0$
+    as the positive anchor
+    \STATE Update $f_\theta$ by one step on~\eqref{eq:dare_loss}
   \ENDFOR
   \STATE Update $\pi_\varphi$ and $V_\omega$ with PPO on
   $r_t^{\mathrm{DARE}}$
