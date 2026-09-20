@@ -767,6 +767,20 @@ class IsaacLabEngine(engine.Engine):
         sim_cfg.physx.max_position_iteration_count = 4
         sim_cfg.physx.max_velocity_iteration_count = 0
         sim_cfg.physx.gpu_max_rigid_contact_count = 8 * 1024 * 1024
+        # The aggregate-pair and rigid-patch buffers have to be raised too.
+        # Their IsaacLab defaults (2**21 and 5*2**15) are sized for shorter
+        # episodes: as the policy improves, per-environment contact counts grow
+        # and the buffers overflow.  PhysX then drops interactions ("the
+        # simulation will miss interactions") and emits one [Error] per physics
+        # step, which both corrupts the rollout and floods the console.  An
+        # 8192-env Climb run hit this at ~2.3 h / iteration ~2000 (episode
+        # length ~136): 2278 errors in 36 minutes and the training loop
+        # effectively stalled at that iteration.  Measured demand at the
+        # overflow was 2.1-2.6M aggregate pairs, i.e. the default 2**21 was
+        # exceeded by only ~20%; 2**24 leaves 8x headroom.  The extra buffers
+        # cost roughly 0.4 GB of GPU memory.
+        sim_cfg.physx.gpu_total_aggregate_pairs_capacity = 2 ** 24
+        sim_cfg.physx.gpu_max_rigid_patch_count = 2 ** 22
         sim_cfg.physx.gpu_found_lost_pairs_capacity = 2 ** 24
         sim_cfg.physics_material.static_friction = 1.0
         sim_cfg.physics_material.dynamic_friction = 1.0

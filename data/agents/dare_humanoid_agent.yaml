@@ -7,11 +7,8 @@ model:
   action_std: 0.05
   critic_net: "fc_2layers_1024units"
   disc_net: "fc_2layers_1024units"
-  # Isometry-preserving discriminator hidden geometry:
-  # semi-orthogonal linears + GroupSort(2) + square 1022x1022 trunk.
-  # 'full_sn' reproduces the historical spectral-norm + ReLU backbone.
   disc_group_embedding: true
-  disc_hidden_geometry: "semi_orthogonal"
+  disc_hidden_geometry: "full_sn"
 
 actor_optimizer: {type: "SGD", learning_rate: 1e-4}
 critic_optimizer: {type: "SGD", learning_rate: 1e-4}
@@ -48,18 +45,6 @@ disc_reward_scale: 2
 task_reward_weight: 0.0
 disc_reward_weight: 1.0
 
-# --- Calibration switches (both stated explicitly, defaults disagree) --------
-# DAREAgent.__init__ defaults:
-#   disc_anchor_calibration : True      -> classifier logit affine calibration
-#   reward_calibration_mode : "legacy"  -> reward-scale calibration DISABLED
-# A config that sets neither therefore runs *half calibrated*: the classifier is
-# calibrated while the reward scale is not, and every reward-side calibration
-# metric stays constant (Reward_Calibrated=0, Reward_Scale=1) or NaN
-# (Reward_Delta_Logit_*, Reward_Probe_Prob).  DAREAgent now prints a warning in
-# that state.  Set reward_calibration_mode to "anchor_root" to enable the
-# reward-scale calibration; note this CHANGES training semantics, so it must
-# match whatever the run is compared against.
-# The 2k/3k Climb runs recorded so far used the default, i.e. reward calibration
-# OFF, with disc_anchor_calibration = true.
+# One-shot affine calibration is applied only to the reward logit; BCE always
+# uses the raw Full-SN logit.
 disc_anchor_calibration: true
-reward_calibration_mode: "legacy"
