@@ -16,15 +16,15 @@ disc_optimizer: {type: "SGD", learning_rate: 2.5e-4, weight_decay: 0.0001}
 
 discount: 0.99
 steps_per_iter: 32
-iters_per_output: 100
-test_episodes: 32
-normalizer_samples: 100000000
+iters_per_output: 1
+test_episodes: 4
+normalizer_samples: 2097152
 use_mixed_precision: false
-actor_epochs: 5
+actor_epochs: 1
 actor_batch_size: 4
-critic_epochs: 2
+critic_epochs: 1
 critic_batch_size: 2
-disc_epochs: 2
+disc_epochs: 1
 disc_batch_size: 2
 td_lambda: 0.95
 ppo_clip_ratio: 0.2

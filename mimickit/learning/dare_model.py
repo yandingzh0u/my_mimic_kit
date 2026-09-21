@@ -1,15 +1,42 @@
 import torch
+import torch.nn.functional as F
 
 import learning.add_model as add_model
 import learning.nets.net_builder as net_builder
+
+
+class ConvexPotentialBlock(torch.nn.Module):
+    """A square 1-Lipschitz convex-potential residual block.
+
+    For a spectrally-normalized W, the map
+        x -> x - 2 W^T ReLU(Wx + b)
+    is the CPL layer used for the deep-trunk stress test.  The transpose is
+    tied to the same W; no extra projection or regularizer is introduced.
+    """
+
+    def __init__(self, width, activation):
+        super().__init__()
+        linear = torch.nn.Linear(width, width)
+        torch.nn.init.zeros_(linear.bias)
+        self.linear = torch.nn.utils.parametrizations.spectral_norm(linear)
+        self.activation = activation()
+
+    def forward(self, inputs):
+        # Read the parametrized weight once so one forward does not advance
+        # spectral-normalization power iteration twice.
+        weight = self.linear.weight
+        pre = F.linear(inputs, weight, self.linear.bias)
+        return inputs - 2.0 * F.linear(self.activation(pre), weight.transpose(-1, -2))
 
 
 class GroupSeparableDiscLayers(torch.nn.Module):
     """Semantic group frontend for DARE's Full-SN critic.
     """
 
-    def __init__(self, groups, first_width, trunk_widths, activation):
+    def __init__(self, groups, first_width, trunk_widths, activation,
+                 trunk_geometry="full_sn"):
         super().__init__()
+        self.trunk_geometry = trunk_geometry
         num_groups = len(groups)
         self.group_width = first_width // num_groups
         if self.group_width < 1:
@@ -27,10 +54,27 @@ class GroupSeparableDiscLayers(torch.nn.Module):
 
         trunk = []
         in_size = self.total_width
-        for out_size in trunk_widths:
-            trunk.append(self._build_linear(in_size, out_size))
-            trunk.append(activation())
-            in_size = out_size
+        if trunk_geometry == "cpl":
+            if not trunk_widths:
+                raise ValueError("CPL trunk requires at least one fusion layer")
+            fusion_width = trunk_widths[0]
+            trunk.extend((self._build_linear(in_size, fusion_width),
+                          activation()))
+            in_size = fusion_width
+            for out_size in trunk_widths[1:]:
+                if out_size != in_size:
+                    raise ValueError(
+                        "CPL requires square hidden trunk layers, got "
+                        "{} -> {}".format(in_size, out_size))
+                trunk.append(ConvexPotentialBlock(in_size, activation))
+        elif trunk_geometry == "full_sn":
+            for out_size in trunk_widths:
+                trunk.append(self._build_linear(in_size, out_size))
+                trunk.append(activation())
+                in_size = out_size
+        else:
+            raise ValueError(
+                "Unsupported DARE trunk geometry: {}".format(trunk_geometry))
         self.trunk = torch.nn.Sequential(*trunk)
         self.out_features = in_size
 
@@ -71,12 +115,15 @@ class DAREModel(add_model.ADDModel):
 
         self._disc_group_embedding = bool(
             config.get("disc_group_embedding", True))
+        self._disc_hidden_geometry = config.get(
+            "disc_hidden_geometry", "full_sn")
         if self._disc_group_embedding:
             self._disc_layers = GroupSeparableDiscLayers(
                 groups=env.get_disc_error_groups(),
                 first_width=linears[0].out_features,
                 trunk_widths=[layer.out_features for layer in linears[1:]],
-                activation=self._activation)
+                activation=self._activation,
+                trunk_geometry=self._disc_hidden_geometry)
             disc_out = self._disc_layers.out_features
         else:
             # The ablation retains DARE's Full-SN critic and all subsequent
@@ -100,12 +147,12 @@ class DAREModel(add_model.ADDModel):
         return self._disc_logits(self._disc_layers(disc_obs))
 
     def get_disc_hidden_geometry(self):
-        return "full_sn"
+        return self._disc_hidden_geometry
 
     def eval_disc(self, disc_obs):
-        # One-shot affine logit standardization: the calibrated logit is
-        # centered on the softplus transition region and unit-scaled by the
-        # balanced calibration spread, i.e. z = (f - c_f) / s_f.
+        # Reward-side affine logit standardization.  DAREAgent may refresh the
+        # center and scale at rollout boundaries; BCE always uses eval_disc_raw.
+        # The calibrated logit is z = (f_raw - c_f) / s_f.
         return self._disc_logit_scale * (
             self.eval_disc_raw(disc_obs) - self._disc_logit_center)
 
