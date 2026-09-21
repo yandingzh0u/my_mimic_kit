@@ -6,7 +6,8 @@ import torch
 
 import learning.diff_normalizer as diff_normalizer
 from learning.dare_agent import DAREAgent, logit_standardization
-from learning.dare_model import DAREModel, GroupSeparableDiscLayers
+from learning.dare_model import (DAREModel, GroupSeparableDiscLayers,
+                                 ConvexPotentialBlock)
 import util.torch_util as torch_util
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -71,6 +72,24 @@ def test_model_restores_explicit_a30_group_frontend():
     assert layers.group_width == 18 and layers.total_width == 126
     assert all(hasattr(encoder[0].parametrizations, "weight")
                for encoder in layers.encoders)
+
+
+def test_cpl_trunk_is_square_sn_and_finite():
+    config = _config()
+    config["disc_net"] = "fc_10layers_1024units"
+    config["disc_hidden_geometry"] = "cpl"
+    model = DAREModel(config, _Env()).train()
+    assert model.get_disc_hidden_geometry() == "cpl"
+    blocks = [m for m in model._disc_layers.modules()
+              if isinstance(m, ConvexPotentialBlock)]
+    assert len(blocks) == 7
+    assert all(hasattr(block.linear.parametrizations, "weight")
+               for block in blocks)
+    logits = model.eval_disc_raw(torch.randn(32, 172))
+    assert torch.isfinite(logits).all()
+    logits.square().mean().backward()
+    assert all(p.grad is None or torch.isfinite(p.grad).all()
+               for p in model.parameters())
 
 
 def test_all_discriminator_linears_use_spectral_norm():

@@ -8,7 +8,7 @@ import util.torch_util as torch_util
 
 def logit_standardization(model, norm, pos_diff, current_diff, replay_diff,
                           batch_size):
-    """One-shot affine standardization of the raw discriminator logit.
+    """Estimate balanced affine statistics for the raw discriminator logit.
 
     Returns (center, std, gap) of the balanced calibration distribution built
     from the zero-differential anchor (weight 1/2) and the current/replay
@@ -41,7 +41,13 @@ def logit_standardization(model, norm, pos_diff, current_diff, replay_diff,
 
 
 class DAREAgent(add_agent.ADDAgent):
-    """DARE with raw Full-SN BCE and one affine reward calibration."""
+    """DARE with raw Full-SN BCE and reward-side logit calibration.
+
+    ``one_shot`` preserves the historical v6 behavior.  ``rollout`` updates
+    the same balanced affine statistics once per rollout after the input
+    normalizer has frozen.  The latter prevents a deep discriminator's raw
+    logit scale from drifting away from a scale measured at freeze time.
+    """
 
     CALIBRATION_BATCH = 16384
     def __init__(self, config, env, device):
@@ -71,6 +77,13 @@ class DAREAgent(add_agent.ADDAgent):
             raise ValueError("DARE requires disc_grad_penalty=0")
         self._enable_anchor_calibration = bool(
             config.get("disc_anchor_calibration", True))
+        self._calibration_mode = config.get(
+            "disc_anchor_calibration_mode", "one_shot")
+        if self._calibration_mode not in ("one_shot", "rollout"):
+            raise ValueError(
+                "disc_anchor_calibration_mode must be 'one_shot' or "
+                "'rollout', got {}".format(self._calibration_mode))
+        self._calibration_updates = 0
         self._calibration_gap_raw = float("nan")
         self._calibration_center_raw = float("nan")
         self._calibration_std_raw = float("nan")
@@ -127,10 +140,11 @@ class DAREAgent(add_agent.ADDAgent):
             self._normalizer_freeze_samples = count
 
     def _compute_rewards(self):
-        if (self._enable_anchor_calibration
-                and not self._need_normalizer_update()
-                and not self._model.is_disc_logit_calibrated()):
-            self._calibrate_disc_logit_scale()
+        normalizer_updating = self._need_normalizer_update()
+        if (self._enable_anchor_calibration and not normalizer_updating):
+            if (self._calibration_mode == "rollout"
+                    or not self._model.is_disc_logit_calibrated()):
+                self._calibrate_disc_logit_scale()
         info = super()._compute_rewards()
         info.update(self._reward_log_info())
         return info
@@ -152,13 +166,16 @@ class DAREAgent(add_agent.ADDAgent):
         finally:
             self._model.train(was_training)
         if not gap > 0.0:
-            # The calibration is one-shot and fires as soon as the normalizer
-            # stops updating.  If the discriminator has not formed a positive
-            # margin yet, defer and retry next iteration rather than killing a
-            # multi-hour run.  This is not hypothetical: at random
-            # initialisation the gap is negative for 6/8 seeds with the legacy
-            # geometry and 2/8 with the isometric one, and a raise here ends the
-            # run ~13% in.
+            # A positive anchor gap is required to preserve the intended
+            # reward ordering.  During rollout calibration, retain the last
+            # valid transform rather than replacing it with an invalid one.
+            if (self._calibration_mode == "rollout"
+                    and self._model.is_disc_logit_calibrated()):
+                Logger.print(
+                    "DARE rollout calibration skipped: separation gap "
+                    "{:.4f} is not positive; retaining the last valid "
+                    "transform.".format(gap))
+                return
             if not self._calibration_deferred:
                 self._calibration_deferred = True
                 Logger.print(
@@ -175,6 +192,7 @@ class DAREAgent(add_agent.ADDAgent):
         self._calibration_gap_raw = gap
         self._calibration_center_raw = center
         self._calibration_std_raw = std
+        self._calibration_updates += 1
         Logger.print("DARE classifier calibration at iter {}: M_f={:.4f} "
                      "c_f={:.4f} s_f={:.4f} kappa_D={:.4f}".format(
                          self._iter, gap, center, std, scale))
@@ -256,6 +274,9 @@ class DAREAgent(add_agent.ADDAgent):
     def _reward_log_info(self):
         return {
             "disc_classifier_scale": self._model.get_disc_logit_scale(),
+            # Explicit name for the reward-side affine gain.  Keep the
+            # historical classifier-scale key for existing log tooling.
+            "disc_kappa": self._model.get_disc_logit_scale(),
             "disc_logit_center": self._model.get_disc_logit_center(),
             "disc_logit_std": torch.tensor(
                 self._calibration_std_raw, device=self._device),
@@ -267,6 +288,8 @@ class DAREAgent(add_agent.ADDAgent):
                 self._normalizer_stable_count, device=self._device),
             "norm_frozen": torch.tensor(float(self._normalizer_frozen),
                                          device=self._device),
+            "disc_calibration_updates": torch.tensor(
+                self._calibration_updates, device=self._device),
         }
 
     def _get_checkpoint_extra_state(self):
@@ -283,6 +306,7 @@ class DAREAgent(add_agent.ADDAgent):
                 else self._normalizer_stability_prev.cpu()),
             "normalizer_stability_history": [
                 (int(c), m) for c, m in self._normalizer_stability_history],
+            "calibration_updates": self._calibration_updates,
         }
         return state
 
@@ -303,3 +327,4 @@ class DAREAgent(add_agent.ADDAgent):
             None if prev is None else prev.to(self._device))
         self._normalizer_stability_history = [
             (int(c), m) for c, m in saved.get("normalizer_stability_history", [])]
+        self._calibration_updates = int(saved.get("calibration_updates", 0))
