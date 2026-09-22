@@ -1,0 +1,12 @@
+env_name: "view_motion"
+
+# Task-agnostic Unitree-ROS G1 asset.  Change motion_file to view another
+# 29-DoF G1 motion; do not create a new robot asset per motion.
+char_file: "data/assets/g1_unitree_ros/g1_29dof_rev_1_0.usd"
+camera_mode: "track"
+episode_length: 20.0
+global_obs: False
+root_height_obs: True
+key_bodies: ["left_ankle_roll_link", "right_ankle_roll_link", "head_link",
+             "left_wrist_yaw_link", "right_wrist_yaw_link"]
+motion_file: "data/motions/g1/g1_carry_box.pkl"

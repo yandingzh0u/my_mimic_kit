@@ -334,20 +334,39 @@ class IsaacLabEngine(engine.Engine):
     
     def get_contact_forces(self, obj_id):
         sensor = self._ground_contact_sensors[obj_id]
+        if (sensor is None):
+            num_bodies = self.get_obj_num_bodies(obj_id)
+            return torch.zeros((self.get_num_envs(), num_bodies, 3),
+                               device=self._device, dtype=torch.float)
         forces = sensor.data.net_forces_w
-
-        body_order_sim2common = self._sensor_body_order_sim2common[obj_id]
-        forces = forces[:, body_order_sim2common, :]
-        return forces
+        return self._scatter_sensor_forces(obj_id, forces)
     
     def get_ground_contact_forces(self, obj_id):
         sensor = self._ground_contact_sensors[obj_id]
+        if (sensor is None):
+            num_bodies = self.get_obj_num_bodies(obj_id)
+            return torch.zeros((self.get_num_envs(), num_bodies, 3),
+                               device=self._device, dtype=torch.float)
         forces = sensor.data.force_matrix_w
         forces = forces.sum(dim=-2)
+        return self._scatter_sensor_forces(obj_id, forces)
 
-        body_order_sim2common = self._sensor_body_order_sim2common[obj_id]
-        forces = forces[:, body_order_sim2common, :]
-        return forces
+    def _scatter_sensor_forces(self, obj_id, forces):
+        """Map a possibly partial sensor body list into common body order.
+
+        ContactSensor regexes are asset-dependent.  Some USDs expose every
+        link, while imported URDFs may expose only the matched link/meshes.
+        The old implementation assumed a complete permutation and failed
+        when a sensor returned a subset (or duplicate visual bodies).
+        """
+        body_ids = self._sensor_body_order_sim2common[obj_id]
+        num_bodies = self.get_obj_num_bodies(obj_id)
+        mapped = torch.zeros((forces.shape[0], num_bodies, forces.shape[-1]),
+                             device=forces.device, dtype=forces.dtype)
+        count = min(forces.shape[1], body_ids.numel())
+        if (count > 0):
+            mapped[:, body_ids[:count], :] = forces[:, :count, :]
+        return mapped
     
     def set_root_pos(self, env_id, obj_id, root_pos):
         obj = self._objs[obj_id]
@@ -1129,8 +1148,14 @@ class IsaacLabEngine(engine.Engine):
                 obj_type = self.get_obj_type(obj_id)
                 if (obj_type == engine.ObjType.articulated):
                     body_names = sensor.body_names
-                    body_common2sim = [self.find_obj_body_id(obj_id, name) for name in body_names]
-                    body_sim2common = [body_common2sim.index(i) for i in range(len(body_common2sim))]
+                    body_sim2common = []
+                    for name in body_names:
+                        try:
+                            body_id = self.find_obj_body_id(obj_id, name)
+                        except ValueError:
+                            continue
+                        if (body_id not in body_sim2common):
+                            body_sim2common.append(body_id)
 
                     body_sim2common = torch.tensor(body_sim2common, device=self._device, dtype=torch.long)
                     self._sensor_body_order_sim2common.append(body_sim2common)
@@ -1157,7 +1182,11 @@ class IsaacLabEngine(engine.Engine):
 
             if (contact_prim_path is not None):
                 contact_prim_name = os.path.basename(contact_prim_path)
-                sensor_regex = OBJ_PATH_TEMPLATE.format(".*", obj_id) + "/{:s}/.*".format(contact_prim_name)
+                # Match the link itself as well as nested collision meshes.
+                # The ROS-URDF importer can attach ContactReportAPI to the
+                # rigid-body link, whereas the legacy asset attached it one
+                # level below the link.
+                sensor_regex = OBJ_PATH_TEMPLATE.format(".*", obj_id) + "/{:s}.*".format(contact_prim_name)
 
                 sensor_cfg = ContactSensorCfg(prim_path=sensor_regex, 
                                               update_period=timestep,
@@ -1276,24 +1305,23 @@ class IsaacLabEngine(engine.Engine):
         return physics_scene_path
     
     def _find_contact_prim_path(self, obj_path):
-        from pxr import PhysxSchema
+        from pxr import PhysxSchema, Usd
 
         obj_prim = self._stage.GetPrimAtPath(obj_path)
-        prim_children = obj_prim.GetAllChildren()
-                
-        contact_prim_path = None
-        for prim_child in prim_children:
-            prim_grandchildren = prim_child.GetAllChildren()
-                
-            if (len(prim_grandchildren) > 0):
-                prim_grandchild = prim_grandchildren[0]
-                has_contact_api = prim_grandchild.HasAPI(PhysxSchema.PhysxContactReportAPI)
-                    
-                if (has_contact_api):
-                    contact_prim_path = prim_child.GetPrimPath().pathString
-                    break
-        
-        return contact_prim_path
+        # Isaac Lab's URDF importer does not use one fixed visual/collision
+        # hierarchy: the contact-report API may be attached to a mesh two or
+        # more levels below the rigid-body link (or directly to the link).
+        # The previous two-level probe therefore worked for the legacy G1 USD
+        # but returned ``None`` for the Unitree ROS conversion.  Return the
+        # first direct child link that contains a contact-report descendant;
+        # this keeps the sensor body name at the link level while supporting
+        # both asset layouts.
+        for prim_child in obj_prim.GetAllChildren():
+            for descendant in Usd.PrimRange(prim_child):
+                if descendant.HasAPI(PhysxSchema.PhysxContactReportAPI):
+                    return prim_child.GetPrimPath().pathString
+
+        return None
     
     def _on_keyboard_event(self, event):
         if (event.type == carb.input.KeyboardEventType.KEY_PRESS):

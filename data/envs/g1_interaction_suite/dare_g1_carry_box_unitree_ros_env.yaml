@@ -1,0 +1,61 @@
+env_name: "interaction_add"
+
+# Unitree's public 29-DoF G1 description, converted from the raw ROS URDF to
+# an Isaac Lab USD.  This is the canonical G1 asset for the interaction suite;
+# other G1 motions should reuse the same char_file and change only motion_file.
+char_file: "data/assets/g1_unitree_ros/g1_29dof_rev_1_0.usd"
+camera_mode: "track"
+
+episode_length: 7.2333333333
+global_obs: True
+root_height_obs: True
+pose_termination: True
+pose_termination_dist: 1.0
+enable_phase_obs: False
+enable_tar_obs: True
+num_phase_encoding: 4
+tar_obs_steps: [1, 2, 3]
+num_disc_obs_steps: 1
+rand_reset: True
+zero_center_action: True
+log_tracking_error: True
+
+ref_char_offset: [2.0, 0.0, 0.0]
+motion_file: "data/motions/g1/g1_carry_box.pkl"
+
+init_pose: [0, 0, 0.8, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+enable_early_termination: True
+key_bodies: ["left_ankle_roll_link", "right_ankle_roll_link", "head_link",
+             "left_wrist_yaw_link", "right_wrist_yaw_link"]
+contact_bodies: ["left_knee_link", "left_ankle_pitch_link", "left_ankle_roll_link",
+                 "right_knee_link", "right_ankle_pitch_link", "right_ankle_roll_link"]
+
+# The object is dynamic and its reference trajectory is part of the
+# demonstration.  Use the centered largebox mesh used by Holosoma for this
+# interaction convention (about 0.471 x 0.459 x 0.408 m).  The grounded
+# reference applies a per-frame 3 mm clearance to the rotated mesh; this keeps
+# the visual and physical reference above the floor instead of relying on
+# contact resolution during training.  Keep the nominal asset mass fixed for
+# deployment.
+interaction_object:
+  file: "data/assets/g1_interaction_suite/largebox/largebox.usd"
+  dynamic: True
+  track_reference: True
+  reference_file: "data/motions/g1/g1_carry_box_object_grounded.pkl"
+  pos: [0.55070853, -0.27168474, 0.18906987]
+  rot: [0.11998549, -0.9896647, 0.06237768, 0.04771057]
+  color: [0.45, 0.30, 0.15]
+
+sim2real:
+  observation_noise_std: 0.0
+  action_delay_steps: [0, 0]
+  char_mass_scale: [1.0, 1.0]
+  object_mass_scale: [1.0, 1.0]
+  friction: [1.0, 1.0]
+  stiffness_scale: [1.0, 1.0]
+  damping_scale: [1.0, 1.0]
+  object_position_jitter: 0.0

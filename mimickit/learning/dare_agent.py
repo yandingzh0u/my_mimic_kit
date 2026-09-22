@@ -83,6 +83,11 @@ class DAREAgent(add_agent.ADDAgent):
             raise ValueError(
                 "disc_anchor_calibration_mode must be 'one_shot' or "
                 "'rollout', got {}".format(self._calibration_mode))
+        self._disc_reward_mode = config.get("disc_reward_mode", "absolute")
+        if self._disc_reward_mode not in ("absolute", "anchor_relative"):
+            raise ValueError(
+                "disc_reward_mode must be 'absolute' or 'anchor_relative', "
+                "got {}".format(self._disc_reward_mode))
         self._calibration_updates = 0
         self._calibration_gap_raw = float("nan")
         self._calibration_center_raw = float("nan")
@@ -199,7 +204,17 @@ class DAREAgent(add_agent.ADDAgent):
 
     def _calc_disc_rewards(self, norm_diff):
         with torch.no_grad():
-            logits = self._model.eval_disc(norm_diff).squeeze(-1)
+            if self._disc_reward_mode == "anchor_relative":
+                # Subtract the raw positive-anchor logit before softplus.  This
+                # removes the discriminator's arbitrary additive logit offset
+                # while preserving the residual ordering and the BCE-trained
+                # raw classifier.  The anchor is exactly the zero differential.
+                logits = self._model.eval_disc_raw(norm_diff).squeeze(-1)
+                anchor = self._model.eval_disc_raw(
+                    self._pos_diff.unsqueeze(0)).squeeze(-1)
+                logits = logits - anchor
+            else:
+                logits = self._model.eval_disc(norm_diff).squeeze(-1)
             return self._disc_reward_scale * add_agent.calc_unscaled_disc_reward(
                 logits)
 
@@ -290,6 +305,9 @@ class DAREAgent(add_agent.ADDAgent):
                                          device=self._device),
             "disc_calibration_updates": torch.tensor(
                 self._calibration_updates, device=self._device),
+            "disc_reward_anchor_relative": torch.tensor(
+                float(self._disc_reward_mode == "anchor_relative"),
+                device=self._device),
         }
 
     def _get_checkpoint_extra_state(self):

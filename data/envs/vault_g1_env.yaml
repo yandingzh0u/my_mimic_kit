@@ -1,6 +1,6 @@
 env_name: "static_objects"
 
-char_file: "data/assets/g1/g1.xml"
+char_file: "data/assets/g1_unitree_ros/g1_29dof_rev_1_0.usd"
 camera_mode: "track"
 
 episode_length: 10.0 # seconds
