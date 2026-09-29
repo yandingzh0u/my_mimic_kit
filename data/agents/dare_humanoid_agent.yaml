@@ -47,4 +47,3 @@ disc_reward_weight: 1.0
 
 # One-shot affine calibration is applied only to the reward logit; BCE always
 # uses the raw Full-SN logit.
-disc_anchor_calibration: true

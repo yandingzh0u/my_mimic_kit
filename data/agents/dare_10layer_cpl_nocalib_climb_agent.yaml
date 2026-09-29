@@ -42,4 +42,3 @@ task_reward_weight: 0.0
 disc_reward_weight: 1.0
 
 # Ablation: remove only rollout affine calibration, so kappa=1 and center=0.
-disc_anchor_calibration: false

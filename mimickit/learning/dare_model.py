@@ -94,14 +94,7 @@ class GroupSeparableDiscLayers(torch.nn.Module):
 
 
 class DAREModel(add_model.ADDModel):
-    """DARE critic with the original calibrated classifier output."""
-
-    def __init__(self, config, env):
-        super().__init__(config, env)
-        self.register_buffer("_disc_logit_scale", torch.ones(()))
-        self.register_buffer("_disc_logit_center", torch.zeros(()))
-        self.register_buffer(
-            "_disc_logit_calibrated", torch.zeros((), dtype=torch.bool))
+    """DARE critic with a fixed raw discriminator logit."""
 
     def _build_disc(self, config, env):
         input_dict = {"disc_obs": env.get_disc_obs_space()}
@@ -150,47 +143,7 @@ class DAREModel(add_model.ADDModel):
         return self._disc_hidden_geometry
 
     def eval_disc(self, disc_obs):
-        # Reward-side affine logit standardization.  DAREAgent may refresh the
-        # center and scale at rollout boundaries; BCE always uses eval_disc_raw.
-        # The calibrated logit is z = (f_raw - c_f) / s_f.
-        return self._disc_logit_scale * (
-            self.eval_disc_raw(disc_obs) - self._disc_logit_center)
-
-    @torch.no_grad()
-    def set_disc_logit_calibration(self, center, scale):
-        """Set the affine calibration (center c_f, kappa = 1 / s_f)."""
-        self._disc_logit_center.fill_(float(center))
-        self._disc_logit_scale.fill_(float(scale))
-        self._disc_logit_calibrated.fill_(True)
-
-    @torch.no_grad()
-    def set_disc_logit_scale(self, scale):
-        # Legacy scale-only entry point (zero center), kept for compatibility.
-        self._disc_logit_center.fill_(0.0)
-        self._disc_logit_scale.fill_(float(scale))
-        self._disc_logit_calibrated.fill_(True)
-
-    def is_disc_logit_calibrated(self):
-        return bool(self._disc_logit_calibrated.item())
-
-    def get_disc_logit_scale(self):
-        return self._disc_logit_scale.clone()
-
-    def get_disc_logit_center(self):
-        return self._disc_logit_center.clone()
-
-    def _load_from_state_dict(self, state_dict, prefix, local_metadata,
-                              strict, missing_keys, unexpected_keys,
-                              error_msgs):
-        # Legacy v6 model/checkpoint state dicts have no calibration buffers.
-        state_dict.setdefault(prefix + "_disc_logit_scale", torch.ones(()))
-        state_dict.setdefault(prefix + "_disc_logit_center", torch.zeros(()))
-        state_dict.setdefault(
-            prefix + "_disc_logit_calibrated",
-            torch.zeros((), dtype=torch.bool))
-        super()._load_from_state_dict(
-            state_dict, prefix, local_metadata, strict, missing_keys,
-            unexpected_keys, error_msgs)
+        return self.eval_disc_raw(disc_obs)
 
     def get_disc_group_width(self):
         if not self._disc_group_embedding:

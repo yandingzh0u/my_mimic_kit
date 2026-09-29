@@ -40,5 +40,3 @@ disc_eval_batch_size: 0
 disc_reward_scale: 2
 task_reward_weight: 0.0
 disc_reward_weight: 1.0
-disc_anchor_calibration: true
-disc_anchor_calibration_mode: "rollout"
