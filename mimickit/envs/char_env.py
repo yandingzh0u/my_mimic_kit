@@ -233,8 +233,16 @@ class CharEnv(sim_env.SimEnv):
         sim_body_names = self._engine.get_obj_body_names(char_id)
         kin_body_names = self._kin_char_model.get_body_names()
 
-        for sim_name, kin_name in zip(sim_body_names, kin_body_names):
-            assert(sim_name == kin_name)
+        align_body_order = getattr(self._engine, "align_obj_body_order", None)
+        if align_body_order is not None:
+            align_body_order(char_id, kin_body_names)
+            sim_body_names = self._engine.get_obj_body_names(char_id)
+
+        if sim_body_names != kin_body_names:
+            raise ValueError(
+                "Kinematic/simulation body order mismatch: "
+                f"sim={sim_body_names}; kin={kin_body_names}"
+            )
         return
     
     def _get_char_id(self):
@@ -364,14 +372,7 @@ class CharEnv(sim_env.SimEnv):
         return
     
     def _get_char_color(self):
-        engine_name = self._engine.get_name()
-        if (engine_name == "isaac_lab"):
-            col = np.array([0.2, 0.25, 0.7])
-        elif (engine_name == "newton"):
-            col = np.array([0.35, 0.45, 0.7])
-        else:
-            col = np.array([0.5, 0.65, 0.95])
-        return col
+        return np.array([0.2, 0.25, 0.7])
 
 
 #####################################################################

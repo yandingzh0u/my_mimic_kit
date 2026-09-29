@@ -1,0 +1,44 @@
+env_name: "add"
+
+char_file: "data/assets/g1/g1_29dof_rev_1_0.urdf"
+camera_mode: "track"
+episode_length: 10.0
+global_obs: True
+root_height_obs: True
+pose_termination: True
+pose_termination_dist: 1.0
+enable_phase_obs: False
+enable_tar_obs: True
+num_phase_encoding: 4
+tar_obs_steps: [1, 2, 3]
+num_disc_obs_steps: 1
+rand_reset: True
+zero_center_action: True
+log_tracking_error: True
+
+ref_char_offset: [2.0, 0.0, 0.0]
+init_pose: [0, 0, 0.8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1.57, 0, 0, 0, 0, 0, 0, 1.57, 0, 0, 0]
+
+enable_early_termination: True
+key_bodies: ["left_ankle_roll_link", "right_ankle_roll_link", "head_link", "left_wrist_yaw_link", "right_wrist_yaw_link"]
+contact_bodies: ["left_knee_link", "left_ankle_pitch_link", "left_ankle_roll_link", "right_knee_link", "right_ankle_pitch_link", "right_ankle_roll_link"]
+motion_file: "data/motions/g1/g1_movebox_hybrid.pkl"
+object_motion_file: "data/motions/g1/g1_movebox_hybrid_object.npz"
+
+# The Hybrid reference starts with the box at this pose.  The kinematic box is
+# replayed from object_motion_file in sync with the robot reference.
+objects:
+  - file: "data/assets/g1/objects_largebox.urdf"
+    pos: [0.30712429, 0.05276225, 0.18436243]
+    rot: [0.43283877, 0.89796127, -0.02242687, -0.07624448]
+
+reward_pose_w: 0.5
+reward_vel_w: 0.1
+reward_root_pose_w: 0.15
+reward_root_vel_w: 0.1
+reward_key_pos_w: 0.15
+reward_pose_scale: 0.25
+reward_vel_scale: 0.01
+reward_root_pose_scale: 5.0
+reward_root_vel_scale: 1.0
+reward_key_pos_scale: 10.0

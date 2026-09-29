@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+import os
 
 import anim.motion as motion
 import anim.motion_lib as motion_lib
@@ -42,6 +43,7 @@ def parse_static_object_specs(env_config):
 class DeepMimicEnv(char_env.CharEnv):
     def __init__(self, env_config, engine_config, num_envs, device, visualize, record_video=False):
         self._static_object_specs = parse_static_object_specs(env_config)
+        self._object_motion = self._load_object_motion(env_config.get("object_motion_file"), device)
         self._enable_early_termination = env_config["enable_early_termination"]
         self._num_phase_encoding = env_config.get("num_phase_encoding", 0)
 
@@ -74,6 +76,72 @@ class DeepMimicEnv(char_env.CharEnv):
         super().__init__(env_config=env_config, engine_config=engine_config,
                          num_envs=num_envs, device=device, visualize=visualize,
                          record_video=record_video)
+        return
+
+    def _load_object_motion(self, filename, device):
+        """Load an optional kinematic object trajectory aligned to the motion."""
+        if not filename:
+            return None
+        if not os.path.isfile(filename):
+            raise FileNotFoundError("object_motion_file does not exist: {}".format(filename))
+        data = np.load(filename)
+        required = ("fps", "object_pos_w", "object_quat_w", "object_lin_vel_w", "object_ang_vel_w")
+        missing = [key for key in required if key not in data.files]
+        if missing:
+            raise ValueError("object motion is missing fields: {}".format(missing))
+        fps = float(np.asarray(data["fps"]).reshape(-1)[0])
+        pos = np.asarray(data["object_pos_w"], dtype=np.float32)
+        quat = np.asarray(data["object_quat_w"], dtype=np.float32)
+        lin = np.asarray(data["object_lin_vel_w"], dtype=np.float32)
+        ang = np.asarray(data["object_ang_vel_w"], dtype=np.float32)
+        n = pos.shape[0]
+        if pos.shape != (n, 3) or quat.shape != (n, 4) or lin.shape != (n, 3) or ang.shape != (n, 3):
+            raise ValueError("object trajectory fields have inconsistent shapes")
+        return {
+            "fps": fps,
+            "pos": torch.tensor(pos, device=device),
+            # Source NPZ stores Isaac wxyz; engine setters accept xyzw.
+            "quat": torch.tensor(quat[:, [1, 2, 3, 0]], device=device),
+            "lin": torch.tensor(lin, device=device),
+            "ang": torch.tensor(ang, device=device),
+        }
+
+    def _object_state_at(self, times):
+        motion = self._object_motion
+        frame = torch.clamp(times * motion["fps"], 0.0, motion["pos"].shape[0] - 1.0)
+        low = torch.floor(frame).long()
+        high = torch.minimum(low + 1, torch.tensor(motion["pos"].shape[0] - 1, device=self._device))
+        alpha = (frame - low).unsqueeze(-1)
+
+        def lerp(values):
+            return values[low] * (1.0 - alpha) + values[high] * alpha
+
+        quat = lerp(motion["quat"])
+        quat = quat / torch.linalg.vector_norm(quat, dim=-1, keepdim=True).clamp_min(1e-8)
+        return lerp(motion["pos"]), quat, lerp(motion["lin"]), lerp(motion["ang"])
+
+    def _update_object_motion(self, env_ids=None):
+        if self._object_motion is None or len(self._static_object_specs) == 0:
+            return
+        # The current interaction config contains one box after the character.
+        obj_id = 1
+        times = self._get_motion_times(env_ids)
+        pos, quat, lin, ang = self._object_state_at(times)
+        self._engine.set_root_pos(env_ids, obj_id, pos)
+        self._engine.set_root_rot(env_ids, obj_id, quat)
+        self._engine.set_root_vel(env_ids, obj_id, lin)
+        self._engine.set_root_ang_vel(env_ids, obj_id, ang)
+
+    def _reset_envs(self, env_ids):
+        super()._reset_envs(env_ids)
+        self._update_object_motion(env_ids)
+        return
+
+    def _pre_physics_step(self, actions):
+        # Keep the box on the reference trajectory while the policy controls
+        # the robot.  The object is kinematic in this first interaction task.
+        self._update_object_motion()
+        super()._pre_physics_step(actions)
         return
     
     def get_reward_succ(self):
@@ -175,14 +243,7 @@ class DeepMimicEnv(char_env.CharEnv):
         return self._visualize and self._visualize_ref_char
 
     def _get_ref_char_color(self):
-        engine_name = self._engine.get_name()
-        if (engine_name == "isaac_lab"):
-            col = np.array([0.25, 0.4, 0.1])
-        elif (engine_name == "newton"):
-            col = np.array([0.3, 0.5, 0.1])
-        else:
-            col = np.array([0.5, 0.9, 0.1])
-        return col
+        return np.array([0.25, 0.4, 0.1])
 
     def _reset_char(self, env_ids):
         self._reset_ref_motion(env_ids)

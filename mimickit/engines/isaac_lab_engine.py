@@ -81,6 +81,11 @@ class IsaacLabEngine(engine.Engine):
         self._env_spacing = config["env_spacing"]
         self._obj_cfgs = []
         self._obj_control_modes = []
+        # Character body order is defined by the kinematic model (URDF/MJCF),
+        # while Isaac's importer may enumerate fixed links differently.  The
+        # pending map is populated during the first validation pass and
+        # consumed once all simulation tensors have been created.
+        self._aligned_body_names = {}
         
         if ("control_mode" in config):
             self._control_mode = engine.ControlMode[config["control_mode"]]
@@ -334,6 +339,14 @@ class IsaacLabEngine(engine.Engine):
     
     def get_contact_forces(self, obj_id):
         sensor = self._ground_contact_sensors[obj_id]
+        if sensor is None:
+            # Some imported USDs do not expose PhysX contact-report APIs on
+            # their collision prims.  Keep the environment usable (contact
+            # based termination simply becomes inactive) instead of crashing
+            # the first rollout.
+            num_envs = self.get_num_envs()
+            num_bodies = self.get_obj_num_bodies(obj_id)
+            return torch.zeros((num_envs, num_bodies, 3), device=self._device)
         forces = sensor.data.net_forces_w
 
         body_order_sim2common = self._sensor_body_order_sim2common[obj_id]
@@ -342,6 +355,10 @@ class IsaacLabEngine(engine.Engine):
     
     def get_ground_contact_forces(self, obj_id):
         sensor = self._ground_contact_sensors[obj_id]
+        if sensor is None:
+            num_envs = self.get_num_envs()
+            num_bodies = self.get_obj_num_bodies(obj_id)
+            return torch.zeros((num_envs, num_bodies, 3), device=self._device)
         forces = sensor.data.force_matrix_w
         forces = forces.sum(dim=-2)
 
@@ -542,8 +559,14 @@ class IsaacLabEngine(engine.Engine):
         meta_data = obj.root_physx_view.shared_metatype
         body_names = meta_data.link_names
         sim_body_id = body_names.index(body_name)
-        body_id = self._body_order_common2sim[obj_id][sim_body_id]
-        return body_id
+        # Public body ids are in the common (kinematic) order.  Convert the
+        # raw PhysX index explicitly; indexing common2sim with a sim index is
+        # only correct when both importers happen to choose the same order.
+        sim2common = self._body_order_sim2common[obj_id]
+        body_id = (sim2common == sim_body_id).nonzero(as_tuple=False)
+        if body_id.numel() == 0:
+            return -1
+        return int(body_id[0, 0].item())
     
     def get_obj_type(self, obj_id):
         obj_type = self._obj_cfgs[0][obj_id].obj_type
@@ -949,13 +972,10 @@ class IsaacLabEngine(engine.Engine):
                                                        angular_damping=0.01,
                                                        max_linear_velocity=1000.0,
                                                        max_angular_velocity=1000.0)
-        articulation_props = sim_utils.ArticulationRootPropertiesCfg(
-            articulation_enabled=False)
         usd_asset_file = self._parse_usd_path(obj_cfg.asset_file)
         usd_cfg = sim_utils.UsdFileCfg(usd_path=usd_asset_file, 
                                        visual_material=visual_material, 
                                        rigid_props=rigid_props,
-                                       articulation_props=articulation_props,
                                        activate_contact_sensors=True)
         
         prim_path = OBJ_PATH_TEMPLATE.format(env_id, obj_id)
@@ -1102,6 +1122,31 @@ class IsaacLabEngine(engine.Engine):
                 obj = self._objs[obj_id]
                 body_order_sim2common, body_order_common2sim, dof_order_sim2common, dof_order_common2sim = self._build_body_order(obj)
 
+                # Override only the body (and derived DOF) order when the
+                # kinematic parser supplied an explicit name order.  This is
+                # needed for URDFs containing fixed sensor/visual links: the
+                # USD importer can legally place those links in a different
+                # DFS position while preserving the same model.
+                common_names = self._aligned_body_names.get(obj_id)
+                if common_names is not None:
+                    meta = obj.root_physx_view.shared_metatype
+                    sim_names = list(meta.link_names)
+                    sim_dof_counts = meta.joint_dof_counts
+                    sim_dof_offsets = meta.joint_dof_offsets
+                    body_order_sim2common = [sim_names.index(name) for name in common_names]
+                    body_order_common2sim = [body_order_sim2common.index(i) for i in range(len(body_order_sim2common))]
+
+                    # Build the DOF order by walking the requested common
+                    # body order.  Root has no joint; fixed links contribute
+                    # zero dimensions and are skipped.
+                    dof_order_sim2common = []
+                    for name in common_names[1:]:
+                        sim_body_id = sim_names.index(name)
+                        dof_count = int(sim_dof_counts[sim_body_id - 1])
+                        dof_offset = int(sim_dof_offsets[sim_body_id - 1])
+                        dof_order_sim2common.extend(range(dof_offset, dof_offset + dof_count))
+                    dof_order_common2sim = [dof_order_sim2common.index(i) for i in range(len(dof_order_sim2common))]
+
                 body_order_sim2common = torch.tensor(body_order_sim2common, device=self._device, dtype=torch.long)
                 body_order_common2sim = torch.tensor(body_order_common2sim, device=self._device, dtype=torch.long)
                 dof_order_sim2common = torch.tensor(dof_order_sim2common, device=self._device, dtype=torch.long)
@@ -1117,6 +1162,31 @@ class IsaacLabEngine(engine.Engine):
             self._dof_order_sim2common.append(dof_order_sim2common)
             self._dof_order_common2sim.append(dof_order_common2sim)
 
+        return
+
+    def align_obj_body_order(self, obj_id, common_body_names):
+        """Use the kinematic model's body order as the engine common order.
+
+        URDF importers are free to enumerate fixed sensor links differently
+        from a DFS over the source XML.  Body observations must nevertheless
+        be compared by name, not importer order.
+        """
+        obj = self._objs[obj_id]
+        sim_names = list(obj.root_physx_view.shared_metatype.link_names)
+        if len(sim_names) != len(common_body_names) or set(sim_names) != set(common_body_names):
+            raise ValueError(
+                "Body-name set mismatch for object {}: sim={} common={}"
+                .format(obj_id, sim_names, list(common_body_names))
+            )
+        # Store names here.  The first engine validation happens before the
+        # body/contact tensors exist, so writing sensor mappings at this point
+        # would race initialization.  _build_body_order_tensors consumes this
+        # map after PhysX reset.
+        self._aligned_body_names[obj_id] = list(common_body_names)
+        if hasattr(self, "_body_order_sim2common"):
+            self._build_body_order_tensors()
+            if hasattr(self, "_ground_contact_sensors"):
+                self._build_sensor_order_tensors()
         return
 
     def _build_sensor_order_tensors(self):
@@ -1279,21 +1349,23 @@ class IsaacLabEngine(engine.Engine):
         from pxr import PhysxSchema
 
         obj_prim = self._stage.GetPrimAtPath(obj_path)
-        prim_children = obj_prim.GetAllChildren()
-                
-        contact_prim_path = None
-        for prim_child in prim_children:
-            prim_grandchildren = prim_child.GetAllChildren()
-                
-            if (len(prim_grandchildren) > 0):
-                prim_grandchild = prim_grandchildren[0]
-                has_contact_api = prim_grandchild.HasAPI(PhysxSchema.PhysxContactReportAPI)
-                    
-                if (has_contact_api):
-                    contact_prim_path = prim_child.GetPrimPath().pathString
-                    break
-        
-        return contact_prim_path
+        # Isaac URDF importer versions place the contact-report API at
+        # different depths (link, collision container, or mesh).  The old
+        # two-level probe silently returned None for the current G1 USD.  A
+        # recursive existence check plus a wildcard sensor path is robust to
+        # all of these layouts; ContactSensor resolves only descendants that
+        # actually carry the reporter API.
+        obj_prefix = obj_path.rstrip("/") + "/"
+        for child in obj_prim.GetChildren():
+            child_prefix = child.GetPath().pathString.rstrip("/") + "/"
+            has_reporter = any(
+                prim.GetPath().pathString.startswith(child_prefix)
+                and prim.HasAPI(PhysxSchema.PhysxContactReportAPI)
+                for prim in self._stage.Traverse()
+            )
+            if has_reporter:
+                return child.GetPath().pathString
+        return None
     
     def _on_keyboard_event(self, event):
         if (event.type == carb.input.KeyboardEventType.KEY_PRESS):

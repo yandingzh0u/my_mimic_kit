@@ -1,0 +1,11 @@
+--mode train
+--num_envs 4096
+--devices cuda:0
+--engine_config data/engines/isaac_lab_engine.yaml
+--env_config data/envs/dare_g1_climb_env.yaml
+--agent_config data/agents/dare_g1_climb_agent.yaml
+--max_samples 393216000
+--rand_seed 0
+--visualize false
+--save_int_models true
+--logger txt
