@@ -30,13 +30,10 @@ class ConvexPotentialBlock(torch.nn.Module):
 
 
 class GroupSeparableDiscLayers(torch.nn.Module):
-    """Semantic group frontend for DARE's Full-SN critic.
-    """
+    """Semantic group frontend and fixed CPL trunk for DARE."""
 
-    def __init__(self, groups, first_width, trunk_widths, activation,
-                 trunk_geometry="full_sn"):
+    def __init__(self, groups, first_width, trunk_widths, activation):
         super().__init__()
-        self.trunk_geometry = trunk_geometry
         num_groups = len(groups)
         self.group_width = first_width // num_groups
         if self.group_width < 1:
@@ -54,27 +51,18 @@ class GroupSeparableDiscLayers(torch.nn.Module):
 
         trunk = []
         in_size = self.total_width
-        if trunk_geometry == "cpl":
-            if not trunk_widths:
-                raise ValueError("CPL trunk requires at least one fusion layer")
-            fusion_width = trunk_widths[0]
-            trunk.extend((self._build_linear(in_size, fusion_width),
-                          activation()))
-            in_size = fusion_width
-            for out_size in trunk_widths[1:]:
-                if out_size != in_size:
-                    raise ValueError(
-                        "CPL requires square hidden trunk layers, got "
-                        "{} -> {}".format(in_size, out_size))
-                trunk.append(ConvexPotentialBlock(in_size, activation))
-        elif trunk_geometry == "full_sn":
-            for out_size in trunk_widths:
-                trunk.append(self._build_linear(in_size, out_size))
-                trunk.append(activation())
-                in_size = out_size
-        else:
-            raise ValueError(
-                "Unsupported DARE trunk geometry: {}".format(trunk_geometry))
+        if not trunk_widths:
+            raise ValueError("CPL trunk requires at least one fusion layer")
+        fusion_width = trunk_widths[0]
+        trunk.extend((self._build_linear(in_size, fusion_width),
+                      activation()))
+        in_size = fusion_width
+        for out_size in trunk_widths[1:]:
+            if out_size != in_size:
+                raise ValueError(
+                    "CPL requires square hidden trunk layers, got "
+                    "{} -> {}".format(in_size, out_size))
+            trunk.append(ConvexPotentialBlock(in_size, activation))
         self.trunk = torch.nn.Sequential(*trunk)
         self.out_features = in_size
 
@@ -94,7 +82,14 @@ class GroupSeparableDiscLayers(torch.nn.Module):
 
 
 class DAREModel(add_model.ADDModel):
-    """DARE critic with a fixed raw discriminator logit."""
+    """DARE critic with rollout-calibrated reward logits."""
+
+    def __init__(self, config, env):
+        super().__init__(config, env)
+        self.register_buffer("_disc_logit_scale", torch.ones(()))
+        self.register_buffer("_disc_logit_center", torch.zeros(()))
+        self.register_buffer(
+            "_disc_logit_calibrated", torch.zeros((), dtype=torch.bool))
 
     def _build_disc(self, config, env):
         input_dict = {"disc_obs": env.get_disc_obs_space()}
@@ -106,26 +101,12 @@ class DAREModel(add_model.ADDModel):
             raise ValueError(
                 "DARE requires a shared discriminator trunk")
 
-        self._disc_group_embedding = bool(
-            config.get("disc_group_embedding", True))
-        self._disc_hidden_geometry = config.get(
-            "disc_hidden_geometry", "full_sn")
-        if self._disc_group_embedding:
-            self._disc_layers = GroupSeparableDiscLayers(
-                groups=env.get_disc_error_groups(),
-                first_width=linears[0].out_features,
-                trunk_widths=[layer.out_features for layer in linears[1:]],
-                activation=self._activation,
-                trunk_geometry=self._disc_hidden_geometry)
-            disc_out = self._disc_layers.out_features
-        else:
-            # The ablation retains DARE's Full-SN critic and all subsequent
-            # training machinery, but replaces the semantic direct sum by the
-            # ordinary dense first layer used by a flat discriminator.
-            self._disc_layers = base_layers
-            for layer in linears:
-                torch.nn.utils.parametrizations.spectral_norm(layer)
-            disc_out = linears[-1].out_features
+        self._disc_layers = GroupSeparableDiscLayers(
+            groups=env.get_disc_error_groups(),
+            first_width=linears[0].out_features,
+            trunk_widths=[layer.out_features for layer in linears[1:]],
+            activation=self._activation)
+        disc_out = self._disc_layers.out_features
 
         self._disc_logits = torch.nn.Linear(disc_out, 1, bias=True)
         torch.nn.init.uniform_(self._disc_logits.weight, -1.0, 1.0)
@@ -139,23 +120,29 @@ class DAREModel(add_model.ADDModel):
     def eval_disc_raw(self, disc_obs):
         return self._disc_logits(self._disc_layers(disc_obs))
 
-    def get_disc_hidden_geometry(self):
-        return self._disc_hidden_geometry
-
     def eval_disc(self, disc_obs):
-        return self.eval_disc_raw(disc_obs)
+        return self._disc_logit_scale * (
+            self.eval_disc_raw(disc_obs) - self._disc_logit_center)
+
+    @torch.no_grad()
+    def set_disc_logit_calibration(self, center, scale):
+        self._disc_logit_center.fill_(float(center))
+        self._disc_logit_scale.fill_(float(scale))
+        self._disc_logit_calibrated.fill_(True)
+
+    def is_disc_logit_calibrated(self):
+        return bool(self._disc_logit_calibrated.item())
+
+    def get_disc_logit_scale(self):
+        return self._disc_logit_scale.clone()
+
+    def get_disc_logit_center(self):
+        return self._disc_logit_center.clone()
 
     def get_disc_group_width(self):
-        if not self._disc_group_embedding:
-            return self._disc_logits.weight.new_zeros(())
         return self._disc_logits.weight.new_tensor(
             float(self._disc_layers.group_width))
 
     def get_disc_group_total_width(self):
-        if not self._disc_group_embedding:
-            return self._disc_logits.weight.new_zeros(())
         return self._disc_logits.weight.new_tensor(
             float(self._disc_layers.total_width))
-
-    def uses_disc_group_embedding(self):
-        return self._disc_group_embedding

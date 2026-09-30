@@ -19,8 +19,8 @@ class AMPAgent(ppo_agent.PPOAgent):
         self._disc_epochs = config["disc_epochs"]
         self._disc_batch_size = config["disc_batch_size"]
         self._disc_replay_samples = config["disc_replay_samples"]
-        self._disc_logit_reg = config["disc_logit_reg"]
-        self._disc_grad_penalty = config["disc_grad_penalty"]
+        self._disc_logit_reg = config.get("disc_logit_reg", 0.0)
+        self._disc_grad_penalty = config.get("disc_grad_penalty", 0.0)
         self._disc_reward_scale = config["disc_reward_scale"]
         self._disc_eval_batch_size = int(config.get("disc_eval_batch_size", 0))
         # Building all demonstration observations for an 8192-env rollout in

@@ -136,6 +136,40 @@ class PPOAgent(base_agent.BaseAgent):
         vals = torch_util.eval_minibatch(self._model.eval_critic, critic_inputs, self._critic_eval_batch_size)
         vals = vals.squeeze(-1).detach()
         adv = new_vals - vals
+
+        # Termination-conditioned TD-target statistics are diagnostics only.
+        # They make it possible to distinguish a critic-scale jump caused by
+        # FAIL/TIME sampling from a genuine value-network update problem.
+        td_flat = new_vals.detach().flatten()
+        done_flat = done.flatten()
+
+        def td_stats(mask):
+            values = td_flat[mask]
+            if values.numel() == 0:
+                nan = torch.full((), float("nan"), device=td_flat.device)
+                return (torch.zeros((), device=td_flat.device), nan, nan,
+                        nan, nan, nan)
+            quantiles = torch.quantile(values, torch.tensor(
+                [0.1, 0.5, 0.9], device=values.device))
+            return (torch.tensor(float(values.numel()), device=values.device),
+                    values.mean(), values.std(unbiased=False), quantiles[0],
+                    quantiles[1], quantiles[2])
+
+        td_info = {}
+        for name, flag in (("null", base_env.DoneFlags.NULL.value),
+                           ("fail", base_env.DoneFlags.FAIL.value),
+                           ("succ", base_env.DoneFlags.SUCC.value),
+                           ("time", base_env.DoneFlags.TIME.value)):
+            count, mean, std, p10, p50, p90 = td_stats(done_flat == flag)
+            prefix = "td_target_{}".format(name)
+            td_info.update({
+                prefix + "_count": count,
+                prefix + "_mean": mean,
+                prefix + "_std": std,
+                prefix + "_p10": p10,
+                prefix + "_p50": p50,
+                prefix + "_p90": p90,
+            })
         
         rand_action_mask = (rand_action_mask == 1.0).flatten()
         adv_flat = adv.flatten()
@@ -149,7 +183,8 @@ class PPOAgent(base_agent.BaseAgent):
         
         info = {
             "adv_mean": adv_mean,
-            "adv_std": adv_std
+            "adv_std": adv_std,
+            **td_info,
         }
         return info
     
@@ -213,7 +248,7 @@ class PPOAgent(base_agent.BaseAgent):
         # pre/post-update policy diagnostic.  Unlike the PPO importance ratio,
         # this compares the complete Gaussian action distributions on the same
         # observations and is therefore suitable for cross-run analysis.
-        audit_obs, audit_old_dist = self._build_policy_audit_batch()
+        audit_obs, audit_old_dist, audit_phase = self._build_policy_audit_batch()
 
         for i in range(num_steps):
             batch = self._exp_buffer.sample(batch_size)
@@ -232,7 +267,8 @@ class PPOAgent(base_agent.BaseAgent):
             torch_util.add_torch_dict(loss_info, info)
         
         torch_util.scale_torch_dict(1.0 / num_steps, info)
-        info.update(self._compute_policy_audit(audit_obs, audit_old_dist))
+        info.update(self._compute_policy_audit(
+            audit_obs, audit_old_dist, audit_phase))
         info.update(self._compute_first_layer_grad_info())
         return info
 
@@ -240,6 +276,9 @@ class PPOAgent(base_agent.BaseAgent):
         obs = self._exp_buffer.get_data_flat("obs")
         num_samples = min(int(obs.shape[0]), int(max_samples))
         norm_obs = self._obs_norm.normalize(obs[:num_samples]).detach()
+        phase = None
+        if self._exp_buffer.has_buffer("diag_phase"):
+            phase = self._exp_buffer.get_data_flat("diag_phase")[:num_samples]
 
         with torch.no_grad():
             old_dist = self._model.eval_actor(norm_obs)
@@ -247,9 +286,9 @@ class PPOAgent(base_agent.BaseAgent):
                 "mean": old_dist.mean.detach().clone(),
                 "logstd": old_dist.logstd.detach().clone(),
             }
-        return norm_obs, old_dist_data
+        return norm_obs, old_dist_data, phase
 
-    def _compute_policy_audit(self, norm_obs, old_dist_data):
+    def _compute_policy_audit(self, norm_obs, old_dist_data, phase=None):
         with torch.no_grad():
             new_dist = self._model.eval_actor(norm_obs)
             old_dist = distribution_gaussian_diag.DistributionGaussianDiag(
@@ -260,11 +299,22 @@ class PPOAgent(base_agent.BaseAgent):
             action_bound_frac = torch.mean(
                 (torch.abs(new_dist.mean) > 1.0).to(dtype=torch.float32))
 
-        return {
+        info = {
             "policy_kl": policy_kl,
             "action_mean_update_rms": action_mean_delta,
             "action_mean_bound_frac": action_bound_frac,
         }
+        if phase is not None:
+            phase = phase.flatten()
+            kl = old_dist.kl(new_dist)
+            num_bins = 4
+            phase_bin = torch.clamp((phase * num_bins).long(), 0, num_bins - 1)
+            for i in range(num_bins):
+                mask = phase_bin == i
+                info["policy_kl_phase{}".format(i)] = (
+                    torch.mean(kl[mask]) if torch.any(mask)
+                    else torch.full((), float("nan"), device=kl.device))
+        return info
 
     def _compute_first_layer_grad_info(self):
         first_linear = None

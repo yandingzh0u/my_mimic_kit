@@ -551,6 +551,13 @@ class BaseAgent(torch.nn.Module):
     def _record_data_pre_step(self, obs, info, action, action_info):
         self._exp_buffer.record("obs", obs)
         self._exp_buffer.record("action", action)
+
+        # DeepMimic environments expose the normalized reference phase for
+        # diagnostics.  It is stored only in the rollout buffer and is not
+        # consumed by any loss.
+        get_phase = getattr(self._env, "get_motion_phase", None)
+        if get_phase is not None:
+            self._exp_buffer.record("diag_phase", get_phase().detach())
         
         if (self._need_normalizer_update()):
             self._obs_norm.record(obs)

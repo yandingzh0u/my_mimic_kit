@@ -55,6 +55,10 @@ class DeepMimicEnv(char_env.CharEnv):
         self._tar_obs_steps = torch.tensor(self._tar_obs_steps, device=device, dtype=torch.int)
         self._rand_reset = env_config.get("rand_reset", True)
         self._test_random_start = False
+        self._diagnostic_phase_bins = int(
+            env_config.get("diagnostic_phase_bins", 4))
+        if self._diagnostic_phase_bins < 1:
+            raise ValueError("diagnostic_phase_bins must be positive")
         
         self._ref_char_offset = torch.tensor(env_config["ref_char_offset"], device=device, dtype=torch.float)
         self._log_tracking_error = env_config.get("log_tracking_error", False)
@@ -163,7 +167,14 @@ class DeepMimicEnv(char_env.CharEnv):
     def set_test_random_start(self, enabled):
         self._test_random_start = bool(enabled)
         return
-    
+
+    def get_motion_phase(self, env_ids=None):
+        motion_ids = self._motion_ids if env_ids is None else self._motion_ids[env_ids]
+        motion_times = self._get_motion_times(env_ids)
+        motion_len = self._motion_lib.get_motion_length(motion_ids)
+        return torch.clamp(
+            motion_times / torch.clamp_min(motion_len, 1e-6), 0.0, 1.0)
+
     def record_diagnostics(self):
         if (self._log_tracking_error):
             err_stats = self._error_tracker.get_mean()
@@ -175,6 +186,44 @@ class DeepMimicEnv(char_env.CharEnv):
             self._diagnostics["root_vel_err"] = err_stats[5]
             self._diagnostics["root_ang_vel_err"] = err_stats[6]
 
+        phase_bins = self._diagnostic_phase_bins
+        term_count = self._diagnostic_term_count
+        total_terms = torch.sum(term_count)
+        denom = torch.clamp_min(total_terms, 1.0)
+        self._diagnostics["train_fail_frac"] = term_count[0] / denom
+        self._diagnostics["train_succ_frac"] = term_count[1] / denom
+        self._diagnostics["train_time_frac"] = term_count[2] / denom
+        self._diagnostics["train_episode_count"] = total_terms
+        self._diagnostics["train_reset_phase_mean"] = (
+            self._diagnostic_reset_phase_sum / torch.clamp_min(
+                self._diagnostic_reset_count, 1.0))
+        self._diagnostics["train_reset_phase_count"] = self._diagnostic_reset_count.clone()
+
+        term_phase_mean = self._diagnostic_term_phase_sum / torch.clamp_min(
+            term_count, 1.0)
+        self._diagnostics["train_fail_term_phase_mean"] = term_phase_mean[0]
+        self._diagnostics["train_succ_term_phase_mean"] = term_phase_mean[1]
+        self._diagnostics["train_time_term_phase_mean"] = term_phase_mean[2]
+        for i in range(3):
+            self._diagnostics["train_term_count_{}".format(i + 1)] = term_count[i].clone()
+
+        phase_count = self._diagnostic_phase_count
+        phase_denom = torch.clamp_min(phase_count, 1.0)
+        phase_len = self._diagnostic_phase_length_sum / phase_denom
+        phase_err = self._diagnostic_phase_error_sum / phase_denom
+        for i in range(phase_bins):
+            self._diagnostics["train_ep_len_phase{}".format(i)] = phase_len[i]
+            self._diagnostics["train_body_pos_err_phase{}".format(i)] = phase_err[i]
+            self._diagnostics["train_ep_count_phase{}".format(i)] = phase_count[i].clone()
+
+        self._diagnostic_reset_count.zero_()
+        self._diagnostic_reset_phase_sum.zero_()
+        self._diagnostic_term_count.zero_()
+        self._diagnostic_term_phase_sum.zero_()
+        self._diagnostic_phase_count.zero_()
+        self._diagnostic_phase_length_sum.zero_()
+        self._diagnostic_phase_error_sum.zero_()
+
         diag = super().record_diagnostics()
         return diag
 
@@ -184,6 +233,16 @@ class DeepMimicEnv(char_env.CharEnv):
         num_envs = self.get_num_envs()
         self._motion_ids = torch.zeros(num_envs, device=self._device, dtype=torch.int64)
         self._motion_time_offsets = torch.zeros(num_envs, device=self._device, dtype=torch.float32)
+
+        phase_bins = self._diagnostic_phase_bins
+        self._episode_start_phase = torch.zeros(num_envs, device=self._device)
+        self._diagnostic_reset_count = torch.zeros((), device=self._device)
+        self._diagnostic_reset_phase_sum = torch.zeros((), device=self._device)
+        self._diagnostic_term_count = torch.zeros(3, device=self._device)
+        self._diagnostic_term_phase_sum = torch.zeros(3, device=self._device)
+        self._diagnostic_phase_count = torch.zeros(phase_bins, device=self._device)
+        self._diagnostic_phase_length_sum = torch.zeros(phase_bins, device=self._device)
+        self._diagnostic_phase_error_sum = torch.zeros(phase_bins, device=self._device)
         
         char_id = self._get_char_id()
         root_pos = self._engine.get_root_pos(char_id)
@@ -291,6 +350,14 @@ class DeepMimicEnv(char_env.CharEnv):
 
         dof_pos = self._motion_lib.joint_rot_to_dof(joint_rot)
         self._ref_dof_pos[env_ids] = dof_pos
+
+        start_phase = torch.clamp(
+            motion_times / torch.clamp_min(
+                self._motion_lib.get_motion_length(motion_ids), 1e-6), 0.0, 1.0)
+        self._episode_start_phase[env_ids] = start_phase
+        if self._mode == base_env.EnvMode.TRAIN:
+            self._diagnostic_reset_count += float(n)
+            self._diagnostic_reset_phase_sum += torch.sum(start_phase)
         return
 
     def _get_ref_char_id(self):
@@ -574,6 +641,7 @@ class DeepMimicEnv(char_env.CharEnv):
                                              root_pose_scale=self._reward_root_pose_scale,
                                              root_vel_scale=self._reward_root_vel_scale,
                                              key_pos_scale=self._reward_key_pos_scale)
+
         return
 
     def _update_done(self):
@@ -606,6 +674,38 @@ class DeepMimicEnv(char_env.CharEnv):
                                          motion_len=motion_len,
                                          motion_len_term=motion_len_term,
                                          track_root=track_root)
+        if self._mode == base_env.EnvMode.TRAIN:
+            done_mask = self._done_buf != base_env.DoneFlags.NULL.value
+            if torch.any(done_mask):
+                term_phase = torch.clamp(
+                    motion_times / torch.clamp_min(motion_len, 1e-6), 0.0, 1.0)
+                start_phase = self._episode_start_phase
+                ep_len = self._time_buf
+                root_pos_rel = body_pos - body_pos[..., 0:1, :]
+                ref_root_pos_rel = self._ref_body_pos - self._ref_body_pos[..., 0:1, :]
+                ep_err = torch.linalg.vector_norm(
+                    ref_root_pos_rel - root_pos_rel, dim=-1).mean(dim=-1)
+                for flag, index in ((base_env.DoneFlags.FAIL.value, 0),
+                                    (base_env.DoneFlags.SUCC.value, 1),
+                                    (base_env.DoneFlags.TIME.value, 2)):
+                    flag_mask = torch.logical_and(
+                        done_mask, self._done_buf == flag)
+                    count = torch.sum(flag_mask).to(dtype=torch.float32)
+                    self._diagnostic_term_count[index] += count
+                    self._diagnostic_term_phase_sum[index] += torch.sum(
+                        term_phase[flag_mask])
+
+                start_bin = torch.clamp(
+                    (start_phase * self._diagnostic_phase_bins).long(),
+                    0, self._diagnostic_phase_bins - 1)
+                for i in range(self._diagnostic_phase_bins):
+                    bin_mask = torch.logical_and(done_mask, start_bin == i)
+                    self._diagnostic_phase_count[i] += torch.sum(
+                        bin_mask).to(dtype=torch.float32)
+                    self._diagnostic_phase_length_sum[i] += torch.sum(
+                        ep_len[bin_mask])
+                    self._diagnostic_phase_error_sum[i] += torch.sum(
+                        ep_err[bin_mask])
         return
 
     def _update_info(self, env_ids=None):

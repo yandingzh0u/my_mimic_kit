@@ -154,7 +154,7 @@ declare -A agent_files=(
   [deepmimic]="data/agents/deepmimic_humanoid_ppo_agent.yaml"
   [amp]="data/agents/amp_humanoid_agent.yaml"
   [add]="data/agents/add_humanoid_agent.yaml"
-  [dare]="data/agents/dare_humanoid_agent.yaml"
+  [dare]="data/agents/dare_10layer_cpl_climb_agent.yaml"
 )
 
 smoke_envs=64
