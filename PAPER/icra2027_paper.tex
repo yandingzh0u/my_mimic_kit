@@ -164,23 +164,23 @@ may have different dimensions and physical units---positions are measured
 in meters, while rotations and velocities have their own representations.
 
 \subsection{Handcrafted Objective Scalarization}
-Traditional methods first compress each tracking error into a scalar.
-For tracked quantity $i$, the scalar tracking error at time $t$ is the
-Euclidean distance
-$e_{i,t}=\|\phi_i(\hat{s}_t)-\phi_i(s_t)\|_2$.
-
-A representative handcrafted scalarization is
+Traditional methods partition the tracking quantities into $G$ objective
+groups and assign a separate weight and error scale to each group. A
+representative handcrafted reward is
 \begin{equation}
-r_t^{\mathrm{hand}}=\sum_i w_i\exp\!\left(-\alpha_i e_{i,t}^2\right),
+r_t^{\mathrm{hand}}
+=\sum_{g=1}^{G} w_g
+\exp\!\Bigl[-\alpha_g
+\bigl\|\phi_g(\hat{s}_t)-\phi_g(s_t)\bigr\|_2^2\Bigr],
 \label{eq:hand}
 \end{equation}
-where $w_i$ and $\alpha_i$ set the relative importance and numerical
-scale of each tracking quantity. DeepMimic is a representative instance
-of this class: its
-tracking terms use weights and error scales specified before training and
-held fixed throughout \cite{peng2018deepmimic}. This is a fixed
-scalarization of the tracking objectives: the trade-off among errors is
-fixed through constant coefficients chosen before training starts.
+where $\phi_g$ extracts the tracking quantities in group $g$, while $w_g$
+and $\alpha_g$ set its relative importance and error scale. DeepMimic is a
+representative instance of this class: its tracking terms use weights and
+error scales specified before training and held fixed throughout
+\cite{peng2018deepmimic}. This is a fixed scalarization of the tracking
+objectives: the trade-off among groups is fixed through constant
+coefficients chosen before training starts.
 Because typical error magnitudes and dynamical characteristics differ
 across motions, one coefficient set need not serve all motions. Learned
 scalarization instead leaves the trade-off unspecified in advance and
