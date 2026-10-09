@@ -196,7 +196,7 @@ def test_formal_arg_budget(method):
     assert "--save_int_models true" in text
     assert "--engine_config data/engines/isaac_lab_engine.yaml" in text
     if method == "dare":
-        assert "dare_humanoid_agent.yaml" in text
+        assert "dare_10layer_cpl_climb_agent.yaml" in text
 
 
 def test_serial_launcher_syntax_and_contract():
@@ -206,7 +206,7 @@ def test_serial_launcher_syntax_and_contract():
     assert "motions=(climb backflip crawl roll getup_facedown spinkick)" in text
     assert "methods=(dare add deepmimic amp)" in text
     assert '[dare]="args/paper_benchmark/dare_2k_8192_args.txt"' in text
-    assert '[dare]="data/agents/dare_humanoid_agent.yaml"' in text
+    assert '[dare]="data/agents/dare_10layer_cpl_climb_agent.yaml"' in text
     assert "motion_filters=()" in text
     assert "--motion" in text
     assert 'for motion in "${run_motions[@]}"' in text

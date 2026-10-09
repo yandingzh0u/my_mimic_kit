@@ -64,11 +64,12 @@ def test_cpl_discriminator_is_finite_and_spectrally_normalized():
                for p in model.parameters())
 
 
-def test_dare_reward_is_quality_probability_and_bounded():
+def test_dare_reward_is_raw_logit_softplus():
     agent = object.__new__(DAREAgent)
     torch.nn.Module.__init__(agent)
     agent._model = DAREModel(_config(), _Env()).eval()
     agent._disc_eval_batch_size = 0
+    agent._disc_reward_scale = 2.0
     agent._pos_diff = torch.zeros(172)
     inputs = torch.randn(31, 172)
     reward = agent._calc_disc_rewards(inputs)
@@ -76,12 +77,14 @@ def test_dare_reward_is_quality_probability_and_bounded():
     anchor_reward = agent._calc_disc_rewards(anchor_input)
     assert reward.shape == (31,)
     assert torch.isfinite(reward).all()
-    expected_anchor_reward = torch.sigmoid(
+    expected_anchor_reward = agent._disc_reward_scale * torch.nn.functional.softplus(
         agent._model.eval_disc_raw(anchor_input)).squeeze(-1)
     torch.testing.assert_close(anchor_reward, expected_anchor_reward,
                                atol=1e-6, rtol=0.0)
     assert torch.all(reward >= 0.0)
-    assert torch.all(reward <= 1.0)
+    torch.testing.assert_close(reward, agent._disc_reward_scale * torch.nn.functional.softplus(
+        agent._model.eval_disc_raw(inputs)).squeeze(-1))
+    assert not reward.requires_grad
 
 
 def test_dare_discriminator_uses_only_the_differential():
@@ -92,20 +95,85 @@ def test_dare_discriminator_uses_only_the_differential():
     assert model.get_disc_group_total_width().item() == 1022
 
 
-def test_dare_disc_path_uses_fixed_quality_target():
+def test_dare_disc_path_uses_zero_vs_residual_bce():
     disc_src = inspect.getsource(DAREAgent._compute_disc_loss)
     reward_src = inspect.getsource(DAREAgent._calc_disc_rewards)
     assert "eval_disc_raw" in disc_src
     assert "replay_diff" in disc_src
-    assert "quality_target" in disc_src
-    assert "quality_loss" in disc_src
-    assert "F.mse_loss" in disc_src
-    assert "torch.sigmoid" in reward_src
-    assert "sigmoid(logits)" in reward_src
+    assert "_disc_loss_pos" in disc_src
+    assert "_disc_loss_neg" in disc_src
+    assert "quality_target" not in disc_src
+    assert "mse_loss" not in disc_src
+    assert "randperm" not in disc_src
+    assert "F.softplus(logits)" in reward_src
     assert "calibr" not in disc_src.lower()
 
 
-def test_dare_configs_have_single_current_rollout_path():
+class _LogitModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.anchor = torch.nn.Parameter(torch.tensor(0.0))
+        self.residual = torch.nn.Parameter(torch.tensor(0.0))
+        self.calls = []
+
+    def eval_disc_raw(self, disc_obs):
+        self.calls.append(disc_obs.detach().clone())
+        logit = torch.where(disc_obs.square().sum(dim=-1) == 0,
+                            self.anchor, self.residual)
+        return logit.unsqueeze(-1)
+
+    def get_disc_group_width(self):
+        return self.anchor.new_tensor(146.0)
+
+    def get_disc_group_total_width(self):
+        return self.anchor.new_tensor(1022.0)
+
+
+class _Replay:
+    def sample(self, count):
+        return {"disc_obs_demo": torch.full((count, 4), 2.0),
+                "disc_obs": torch.zeros(count, 4)}
+
+
+def test_dare_bce_uses_current_replay_and_correct_gradient_directions():
+    agent = object.__new__(DAREAgent)
+    torch.nn.Module.__init__(agent)
+    agent._model = _LogitModel()
+    agent._pos_diff = torch.zeros(4)
+    agent._disc_obs_norm = diff_normalizer.DiffNormalizer((4,), "cpu")
+    agent._disc_buffer = _Replay()
+    batch = {"disc_obs_demo": torch.ones(3, 4),
+             "disc_obs": torch.zeros(3, 4)}
+    info = agent._compute_disc_loss(batch)
+    torch.testing.assert_close(info["disc_loss"], torch.log(torch.tensor(2.0)))
+    assert len(agent._model.calls) == 2
+    torch.testing.assert_close(agent._model.calls[0], torch.zeros(1, 4))
+    torch.testing.assert_close(agent._model.calls[1], torch.cat((
+        torch.ones(3, 4), torch.full((3, 4), 2.0))))
+    info["disc_loss"].backward()
+    assert agent._model.anchor.grad < 0   # Gradient descent raises anchor logit.
+    assert agent._model.residual.grad > 0 # Gradient descent lowers residual logit.
+    assert "disc_quality_loss" not in info and "disc_pair_acc" not in info
+
+
+def test_dare_softplus_reward_is_finite_monotone_and_detached():
+    agent = object.__new__(DAREAgent)
+    torch.nn.Module.__init__(agent)
+    agent._model = torch.nn.Module()
+    agent._model.eval_disc_raw = lambda disc_obs: disc_obs[:, :1]
+    agent._disc_eval_batch_size = 0
+    agent._disc_reward_scale = 1.0
+    logits = torch.tensor([[-1000.], [-1.], [0.], [1.], [1000.]],
+                          requires_grad=True)
+    reward = agent._calc_disc_rewards(logits)
+    assert torch.isfinite(reward).all()
+    assert torch.all(reward[1:] >= reward[:-1])
+    torch.testing.assert_close(reward[2], torch.log(torch.tensor(2.0)))
+    torch.testing.assert_close(reward[-1], torch.tensor(1000.0))
+    assert not reward.requires_grad
+
+
+def test_dare_configs_have_single_adversarial_path():
     import yaml
 
     paths = [
@@ -117,7 +185,10 @@ def test_dare_configs_have_single_current_rollout_path():
         assert config["disc_buffer_size"] == 200000
         assert config["disc_replay_samples"] == 1000
         assert "disc_anchor_calibration" not in config
-        assert "disc_reward_scale" not in config
+        assert config["disc_reward_scale"] == 2.0
+        assert config["normalizer_samples"] == 100000000
+        assert "disc_grad_penalty" not in config
+        assert "disc_logit_reg" not in config
         assert config["agent_name"] == "DARE"
 
 
