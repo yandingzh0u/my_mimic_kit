@@ -5,10 +5,8 @@ import gymnasium.spaces as spaces
 import torch
 
 import learning.diff_normalizer as diff_normalizer
-from learning.dare_agent import DAREAgent, logit_standardization
-from learning.dare_model import (DAREModel, GroupSeparableDiscLayers,
-                                 ConvexPotentialBlock)
-import util.torch_util as torch_util
+from learning.dare_agent import DAREAgent
+from learning.dare_model import DAREModel, ConvexPotentialBlock
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -39,47 +37,21 @@ def _config():
             "actor_init_output_scale": 0.01,
             "actor_std_type": "FIXED", "action_std": 0.05,
             "critic_net": "fc_2layers_128units",
-            "disc_net": "fc_2layers_128units"}
+            "disc_net": "fc_10layers_1024units"}
 
 
-def _sn_linears(module):
-    return [child for child in module.modules()
-            if isinstance(child, torch.nn.Linear)]
-
-
-def test_coordinate_normalizer_zero_and_state_round_trip():
+def test_coordinate_normalizer_round_trip():
     norm = diff_normalizer.DiffNormalizer((4,), device="cpu")
     data = torch.tensor([[1., -2., 3., -4.], [-1., 2., -3., 4.]])
-    norm.record(data); norm.update()
-    torch.testing.assert_close(norm.get_abs_mean(), torch.tensor([1., 2., 3., 4.]))
-    torch.testing.assert_close(norm.normalize(torch.zeros(4)), torch.zeros(4))
+    norm.record(data)
+    norm.update()
+    torch.testing.assert_close(norm.get_abs_mean(),
+                               torch.tensor([1., 2., 3., 4.]))
     torch.testing.assert_close(norm.unnormalize(norm.normalize(data)), data)
-    state = norm.training_state_dict()
-    restored = diff_normalizer.DiffNormalizer((4,), device="cpu")
-    restored.load_training_state_dict(state)
-    assert restored._new_count == norm._new_count
 
 
-def test_model_restores_explicit_a30_group_frontend():
-    # Historical a30 frontend: pin the legacy geometry, since the default
-    # isometric backbone uses proportional widths and no spectral norm.
-    config = _config()
-    config["disc_hidden_geometry"] = "full_sn"
-    model = DAREModel(config, _Env()).train()
-    layers = model._disc_layers
-    assert isinstance(layers, GroupSeparableDiscLayers)
-    assert len(layers.encoders) == len(_Env.dims)
-    assert layers.group_width == 18 and layers.total_width == 126
-    assert all(hasattr(encoder[0].parametrizations, "weight")
-               for encoder in layers.encoders)
-
-
-def test_cpl_trunk_is_square_sn_and_finite():
-    config = _config()
-    config["disc_net"] = "fc_10layers_1024units"
-    config["disc_hidden_geometry"] = "cpl"
-    model = DAREModel(config, _Env()).train()
-    assert model.get_disc_hidden_geometry() == "cpl"
+def test_cpl_discriminator_is_finite_and_spectrally_normalized():
+    model = DAREModel(_config(), _Env()).train()
     blocks = [m for m in model._disc_layers.modules()
               if isinstance(m, ConvexPotentialBlock)]
     assert len(blocks) == 7
@@ -92,169 +64,61 @@ def test_cpl_trunk_is_square_sn_and_finite():
                for p in model.parameters())
 
 
-def test_all_discriminator_linears_use_spectral_norm():
-    # Legacy geometry only: the isometric backbone constrains the hidden layers
-    # by QR retraction instead, and keeps spectral norm on the output map.
-    config = _config()
-    config["disc_hidden_geometry"] = "full_sn"
-    model = DAREModel(config, _Env()).train()
-    linears = _sn_linears(model._disc_layers) + [model._disc_logits]
-    assert len(linears) == 9
-    assert all(hasattr(layer.parametrizations, "weight") for layer in linears)
+def test_dare_reward_is_quality_probability_and_bounded():
+    agent = object.__new__(DAREAgent)
+    torch.nn.Module.__init__(agent)
+    agent._model = DAREModel(_config(), _Env()).eval()
+    agent._disc_eval_batch_size = 0
+    agent._pos_diff = torch.zeros(172)
+    inputs = torch.randn(31, 172)
+    reward = agent._calc_disc_rewards(inputs)
+    anchor_input = agent._pos_diff.unsqueeze(0).expand(31, -1)
+    anchor_reward = agent._calc_disc_rewards(anchor_input)
+    assert reward.shape == (31,)
+    assert torch.isfinite(reward).all()
+    expected_anchor_reward = torch.sigmoid(
+        agent._model.eval_disc_raw(anchor_input)).squeeze(-1)
+    torch.testing.assert_close(anchor_reward, expected_anchor_reward,
+                               atol=1e-6, rtol=0.0)
+    assert torch.all(reward >= 0.0)
+    assert torch.all(reward <= 1.0)
 
 
-def test_flat_ablation_only_removes_group_frontend():
-    config = _config(); config["disc_group_embedding"] = False
-    model = DAREModel(config, _Env()).train()
-    assert not model.uses_disc_group_embedding()
-    assert float(model.get_disc_group_width()) == 0.0
-    logits = model.eval_disc(torch.randn(16, 172)).squeeze(-1)
-    logits.square().mean().backward()
-    assert torch.isfinite(logits).all()
-
-
-def test_uncalibrated_model_is_bitwise_v6():
+def test_dare_discriminator_uses_only_the_differential():
     model = DAREModel(_config(), _Env()).eval()
-    inputs = torch.randn(64, 172)
-    torch.testing.assert_close(model.eval_disc(inputs), model.eval_disc_raw(inputs),
-                               rtol=0., atol=0.)
+    logits = model.eval_disc_raw(torch.zeros(8, 172))
+    assert logits.shape == (8, 1)
+    assert model.get_disc_group_width().item() == 146
+    assert model.get_disc_group_total_width().item() == 1022
 
 
-def test_calibrated_classifier_is_affine_standardized_logit():
-    model = DAREModel(_config(), _Env()).eval()
-    inputs = torch.randn(32, 172); raw = model.eval_disc_raw(inputs)
-    model.set_disc_logit_calibration(-0.7, 3.5)
-    torch.testing.assert_close(model.eval_disc(inputs), 3.5 * (raw + 0.7),
-                               rtol=0., atol=1e-6)
-
-
-def test_logit_standardization_gives_zero_mean_unit_variance():
-    # The sign of the initial zero-vs-noise gap is arbitrary: measured at
-    # initialisation it is negative for 6/8 seeds with the legacy geometry and
-    # 2/8 with the isometric one.  DAREAgent defers calibration until the gap is
-    # positive, so the test sweeps seeds instead of pinning one.
-    for seed in range(32):
-        torch.manual_seed(seed)
-        model = DAREModel(_config(), _Env()).eval()
-        norm = diff_normalizer.DiffNormalizer((172,), device="cpu")
-        pos = torch.zeros(172)
-        current, replay = torch.randn(2048, 172), torch.randn(1024, 172)
-        center, std, gap = logit_standardization(model, norm, pos, current,
-                                                 replay, 512)
-        if gap > 0.0:
-            break
-    assert gap > 0.0
-    model.set_disc_logit_calibration(center, 1.0 / std)
-
-    def eval_scaled(disc_obs):
-        return model.eval_disc(norm.normalize(disc_obs))
-
-    pos_z = model.eval_disc(pos.unsqueeze(0)).mean()
-    cur_logits = torch_util.eval_minibatch(
-        eval_scaled, {"disc_obs": current}, 512)
-    rep_logits = torch_util.eval_minibatch(
-        eval_scaled, {"disc_obs": replay}, 512)
-    balanced_mean = (0.5 * pos_z + 0.25 * cur_logits.mean()
-                    + 0.25 * rep_logits.mean())
-    balanced_second = (0.5 * pos_z.square() + 0.25 * cur_logits.square().mean()
-                      + 0.25 * rep_logits.square().mean())
-    torch.testing.assert_close(balanced_mean, torch.tensor(0.0),
-                               rtol=0., atol=1e-5)
-    torch.testing.assert_close(balanced_second, torch.tensor(1.0),
-                               rtol=0., atol=1e-5)
-
-
-def test_anchor_gap_does_not_update_spectral_norm_state():
-    model = DAREModel(_config(), _Env()).eval()
-    norm = diff_normalizer.DiffNormalizer((172,), device="cpu")
-    before = {n: v.clone() for n, v in model.named_buffers()
-              if n.endswith("._u") or n.endswith("._v")}
-    logit_standardization(model, norm, torch.zeros(172), torch.randn(256, 172),
-                          torch.randn(256, 172), 128)
-    after = dict(model.named_buffers())
-    assert all(torch.equal(before[n], after[n]) for n in before)
-
-
-def test_reward_forward_uses_training_mode_sn_updates_like_a30():
-    agent = object.__new__(DAREAgent); torch.nn.Module.__init__(agent)
-    agent._model = DAREModel(_config(), _Env()).train()
-    agent._disc_reward_scale = 2.; agent._disc_eval_batch_size = 0
-    before = {n: v.clone() for n, v in agent._model.named_buffers()
-              if n.endswith("._u") or n.endswith("._v")}
-    reward = agent._calc_disc_rewards(torch.randn(31, 172))
-    after = dict(agent._model.named_buffers())
-    assert reward.shape == (31,) and torch.isfinite(reward).all()
-    assert any(not torch.equal(before[n], after[n]) for n in before)
-
-
-def test_disc_loss_evaluates_positive_before_negative():
-    source = inspect.getsource(DAREAgent._compute_disc_loss)
-    assert source.index("pos_logit =") < source.index("neg_logit =")
-
-
-def test_bc_separation_disc_loss_raw_reward_calibrated():
-    """B/C decoupling: discriminator trains on the RAW logit, reward on z.
-
-     B = spectral norm -> normalized geometry (inside the raw network)
-     C = affine calibration z = (f_raw - c_f) / s_f -> reward origin/scale
-    The calibration must therefore never enter the BCE, otherwise kappa = 1/s_f
-    silently rescales the classifier loss too.
-    """
+def test_dare_disc_path_uses_fixed_quality_target():
     disc_src = inspect.getsource(DAREAgent._compute_disc_loss)
-    assert "eval_disc_raw" in disc_src
-    assert "eval_disc(" not in disc_src
     reward_src = inspect.getsource(DAREAgent._calc_disc_rewards)
-    assert "eval_disc" in reward_src
+    assert "eval_disc_raw" in disc_src
+    assert "replay_diff" in disc_src
+    assert "quality_target" in disc_src
+    assert "quality_loss" in disc_src
+    assert "F.mse_loss" in disc_src
+    assert "torch.sigmoid" in reward_src
+    assert "sigmoid(logits)" in reward_src
+    assert "calibr" not in disc_src.lower()
 
 
-def test_dare_logit_reg_is_removed_not_silently_inert():
-    """DARE's `_disc_logits` is spectral-normalized, so the effective weight
-    always satisfies ||W_eff||_2 == 1 and sum(W_eff^2) is a constant with an
-    exactly zero gradient.  The objective must not add that term (it would be
-    dead weight), and a non-zero config value must be reported rather than
-    silently ignored, otherwise an ablation arm that only toggles it compares
-    two identical models.
-    """
-    disc_src = inspect.getsource(DAREAgent._compute_disc_loss)
-    assert "logit_reg_loss" in disc_src          # still reported in the info dict
-    assert "_disc_logit_reg * logit_loss" not in disc_src
-    assert "has no effect for DARE" in disc_src
-    assert "get_disc_logit_weights" not in disc_src
-
-
-def test_dare_configs_state_calibration_switches_explicitly():
-    """Every DARE config states whether the affine reward calibration is used."""
+def test_dare_configs_have_single_current_rollout_path():
     import yaml
-    for name in ["dare_humanoid_agent.yaml",
-                 "ablations/dare_climb_base_agent.yaml",
-                 "ablations/dare_climb_wocalibration_agent.yaml",
-                 "ablations/dare_climb_wogroup_agent.yaml"]:
-        path = ROOT / "data/agents" / name
+
+    paths = [
+        ROOT / "data/agents/dare_10layer_cpl_climb_agent.yaml",
+        ROOT / "data/agents/dare_10layer_cpl_climb_smoke_agent.yaml",
+    ]
+    for path in paths:
         config = yaml.safe_load(path.read_text())
-        assert "disc_anchor_calibration" in config, name
-        assert config.get("disc_logit_reg") == 0, name
-
-
-def test_config_restores_clean_v6_semantics():
-    text = (ROOT / "data/agents/dare_humanoid_agent.yaml").read_text()
-    assert 'agent_name: "DARE"' in text
-    assert "disc_grad_penalty: 0" in text
-    assert "disc_eval_batch_size: 0" in text
-    assert "disc_raw_bce" not in text and "group_energy" not in text
-
-
-def test_getup_ablation_configs_form_two_by_two_grid():
-    root = ROOT / "data/agents/ablations"
-    expected = {"dare_getup_wogroup_agent.yaml":
-                ("disc_group_embedding: false", "disc_anchor_calibration: true"),
-                "dare_getup_wocalibration_agent.yaml":
-                ("disc_group_embedding: true", "disc_anchor_calibration: false"),
-                "dare_getup_base_agent.yaml":
-                ("disc_group_embedding: false", "disc_anchor_calibration: false")}
-    for filename, flags in expected.items():
-        text = (root / filename).read_text()
-        assert 'agent_name: "DARE"' in text
-        assert all(flag in text for flag in flags)
+        assert config["disc_buffer_size"] == 200000
+        assert config["disc_replay_samples"] == 1000
+        assert "disc_anchor_calibration" not in config
+        assert "disc_reward_scale" not in config
+        assert config["agent_name"] == "DARE"
 
 
 def test_official_add_is_not_modified_by_dare():

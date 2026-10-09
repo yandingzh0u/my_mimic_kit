@@ -82,14 +82,7 @@ class GroupSeparableDiscLayers(torch.nn.Module):
 
 
 class DAREModel(add_model.ADDModel):
-    """DARE critic with rollout-calibrated reward logits."""
-
-    def __init__(self, config, env):
-        super().__init__(config, env)
-        self.register_buffer("_disc_logit_scale", torch.ones(()))
-        self.register_buffer("_disc_logit_center", torch.zeros(()))
-        self.register_buffer(
-            "_disc_logit_calibrated", torch.zeros((), dtype=torch.bool))
+    """DARE's fixed 10-layer convex-potential discriminator."""
 
     def _build_disc(self, config, env):
         input_dict = {"disc_obs": env.get_disc_obs_space()}
@@ -113,31 +106,8 @@ class DAREModel(add_model.ADDModel):
         torch.nn.init.zeros_(self._disc_logits.bias)
         torch.nn.utils.parametrizations.spectral_norm(self._disc_logits)
 
-    def eval_disc_hidden(self, disc_obs):
-        """Hidden discriminator representation h(x), used for diagnostics."""
-        return self._disc_layers(disc_obs)
-
     def eval_disc_raw(self, disc_obs):
         return self._disc_logits(self._disc_layers(disc_obs))
-
-    def eval_disc(self, disc_obs):
-        return self._disc_logit_scale * (
-            self.eval_disc_raw(disc_obs) - self._disc_logit_center)
-
-    @torch.no_grad()
-    def set_disc_logit_calibration(self, center, scale):
-        self._disc_logit_center.fill_(float(center))
-        self._disc_logit_scale.fill_(float(scale))
-        self._disc_logit_calibrated.fill_(True)
-
-    def is_disc_logit_calibrated(self):
-        return bool(self._disc_logit_calibrated.item())
-
-    def get_disc_logit_scale(self):
-        return self._disc_logit_scale.clone()
-
-    def get_disc_logit_center(self):
-        return self._disc_logit_center.clone()
 
     def get_disc_group_width(self):
         return self._disc_logits.weight.new_tensor(

@@ -16,7 +16,7 @@ discount: 0.99
 steps_per_iter: 32
 iters_per_output: 100
 test_episodes: 32
-normalizer_samples: 100000000
+normalizer_samples: 2097152
 use_mixed_precision: false
 actor_epochs: 5
 actor_batch_size: 4
@@ -30,9 +30,8 @@ norm_adv_clip: 4.0
 action_bound_weight: 10.0
 action_entropy_weight: 0.0
 action_reg_weight: 0.0
+disc_eval_batch_size: 0
 disc_buffer_size: 200000
 disc_replay_samples: 1000
-disc_eval_batch_size: 0
-disc_reward_scale: 2
 task_reward_weight: 0.0
 disc_reward_weight: 1.0

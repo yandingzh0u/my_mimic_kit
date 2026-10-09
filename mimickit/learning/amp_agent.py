@@ -21,7 +21,7 @@ class AMPAgent(ppo_agent.PPOAgent):
         self._disc_replay_samples = config["disc_replay_samples"]
         self._disc_logit_reg = config.get("disc_logit_reg", 0.0)
         self._disc_grad_penalty = config.get("disc_grad_penalty", 0.0)
-        self._disc_reward_scale = config["disc_reward_scale"]
+        self._disc_reward_scale = config.get("disc_reward_scale", 1.0)
         self._disc_eval_batch_size = int(config.get("disc_eval_batch_size", 0))
         # Building all demonstration observations for an 8192-env rollout in
         # one call creates a second, very large temporary tensor (especially
@@ -58,8 +58,9 @@ class AMPAgent(ppo_agent.PPOAgent):
         super()._build_exp_buffer(config)
 
         disc_buffer_size = config["disc_buffer_size"]
-        self._disc_buffer = experience_buffer.ExperienceBuffer(buffer_length=disc_buffer_size, batch_size=1,
-                                                               device=self._device)
+        self._disc_buffer = experience_buffer.ExperienceBuffer(
+            buffer_length=disc_buffer_size, batch_size=1,
+            device=self._device)
         return
     
     def _build_normalizers(self):
