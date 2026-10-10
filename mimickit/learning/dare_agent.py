@@ -1,5 +1,4 @@
 import torch
-import torch.nn.functional as F
 
 import learning.add_agent as add_agent
 import learning.dare_model as dare_model
@@ -42,10 +41,11 @@ class DAREAgent(add_agent.ADDAgent):
         }
 
     def _calc_disc_rewards(self, norm_diff):
-        """Use the reward paired with zero-vs-residual binary classification."""
+        """Use the bounded ADD reward paired with the BCE discriminator."""
         with torch.no_grad():
             logits = torch_util.eval_minibatch(
                 self._model.eval_disc_raw,
                 {"disc_obs": norm_diff}, self._disc_eval_batch_size,
             ).squeeze(-1)
-            return self._disc_reward_scale * F.softplus(logits)
+            return self._disc_reward_scale * add_agent.calc_unscaled_disc_reward(
+                logits)

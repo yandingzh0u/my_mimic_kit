@@ -64,7 +64,7 @@ def test_cpl_discriminator_is_finite_and_spectrally_normalized():
                for p in model.parameters())
 
 
-def test_dare_reward_is_raw_logit_softplus():
+def test_dare_reward_is_bounded_raw_logit_reward():
     agent = object.__new__(DAREAgent)
     torch.nn.Module.__init__(agent)
     agent._model = DAREModel(_config(), _Env()).eval()
@@ -77,13 +77,16 @@ def test_dare_reward_is_raw_logit_softplus():
     anchor_reward = agent._calc_disc_rewards(anchor_input)
     assert reward.shape == (31,)
     assert torch.isfinite(reward).all()
-    expected_anchor_reward = agent._disc_reward_scale * torch.nn.functional.softplus(
-        agent._model.eval_disc_raw(anchor_input)).squeeze(-1)
+    anchor_logits = agent._model.eval_disc_raw(anchor_input).squeeze(-1)
+    expected_anchor_reward = agent._disc_reward_scale * (
+        -torch.log(torch.clamp_min(1.0 - torch.sigmoid(anchor_logits), 1e-4)))
     torch.testing.assert_close(anchor_reward, expected_anchor_reward,
                                atol=1e-6, rtol=0.0)
     assert torch.all(reward >= 0.0)
-    torch.testing.assert_close(reward, agent._disc_reward_scale * torch.nn.functional.softplus(
-        agent._model.eval_disc_raw(inputs)).squeeze(-1))
+    logits = agent._model.eval_disc_raw(inputs).squeeze(-1)
+    expected = agent._disc_reward_scale * (
+        -torch.log(torch.clamp_min(1.0 - torch.sigmoid(logits), 1e-4)))
+    torch.testing.assert_close(reward, expected)
     assert not reward.requires_grad
 
 
@@ -105,7 +108,7 @@ def test_dare_disc_path_uses_zero_vs_residual_bce():
     assert "quality_target" not in disc_src
     assert "mse_loss" not in disc_src
     assert "randperm" not in disc_src
-    assert "F.softplus(logits)" in reward_src
+    assert "calc_unscaled_disc_reward" in reward_src
     assert "calibr" not in disc_src.lower()
 
 
@@ -156,7 +159,7 @@ def test_dare_bce_uses_current_replay_and_correct_gradient_directions():
     assert "disc_quality_loss" not in info and "disc_pair_acc" not in info
 
 
-def test_dare_softplus_reward_is_finite_monotone_and_detached():
+def test_dare_bounded_reward_is_finite_monotone_and_detached():
     agent = object.__new__(DAREAgent)
     torch.nn.Module.__init__(agent)
     agent._model = torch.nn.Module()
@@ -169,7 +172,7 @@ def test_dare_softplus_reward_is_finite_monotone_and_detached():
     assert torch.isfinite(reward).all()
     assert torch.all(reward[1:] >= reward[:-1])
     torch.testing.assert_close(reward[2], torch.log(torch.tensor(2.0)))
-    torch.testing.assert_close(reward[-1], torch.tensor(1000.0))
+    torch.testing.assert_close(reward[-1], torch.tensor(9.2103405))
     assert not reward.requires_grad
 
 
