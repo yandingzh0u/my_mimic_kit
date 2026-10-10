@@ -98,6 +98,7 @@ class BaseAgent(torch.nn.Module):
         else:
             int_out_dir = ""
         
+        self.set_mode(AgentMode.TRAIN)
         self._curr_obs, self._curr_info = self._reset_envs()
         self._init_train()
         test_info = self._last_test_info
@@ -140,6 +141,9 @@ class BaseAgent(torch.nn.Module):
                                          out_checkpoint_file, int_out_dir)
 
                 self._train_return_tracker.reset()
+                # Evaluation uses the same simulator. Select TRAIN before
+                # resetting so reference-state initialization remains random.
+                self.set_mode(AgentMode.TRAIN)
                 self._curr_obs, self._curr_info = self._reset_envs()
             
             self._iter += 1
@@ -147,6 +151,9 @@ class BaseAgent(torch.nn.Module):
         return
 
     def test_model(self, num_episodes, random_start=False):
+        previous_mode = self._mode
+        previous_training = self.training
+        previous_random_start = getattr(self._env, "_test_random_start", False)
         self.eval()
         self.set_mode(AgentMode.TEST)
 
@@ -163,7 +170,10 @@ class BaseAgent(torch.nn.Module):
                 test_info = self._rollout_test(num_eps_proc)
         finally:
             if (set_random_start is not None):
-                set_random_start(False)
+                set_random_start(previous_random_start)
+            if self._mode != previous_mode:
+                self.set_mode(previous_mode)
+            self.train(previous_training)
 
         return test_info
     
@@ -476,6 +486,15 @@ class BaseAgent(torch.nn.Module):
         self.set_mode(AgentMode.TRAIN)
 
         with torch.no_grad():
+            rollout_info = {}
+            get_phase = getattr(self._env, "get_motion_phase", None)
+            if get_phase is not None:
+                start_phase = get_phase().detach()
+                rollout_info = {
+                    "rollout_start_phase_mean": start_phase.mean(),
+                    "rollout_start_phase_zero_frac": (
+                        start_phase <= 1e-6).float().mean(),
+                }
             self._rollout_train(self._steps_per_iter)
         
         data_info = self._build_train_data()
@@ -484,7 +503,7 @@ class BaseAgent(torch.nn.Module):
         if (self._need_normalizer_update()):
             self._update_normalizers()
 
-        info = {**train_info, **data_info}
+        info = {**train_info, **data_info, **rollout_info}
         
         info["mean_return"] = self._train_return_tracker.get_mean_return().item()
         info["mean_ep_len"] = self._train_return_tracker.get_mean_ep_len().item()
