@@ -23,6 +23,9 @@ class ASEAgent(amp_agent.AMPAgent):
     
     def _load_params(self, config):
         super()._load_params(config)
+        # ASE retains its latent-conditioned PPO losses, separate from DARE.
+        self._ppo_clip_ratio = config["ppo_clip_ratio"]
+        self._norm_adv_clip = config["norm_adv_clip"]
         
         self._latent_time_min = config["latent_time_min"]
         self._latent_time_max = config["latent_time_max"]

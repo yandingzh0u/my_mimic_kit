@@ -5,10 +5,10 @@ import learning.amp_model as amp_model
 import learning.experience_buffer as experience_buffer
 import learning.mp_optimizer as mp_optimizer
 import learning.normalizer as normalizer
-import learning.ppo_agent as ppo_agent
+import learning.on_policy_agent as on_policy_agent
 import util.torch_util as torch_util
 
-class AMPAgent(ppo_agent.PPOAgent):
+class AMPAgent(on_policy_agent.OnPolicyAgent):
     def __init__(self, config, env, device):
         super().__init__(config, env, device)
         return

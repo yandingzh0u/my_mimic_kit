@@ -1,0 +1,66 @@
+{
+  "protocol": "Two seed-0 historical runs; no multi-seed mean or error bars.",
+  "sources": {
+    "CPL-DARE baseline": {
+      "path": "output/paper_benchmark/dare_10layer_cpl_resetfix_climb_3000_8192_seed0_headless_20261010/train_metrics.jsonl",
+      "sha256": "c702094f491cc650302302b30881d99911e8232df615c0c24f65d2731e9c194c",
+      "records": 31,
+      "last_iteration": 2999,
+      "training_seed": 0
+    },
+    "Phase-balanced CPL-DARE": {
+      "path": "output/paper_benchmark/dare_10layer_cpl_phasebalanced_climb_3000_8192_seed0_headless_20261012/train_metrics.jsonl",
+      "sha256": "860a2c6df0b56fabf3cd359624f081c8820b3da038b1bf79e6c0312933b19b03",
+      "records": 31,
+      "last_iteration": 2999,
+      "training_seed": 0
+    }
+  },
+  "first_observed_full_motion": {
+    "CPL-DARE baseline": {
+      "iteration": 2200,
+      "samples": 576978944
+    },
+    "Phase-balanced CPL-DARE": {
+      "iteration": 1700,
+      "samples": 445906944
+    }
+  },
+  "final_errors": {
+    "Root_Pos_Err": {
+      "baseline": 0.057912398129701614,
+      "phasebalanced": 0.048144251108169556,
+      "reduction_percent": 16.867108489714322
+    },
+    "Root_Rot_Err": {
+      "baseline": 0.039007462561130524,
+      "phasebalanced": 0.0356844887137413,
+      "reduction_percent": 8.518815706562876
+    },
+    "Body_Pos_Err": {
+      "baseline": 0.022571086883544922,
+      "phasebalanced": 0.019985320046544075,
+      "reduction_percent": 11.456102447977178
+    },
+    "Body_Rot_Err": {
+      "baseline": 0.08349426835775375,
+      "phasebalanced": 0.07564985007047653,
+      "reduction_percent": 9.395157825284118
+    },
+    "Dof_Vel_Err": {
+      "baseline": 0.4854499399662018,
+      "phasebalanced": 0.47225695848464966,
+      "reduction_percent": 2.717681143903461
+    },
+    "Root_Vel_Err": {
+      "baseline": 0.11251990497112274,
+      "phasebalanced": 0.10223180800676346,
+      "reduction_percent": 9.143357317089485
+    },
+    "Root_Ang_Vel_Err": {
+      "baseline": 0.2673960030078888,
+      "phasebalanced": 0.2522045373916626,
+      "reduction_percent": 5.6812612923679335
+    }
+  }
+}

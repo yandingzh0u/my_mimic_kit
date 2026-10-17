@@ -36,6 +36,9 @@ def build_agent(agent_file, env, device):
         import learning.dare_agent as dare_agent
         agent = dare_agent.DAREAgent(
             config=agent_config, env=env, device=device)
+    elif (agent_name == "DARE_REPPO"):
+        from learning.reppo_agent import REPPOAgent
+        agent = REPPOAgent(config=agent_config, env=env, device=device)
     elif (agent_name == "LCP"):
         import learning.lcp_agent as lcp_agent
         agent = lcp_agent.LCPAgent(config=agent_config, env=env, device=device)
