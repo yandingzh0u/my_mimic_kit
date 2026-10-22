@@ -5,13 +5,13 @@ import envs.base_env as base_env
 import learning.base_agent as base_agent
 import learning.distribution_gaussian_diag as distribution_gaussian_diag
 import learning.mp_optimizer as mp_optimizer
+import learning.phase_balance as phase_balance
 import learning.ppo_model as ppo_model
 import learning.rl_util as rl_util
 import util.mp_util as mp_util
 import util.torch_util as torch_util
 
 class PPOAgent(base_agent.BaseAgent):
-    _phase_balance_bins = 8
 
     def __init__(self, config, env, device):
         super().__init__(config, env, device)
@@ -216,24 +216,7 @@ class PPOAgent(base_agent.BaseAgent):
             }
 
         phase = self._exp_buffer.get_data("diag_phase").to(torch.float32)
-        phase = torch.nan_to_num(phase, nan=0.0, posinf=1.0, neginf=0.0)
-        phase = torch.clamp(phase, 0.0, 1.0 - torch.finfo(phase.dtype).eps)
-        phase_bin = (phase * self._phase_balance_bins).to(torch.long)
-        flat_bin = phase_bin.flatten()
-        counts = torch.bincount(
-            flat_bin, minlength=self._phase_balance_bins).to(torch.float32)
-        present = counts > 0.0
-        num_present = present.sum().to(torch.float32)
-        total = torch.tensor(
-            float(flat_bin.numel()), device=phase.device, dtype=torch.float32)
-        weights_by_bin = torch.zeros_like(counts)
-        weights_by_bin[present] = total / (num_present * counts[present])
-        weights = weights_by_bin[flat_bin].reshape(phase.shape)
-        return weights, {
-            "phase_weight_mean": weights.mean(),
-            "phase_weight_max": weights.max(),
-            "phase_bins_present": num_present,
-        }
+        return phase_balance.compute(phase)
 
     def _weighted_mean_std(self, values, weights):
         weights = weights.to(dtype=values.dtype)

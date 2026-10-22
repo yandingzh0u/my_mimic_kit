@@ -70,6 +70,7 @@ def main():
     sys.path.insert(0, str(ROOT / "mimickit"))
     import envs.env_builder as env_builder
     import learning.agent_builder as agent_builder
+    import learning.phase_balance as phase_balance
     from learning.base_agent import AgentMode
     import util.mp_util as mp_util
     import util.util as util
@@ -121,12 +122,19 @@ def main():
             w_uniform = torch.ones_like(phase, dtype=torch.float64)
             w8, counts8 = bin_weights(phase, 8)
             wf, countsf = bin_weights(phase, frames)
+            wa, info_a = phase_balance.compute(
+                phase.view(args.steps, args.num_envs))
+            wa = wa.flatten()
             pu8, _ = bin_weights(phase_pool, 8)
             puf, _ = bin_weights(phase_pool, frames)
+            pua, _ = phase_balance.compute(
+                phase_pool.view(args.steps, args.grad_envs))
+            pua = pua.flatten()
             pool_w = {
                 "uniform": torch.ones_like(phase_pool, dtype=torch.float64).to(device),
                 "bins8": pu8.to(device),
                 "frame": puf.to(device),
+                "adaptive": pua.to(device),
             }
             entry = {
                 "occupied_bins": {"bins8": int((counts8 > 0).sum()),
@@ -138,7 +146,8 @@ def main():
                 "weights": {
                     "uniform": weight_stats(w_uniform),
                     "bins8": weight_stats(w8),
-                    "frame": weight_stats(wf)},
+                    "frame": weight_stats(wf),
+                    "adaptive": weight_stats(wa)},
                 "gradient": {},
             }
             print(json.dumps({"stage": "weights_done", "ckpt": ckpt}), flush=True)
@@ -171,7 +180,7 @@ def main():
                 agent._model.zero_grad(set_to_none=True)
             print(json.dumps({"stage": "schemes_done", "ckpt": ckpt}), flush=True)
             base = entry["gradient"]["uniform"]["grad_variance"]
-            for scheme in ("bins8", "frame"):
+            for scheme in ("bins8", "frame", "adaptive"):
                 entry["gradient"][scheme]["variance_ratio_vs_uniform"] = (
                     entry["gradient"][scheme]["grad_variance"] / max(base, 1e-30))
             entry["gradient"]["variance_ratio_frame_over_bins8"] = (
@@ -186,6 +195,8 @@ def main():
                               "grad_var": {k: round(v["grad_variance"], 6)
                                            for k, v in entry["gradient"].items()
                                            if isinstance(v, dict)},
+                              "adaptive_bandwidth": round(
+                                  float(info_a["phase_bandwidth"]), 4),
                               "frame_over_bins8": round(
                                   entry["gradient"]["variance_ratio_frame_over_bins8"], 3)}),
                              flush=True)
