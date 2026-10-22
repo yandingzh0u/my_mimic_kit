@@ -99,6 +99,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--master-port", type=int, default=6381)
+    parser.add_argument(
+        "--save-disc-diffs", action="store_true",
+        help="Save raw demo-minus-policy discriminator inputs for offline audits.")
     parser.add_argument("--out-dir", required=True)
     return parser.parse_args(argv)
 
@@ -372,9 +375,11 @@ def _copy_reference_cache(env, ref: Mapping[str, torch.Tensor]) -> None:
 
 def _reset_with_protocol(env, start_mode: str):
     if start_mode == "random":
+        env.set_test_random_start(True)
         env._rand_reset = True
         return env.reset()
 
+    env.set_test_random_start(False)
     env._rand_reset = False
     obs, info = env.reset()
     if start_mode == "phase0":
@@ -725,6 +730,7 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
         ts_ref_root: list[np.ndarray] = []
         ts_winding: list[np.ndarray] = []
         ts_displacement: list[np.ndarray] = []
+        ts_disc_diff: list[np.ndarray] = []
         decision_seconds = 0.0
         eval_start = time.perf_counter()
 
@@ -762,6 +768,12 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
                     active_before, action_delta, torch.zeros_like(action_delta)
                 )
                 action = torch.where(active_before.unsqueeze(-1), action, torch.zeros_like(action))
+                if args.save_disc_diffs:
+                    raw_diff = info["disc_obs_demo"] - info["disc_obs"]
+                    raw_diff = torch.where(
+                        active_before.unsqueeze(-1), raw_diff,
+                        torch.full_like(raw_diff, torch.nan))
+                    ts_disc_diff.append(_to_numpy(raw_diff))
                 obs, env_reward, done, info = env.step(action)
                 reward_diagnostic = _policy_reward(agent, info, env_reward)
 
@@ -1087,6 +1099,8 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
             "artifacts": {
                 "episodes": "episodes.npz",
                 "timeseries": "timeseries.npz",
+                **({"disc_diffs": "timeseries.npz"}
+                   if args.save_disc_diffs else {}),
             },
         }
 
@@ -1102,6 +1116,8 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
             ref_root_pos=np.stack(ts_ref_root, axis=0),
             winding_ratio=np.stack(ts_winding, axis=0),
             displacement_ratio=np.stack(ts_displacement, axis=0),
+            **({"disc_diff": np.stack(ts_disc_diff, axis=0)}
+               if args.save_disc_diffs else {}),
         )
         _write_json(out_dir / "summary.json", summary)
         return summary
