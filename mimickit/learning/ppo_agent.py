@@ -115,6 +115,7 @@ class PPOAgent(base_agent.BaseAgent):
         obs = self._exp_buffer.get_data("obs")
         next_obs = self._exp_buffer.get_data("next_obs")
         r = self._exp_buffer.get_data("reward")
+        action = self._exp_buffer.get_data("action")
         done = self._exp_buffer.get_data("done")
         rand_action_mask = self._exp_buffer.get_data("rand_action_mask")
         
@@ -139,13 +140,8 @@ class PPOAgent(base_agent.BaseAgent):
         vals = vals.squeeze(-1).detach()
         adv = new_vals - vals
 
-        # PPO currently samples transitions uniformly from the rollout.  With
-        # early termination this makes the actor/critic objective depend on
-        # the policy's own phase occupancy: failed episodes contribute many
-        # freshly reset states while late phases become underrepresented.
-        # Reweight the existing motion-phase diagnostic so every occupied
-        # phase bin contributes equally to both value and policy updates.
-        phase_weight, phase_info = self._build_phase_weights()
+        score = self._build_phase_score(obs, action, adv)
+        phase_weight, phase_info = self._build_phase_weights(score)
 
         # Termination-conditioned TD-target statistics are diagnostics only.
         # They make it possible to distinguish a critic-scale jump caused by
@@ -203,7 +199,24 @@ class PPOAgent(base_agent.BaseAgent):
         }
         return info
 
-    def _build_phase_weights(self):
+    @torch.no_grad()
+    def _build_phase_score(self, obs, action, adv):
+        """Per-sample actor-mean gradient signal used to judge reliability."""
+        flat_obs = obs.reshape(-1, obs.shape[-1])
+        chunk = 32768
+        means = []
+        stds = []
+        for start in range(0, flat_obs.shape[0], chunk):
+            dist = self._model.eval_actor(
+                self._obs_norm.normalize(flat_obs[start:start + chunk]))
+            means.append(dist.mean)
+            stds.append(dist.stddev)
+        mean = torch.cat(means, dim=0).reshape(action.shape)
+        std = torch.cat(stds, dim=0).reshape(action.shape)
+        norm_a = self._a_norm.normalize(action)
+        return adv.unsqueeze(-1) * (norm_a - mean) / std.square().clamp_min(1e-8)
+
+    def _build_phase_weights(self, score):
         if (not self._exp_buffer.has_buffer("diag_phase")):
             weights = torch.ones(
                 [self._steps_per_iter, self.get_num_envs()],
@@ -216,7 +229,8 @@ class PPOAgent(base_agent.BaseAgent):
             }
 
         phase = self._exp_buffer.get_data("diag_phase").to(torch.float32)
-        return phase_balance.compute(phase)
+        num_frames = int(self._env._motion_lib._motion_num_frames.max().item()) - 1
+        return phase_balance.compute(phase, score, num_frames)
 
     def _weighted_mean_std(self, values, weights):
         weights = weights.to(dtype=values.dtype)

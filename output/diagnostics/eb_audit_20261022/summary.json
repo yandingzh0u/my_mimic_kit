@@ -1,0 +1,147 @@
+{
+  "num_envs": 1024,
+  "steps": 32,
+  "motion_frames": 299,
+  "batch": 2048,
+  "resamples": 8,
+  "checkpoints": {
+    "400": {
+      "weights": {
+        "uniform": {
+          "mean": 1.0,
+          "max": 1.0,
+          "p99": 1.0,
+          "share_gt_5": 0.0,
+          "share_gt_10": 0.0,
+          "ess": 32768.0,
+          "ess_fraction": 1.0,
+          "variance_inflation": 1.0
+        },
+        "bins8": {
+          "mean": 1.0,
+          "max": 1.8910433979686057,
+          "p99": 1.8910433979686057,
+          "share_gt_5": 0.0,
+          "share_gt_10": 0.0,
+          "ess": 30389.325854919858,
+          "ess_fraction": 0.9274086259435992,
+          "variance_inflation": 1.0782733436219036
+        },
+        "frame": {
+          "mean": 0.9999999999999999,
+          "max": 109.59197324414716,
+          "p99": 2.382434200959721,
+          "share_gt_5": 0.00225830078125,
+          "share_gt_10": 0.000457763671875,
+          "ess": 19761.7406294065,
+          "ess_fraction": 0.6030804635438995,
+          "variance_inflation": 1.658153530830149
+        },
+        "eb": {
+          "mean": 0.9999999907468009,
+          "max": 2.09041690826416,
+          "p99": 1.6910465955734253,
+          "share_gt_5": 0.0,
+          "share_gt_10": 0.0,
+          "ess": 29523.871146983565,
+          "ess_fraction": 0.9009970442805043,
+          "variance_inflation": 1.1098815543824063
+        }
+      },
+      "eb_alpha_mean": 0.3485039174556732,
+      "eb_tau2": 464.58251953125,
+      "gradient": {
+        "uniform": {
+          "grad_variance": 212.15921503322778,
+          "grad_norm_mean": 10.51027571643388
+        },
+        "bins8": {
+          "grad_variance": 248.88538963123312,
+          "grad_norm_mean": 11.053786070887016,
+          "variance_ratio_vs_uniform": 1.173106667048393
+        },
+        "frame": {
+          "grad_variance": 297.87857301747397,
+          "grad_norm_mean": 12.67225894674629,
+          "variance_ratio_vs_uniform": 1.40403315958169
+        },
+        "eb": {
+          "grad_variance": 273.7622005064319,
+          "grad_norm_mean": 11.816337291749335,
+          "variance_ratio_vs_uniform": 1.2903620540995875
+        },
+        "variance_ratio_frame_over_bins8": 1.196850379441046,
+        "variance_ratio_eb_over_bins8": 1.0999528775556415
+      }
+    },
+    "1400": {
+      "weights": {
+        "uniform": {
+          "mean": 1.0,
+          "max": 1.0,
+          "p99": 1.0,
+          "share_gt_5": 0.0,
+          "share_gt_10": 0.0,
+          "ess": 32768.0,
+          "ess_fraction": 1.0,
+          "variance_inflation": 1.0
+        },
+        "bins8": {
+          "mean": 0.9999999999999999,
+          "max": 1.665040650406504,
+          "p99": 1.665040650406504,
+          "share_gt_5": 0.0,
+          "share_gt_10": 0.0,
+          "ess": 31069.413693452483,
+          "ess_fraction": 0.948163259687881,
+          "variance_inflation": 1.0546706907090904
+        },
+        "frame": {
+          "mean": 1.0,
+          "max": 54.79598662207358,
+          "p99": 2.2831661092530657,
+          "share_gt_5": 0.001983642578125,
+          "share_gt_10": 0.00048828125,
+          "ess": 22768.868567225418,
+          "ess_fraction": 0.6948507253181585,
+          "variance_inflation": 1.439158028570985
+        },
+        "eb": {
+          "mean": 0.9999999767715053,
+          "max": 1.752700686454773,
+          "p99": 1.3522707223892212,
+          "share_gt_5": 0.0,
+          "share_gt_10": 0.0,
+          "ess": 32536.395630983137,
+          "ess_fraction": 0.9929319955744366,
+          "variance_inflation": 1.0071183167196405
+        }
+      },
+      "eb_alpha_mean": 0.028417982161045074,
+      "eb_tau2": 28.298730850219727,
+      "gradient": {
+        "uniform": {
+          "grad_variance": 337.8857587030218,
+          "grad_norm_mean": 12.233538611076625
+        },
+        "bins8": {
+          "grad_variance": 365.7977171658453,
+          "grad_norm_mean": 12.793276851947622,
+          "variance_ratio_vs_uniform": 1.082607679500799
+        },
+        "frame": {
+          "grad_variance": 431.2457485414403,
+          "grad_norm_mean": 14.078566905042479,
+          "variance_ratio_vs_uniform": 1.2763063770334147
+        },
+        "eb": {
+          "grad_variance": 340.7754216584116,
+          "grad_norm_mean": 12.217123682197634,
+          "variance_ratio_vs_uniform": 1.008552189256161
+        },
+        "variance_ratio_frame_over_bins8": 1.1789186435680301,
+        "variance_ratio_eb_over_bins8": 0.9315952660904958
+      }
+    }
+  }
+}
