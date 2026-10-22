@@ -11,7 +11,6 @@ import util.mp_util as mp_util
 import util.torch_util as torch_util
 
 class PPOAgent(base_agent.BaseAgent):
-    _phase_balance_bins = 8
 
     def __init__(self, config, env, device):
         super().__init__(config, env, device)
@@ -139,14 +138,6 @@ class PPOAgent(base_agent.BaseAgent):
         vals = vals.squeeze(-1).detach()
         adv = new_vals - vals
 
-        # PPO currently samples transitions uniformly from the rollout.  With
-        # early termination this makes the actor/critic objective depend on
-        # the policy's own phase occupancy: failed episodes contribute many
-        # freshly reset states while late phases become underrepresented.
-        # Reweight the existing motion-phase diagnostic so every occupied
-        # phase bin contributes equally to both value and policy updates.
-        phase_weight, phase_info = self._build_phase_weights()
-
         # Termination-conditioned TD-target statistics are diagnostics only.
         # They make it possible to distinguish a critic-scale jump caused by
         # FAIL/TIME sampling from a genuine value-network update problem.
@@ -183,72 +174,22 @@ class PPOAgent(base_agent.BaseAgent):
         
         rand_action_mask = (rand_action_mask == 1.0).flatten()
         adv_flat = adv.flatten()
-        phase_weight_flat = phase_weight.flatten()
         rand_action_adv = adv_flat[rand_action_mask]
-        rand_action_weight = phase_weight_flat[rand_action_mask]
-        adv_mean, adv_std = self._weighted_mean_std(
-            rand_action_adv, rand_action_weight)
+        adv_mean = rand_action_adv.mean()
+        adv_std = rand_action_adv.std(unbiased=False)
         norm_adv = (adv - adv_mean) / torch.clamp_min(adv_std, 1e-5)
         norm_adv = torch.clamp(norm_adv, -self._norm_adv_clip, self._norm_adv_clip)
         
         self._exp_buffer.set_data("tar_val", new_vals)
         self._exp_buffer.set_data("adv", norm_adv)
-        self._exp_buffer.set_data("phase_weight", phase_weight)
         
         info = {
             "adv_mean": adv_mean,
             "adv_std": adv_std,
-            **phase_info,
             **td_info,
         }
         return info
 
-    def _build_phase_weights(self):
-        if (not self._exp_buffer.has_buffer("diag_phase")):
-            weights = torch.ones(
-                [self._steps_per_iter, self.get_num_envs()],
-                device=self._device, dtype=torch.float32)
-            return weights, {
-                "phase_weight_mean": weights.mean(),
-                "phase_weight_max": weights.max(),
-                "phase_bins_present": torch.tensor(
-                    1.0, device=self._device)
-            }
-
-        phase = self._exp_buffer.get_data("diag_phase").to(torch.float32)
-        phase = torch.nan_to_num(phase, nan=0.0, posinf=1.0, neginf=0.0)
-        phase = torch.clamp(phase, 0.0, 1.0 - torch.finfo(phase.dtype).eps)
-        phase_bin = (phase * self._phase_balance_bins).to(torch.long)
-        flat_bin = phase_bin.flatten()
-        counts = torch.bincount(
-            flat_bin, minlength=self._phase_balance_bins).to(torch.float32)
-        present = counts > 0.0
-        num_present = present.sum().to(torch.float32)
-        total = torch.tensor(
-            float(flat_bin.numel()), device=phase.device, dtype=torch.float32)
-        weights_by_bin = torch.zeros_like(counts)
-        weights_by_bin[present] = total / (num_present * counts[present])
-        weights = weights_by_bin[flat_bin].reshape(phase.shape)
-        return weights, {
-            "phase_weight_mean": weights.mean(),
-            "phase_weight_max": weights.max(),
-            "phase_bins_present": num_present,
-        }
-
-    def _weighted_mean_std(self, values, weights):
-        weights = weights.to(dtype=values.dtype)
-        sum_w = mp_util.reduce_sum(weights.sum())
-        sum_wx = mp_util.reduce_sum(torch.sum(weights * values))
-        sum_wx2 = mp_util.reduce_sum(torch.sum(weights * values.square()))
-        mean = sum_wx / torch.clamp_min(sum_w, 1e-8)
-        var = sum_wx2 / torch.clamp_min(sum_w, 1e-8) - mean.square()
-        return mean, torch.sqrt(torch.clamp_min(var, 0.0))
-
-    @staticmethod
-    def _weighted_mean(values, weights):
-        return torch.sum(values * weights) / torch.clamp_min(
-            torch.sum(weights), 1e-8)
-    
     def _get_exp_prob(self):
         if (np.isfinite(self._exp_anneal_samples)):
             samples = self._sample_count
@@ -417,8 +358,7 @@ class PPOAgent(base_agent.BaseAgent):
         pred = pred.squeeze(-1)
 
         diff = tar_val - pred
-        phase_weight = batch["phase_weight"]
-        loss = self._weighted_mean(torch.square(diff), phase_weight)
+        loss = torch.square(diff).mean()
 
         info = {
             "critic_loss": loss
@@ -431,7 +371,6 @@ class PPOAgent(base_agent.BaseAgent):
         old_a_logp = batch["a_logp"]
         adv = batch["adv"]
         rand_action_mask = batch["rand_action_mask"]
-        phase_weight = batch["phase_weight"]
 
         # loss should only be computed using samples with random actions
         rand_action_mask = (rand_action_mask == 1.0)
@@ -439,7 +378,6 @@ class PPOAgent(base_agent.BaseAgent):
         norm_a = norm_a[rand_action_mask]
         old_a_logp = old_a_logp[rand_action_mask]
         adv = adv[rand_action_mask]
-        phase_weight = phase_weight[rand_action_mask]
 
         a_dist = self._model.eval_actor(norm_obs)
         a_logp = a_dist.log_prob(norm_a)
@@ -448,11 +386,11 @@ class PPOAgent(base_agent.BaseAgent):
         actor_loss0 = adv * a_ratio
         actor_loss1 = adv * torch.clamp(a_ratio, 1.0 - self._ppo_clip_ratio, 1.0 + self._ppo_clip_ratio)
         actor_objective = torch.minimum(actor_loss0, actor_loss1)
-        actor_loss = -self._weighted_mean(actor_objective, phase_weight)
+        actor_loss = -actor_objective.mean()
         
         clip_frac = (torch.abs(a_ratio - 1.0) > self._ppo_clip_ratio).type(torch.float)
-        clip_frac = self._weighted_mean(clip_frac, phase_weight)
-        imp_ratio = self._weighted_mean(a_ratio, phase_weight)
+        clip_frac = clip_frac.mean()
+        imp_ratio = a_ratio.mean()
         
         info = {
             "actor_loss": actor_loss,
@@ -463,20 +401,19 @@ class PPOAgent(base_agent.BaseAgent):
         if (self._action_bound_weight != 0):
             action_bound_loss = self._compute_action_bound_loss(a_dist)
             if (action_bound_loss is not None):
-                action_bound_loss = self._weighted_mean(
-                    action_bound_loss, phase_weight)
+                action_bound_loss = action_bound_loss.mean()
                 actor_loss += self._action_bound_weight * action_bound_loss
                 info["action_bound_loss"] = action_bound_loss.detach()
 
         if (self._action_entropy_weight != 0):
             action_entropy = a_dist.entropy()
-            action_entropy = self._weighted_mean(action_entropy, phase_weight)
+            action_entropy = action_entropy.mean()
             actor_loss += -self._action_entropy_weight * action_entropy
             info["action_entropy"] = action_entropy.detach()
         
         if (self._action_reg_weight != 0):
             action_reg_loss = a_dist.param_reg()
-            action_reg_loss = self._weighted_mean(action_reg_loss, phase_weight)
+            action_reg_loss = action_reg_loss.mean()
             actor_loss += self._action_reg_weight * action_reg_loss
             info["action_reg_loss"] = action_reg_loss.detach()
         

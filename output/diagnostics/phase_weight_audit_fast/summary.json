@@ -1,0 +1,226 @@
+{
+  "num_envs": 1024,
+  "steps": 32,
+  "motion_frames": 299,
+  "batch": 2048,
+  "resamples": 8,
+  "grad_envs": 256,
+  "checkpoints": {
+    "400": {
+      "occupied_bins": {
+        "bins8": 8,
+        "frame": 299
+      },
+      "min_bin_count": {
+        "bins8": 3133,
+        "frame": 3
+      },
+      "median_bin_count": {
+        "bins8": 4134.0,
+        "frame": 116.0
+      },
+      "weights": {
+        "uniform": {
+          "mean": 1.0,
+          "max": 1.0,
+          "p99": 1.0,
+          "cv": 0.0,
+          "share_gt_5": 0.0,
+          "share_gt_10": 0.0,
+          "share_gt_50": 0.0,
+          "ess": 32768.0,
+          "ess_fraction": 1.0,
+          "variance_inflation": 1.0
+        },
+        "bins8": {
+          "mean": 0.9999999999999999,
+          "max": 1.3073731248005107,
+          "p99": 1.3073731248005107,
+          "cv": 0.1465701615415521,
+          "share_gt_5": 0.0,
+          "share_gt_10": 0.0,
+          "share_gt_50": 0.0,
+          "ess": 32078.855960076522,
+          "ess_fraction": 0.9789689929222571,
+          "variance_inflation": 1.0214828122543131
+        },
+        "frame": {
+          "mean": 1.0,
+          "max": 36.53065774804905,
+          "p99": 2.2365708825336155,
+          "cv": 0.5143349609287651,
+          "share_gt_5": 0.001312255859375,
+          "share_gt_10": 0.000335693359375,
+          "share_gt_50": 0.0,
+          "ess": 25912.97095107133,
+          "ess_fraction": 0.7908011154501748,
+          "variance_inflation": 1.2645404520335504
+        }
+      },
+      "gradient": {
+        "uniform": {
+          "grad_norm_mean": 9.860466393806167,
+          "grad_variance": 201.92079245129958,
+          "relative_std": 1.441096501015954
+        },
+        "bins8": {
+          "grad_norm_mean": 10.106901190026852,
+          "grad_variance": 214.43668266719746,
+          "relative_std": 1.4488770062066987,
+          "variance_ratio_vs_uniform": 1.0619841575696893
+        },
+        "frame": {
+          "grad_norm_mean": 11.469988127527742,
+          "grad_variance": 259.3756183314887,
+          "relative_std": 1.404111532293163,
+          "variance_ratio_vs_uniform": 1.2845414044917953
+        },
+        "variance_ratio_frame_over_bins8": 1.2095673888689829
+      }
+    },
+    "900": {
+      "occupied_bins": {
+        "bins8": 8,
+        "frame": 299
+      },
+      "min_bin_count": {
+        "bins8": 2925,
+        "frame": 6
+      },
+      "median_bin_count": {
+        "bins8": 4191.0,
+        "frame": 115.0
+      },
+      "weights": {
+        "uniform": {
+          "mean": 1.0,
+          "max": 1.0,
+          "p99": 1.0,
+          "cv": 0.0,
+          "share_gt_5": 0.0,
+          "share_gt_10": 0.0,
+          "share_gt_50": 0.0,
+          "ess": 32768.0,
+          "ess_fraction": 1.0,
+          "variance_inflation": 1.0
+        },
+        "bins8": {
+          "mean": 1.0000000000000002,
+          "max": 1.4003418803418803,
+          "p99": 1.4003418803418803,
+          "cv": 0.12869872506071314,
+          "share_gt_5": 0.0,
+          "share_gt_10": 0.0,
+          "share_gt_50": 0.0,
+          "ess": 32234.0950208346,
+          "ess_fraction": 0.9837065130869934,
+          "variance_inflation": 1.0165633618322558
+        },
+        "frame": {
+          "mean": 1.0,
+          "max": 18.265328874024526,
+          "p99": 1.9569995222169134,
+          "cv": 0.44511348032926906,
+          "share_gt_5": 0.001739501953125,
+          "share_gt_10": 0.000396728515625,
+          "share_gt_50": 0.0,
+          "ess": 27349.377040783864,
+          "ess_fraction": 0.8346367505122029,
+          "variance_inflation": 1.1981260103707587
+        }
+      },
+      "gradient": {
+        "uniform": {
+          "grad_norm_mean": 11.657769984404421,
+          "grad_variance": 291.36287406081544,
+          "relative_std": 1.4642041184089525
+        },
+        "bins8": {
+          "grad_norm_mean": 11.990503767505679,
+          "grad_variance": 294.8158539817905,
+          "relative_std": 1.4319834125047346,
+          "variance_ratio_vs_uniform": 1.0118511321392798
+        },
+        "frame": {
+          "grad_norm_mean": 12.31415801817308,
+          "grad_variance": 316.0310140163363,
+          "relative_std": 1.4436440659894265,
+          "variance_ratio_vs_uniform": 1.0846646644155904
+        },
+        "variance_ratio_frame_over_bins8": 1.0719607163183842
+      }
+    },
+    "1400": {
+      "occupied_bins": {
+        "bins8": 8,
+        "frame": 299
+      },
+      "min_bin_count": {
+        "bins8": 2465,
+        "frame": 2
+      },
+      "median_bin_count": {
+        "bins8": 4213.0,
+        "frame": 114.0
+      },
+      "weights": {
+        "uniform": {
+          "mean": 1.0,
+          "max": 1.0,
+          "p99": 1.0,
+          "cv": 0.0,
+          "share_gt_5": 0.0,
+          "share_gt_10": 0.0,
+          "share_gt_50": 0.0,
+          "ess": 32768.0,
+          "ess_fraction": 1.0,
+          "variance_inflation": 1.0
+        },
+        "bins8": {
+          "mean": 1.0000000000000002,
+          "max": 1.6616632860040568,
+          "p99": 1.6616632860040568,
+          "cv": 0.19381968501478505,
+          "share_gt_5": 0.0,
+          "share_gt_10": 0.0,
+          "share_gt_50": 0.0,
+          "ess": 31581.603271346325,
+          "ess_fraction": 0.963794045146067,
+          "variance_inflation": 1.0375660702992264
+        },
+        "frame": {
+          "mean": 0.9999999999999999,
+          "max": 54.79598662207358,
+          "p99": 2.382434200959721,
+          "cv": 0.5621402371121056,
+          "share_gt_5": 0.001434326171875,
+          "share_gt_10": 0.000335693359375,
+          "share_gt_50": 6.103515625e-05,
+          "ess": 24899.66490171524,
+          "ess_fraction": 0.7598774689244153,
+          "variance_inflation": 1.316001646180497
+        }
+      },
+      "gradient": {
+        "uniform": {
+          "grad_norm_mean": 12.073231958530139,
+          "grad_variance": 333.39744197200685,
+          "relative_std": 1.5123683740353815
+        },
+        "bins8": {
+          "grad_norm_mean": 12.014428185483812,
+          "grad_variance": 327.94604620890453,
+          "relative_std": 1.507294428462495,
+          "variance_ratio_vs_uniform": 0.9836489574399313
+        },
+        "frame": {
+          "grad_norm_mean": 13.008035669383673,
+          "grad_variance": 363.22997026309974,
+          "relative_std": 1.465139977037469,
+          "variance_ratio_vs_uniform": 1.089480375478099
+        },
+        "variance_ratio_frame_over_bins8": 1.1075906371248612
+      }
+    }
+  }
+}

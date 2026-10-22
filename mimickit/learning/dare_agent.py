@@ -17,11 +17,8 @@ class DAREAgent(add_agent.ADDAgent):
         pos_logits = self._model.eval_disc_raw(
             self._pos_diff.unsqueeze(0)).squeeze(-1)
         current_diff = batch["disc_obs_demo"] - batch["disc_obs"]
-        replay_data = self._disc_buffer.sample(current_diff.shape[0])
-        replay_diff = (replay_data["disc_obs_demo"]
-                       - replay_data["disc_obs"])
 
-        raw_diff = torch.cat((current_diff, replay_diff), dim=0)
+        raw_diff = current_diff
         norm_diff = self._disc_obs_norm.normalize(raw_diff)
         neg_logits = self._model.eval_disc_raw(norm_diff).squeeze(-1)
         pos_loss = self._disc_loss_pos(pos_logits)

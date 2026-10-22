@@ -42,15 +42,6 @@ class ADDAgent(amp_agent.AMPAgent):
     def _record_disc_demo_data(self):
         return
 
-    def _store_disc_replay_data(self):
-        disc_obs = self._exp_buffer.get_data_flat("disc_obs")
-        disc_obs_demo = self._exp_buffer.get_data_flat("disc_obs_demo")
-        indices = self._sample_disc_replay_indices(disc_obs.shape[0])
-        self._disc_buffer.push({
-            "disc_obs": disc_obs[indices].unsqueeze(1),
-            "disc_obs_demo": disc_obs_demo[indices].unsqueeze(1),
-        })
-
     def _compute_rewards(self):
         task_reward = self._exp_buffer.get_data_flat("reward")
         disc_obs = self._exp_buffer.get_data_flat("disc_obs")
@@ -73,9 +64,7 @@ class ADDAgent(amp_agent.AMPAgent):
 
     def _compute_disc_loss(self, batch):
         current_diff = batch["disc_obs_demo"] - batch["disc_obs"]
-        replay_data = self._disc_buffer.sample(current_diff.shape[0])
-        replay_diff = replay_data["disc_obs_demo"] - replay_data["disc_obs"]
-        raw_diff = torch.cat((current_diff, replay_diff), dim=0)
+        raw_diff = current_diff
 
         norm_diff = self._disc_obs_norm.normalize(raw_diff)
         norm_diff.requires_grad_(True)
