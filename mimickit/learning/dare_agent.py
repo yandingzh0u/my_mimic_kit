@@ -1,3 +1,5 @@
+import math
+
 import torch
 
 import learning.add_agent as add_agent
@@ -12,6 +14,77 @@ class DAREAgent(add_agent.ADDAgent):
         super()._load_params(config)
         self._disc_pairwise_weight = float(
             config.get("disc_pairwise_weight", 0.0))
+        self._disc_pair_bins = int(config.get("disc_pair_bins", 64))
+        self._disc_pair_mag_tol = float(config.get("disc_pair_mag_tol", 0.05))
+        self._disc_pair_pool_max = int(config.get("disc_pair_pool_max", 20000))
+        self._disc_pair_batch = int(config.get("disc_pair_batch", 256))
+        self._disc_rank_label = str(config.get("disc_rank_label", "env_succ"))
+        if self._disc_rank_label != "env_succ":
+            raise ValueError(
+                "Only env SUCC labels are available online; offline strict "
+                "completion is a different label and must not be mixed in")
+        self._rank_pool = None
+
+    def _update_model(self):
+        # Build the rollout-level pair pool once per iteration, before the
+        # discriminator updates consume it.
+        self._rank_pool = self._build_rank_pool()
+        return super()._update_model()
+
+    @torch.no_grad()
+    def _build_rank_pool(self):
+        """Matched (success, failure) pairs over the whole rollout.
+
+        Matching mirrors the offline screen: 64 phase bins and a magnitude
+        tolerance of disc_pair_mag_tol. Unresolved episodes (-1) are excluded.
+        """
+        empty = {"pos": None, "neg": None, "pairs": 0, "pos_count": 0,
+                 "neg_count": 0, "unknown": 0, "cells": 0}
+        if self._disc_pairwise_weight <= 0.0:
+            return empty
+        buf = self._exp_buffer
+        for name in ("disc_outcome", "diag_phase", "disc_obs", "disc_obs_demo"):
+            if not buf.has_buffer(name):
+                return empty
+        outcome = buf.get_data_flat("disc_outcome").flatten().to(torch.float64)
+        phase = buf.get_data_flat("diag_phase").flatten()
+        obs = buf.get_data_flat("disc_obs")
+        demo = buf.get_data_flat("disc_obs_demo")
+        samples = int(outcome.numel())
+        is_pos = outcome == 1.0
+        is_neg = outcome == 0.0
+        unknown = int((~(is_pos | is_neg)).sum())
+        pos_idx = torch.nonzero(is_pos, as_tuple=False).flatten()
+        neg_idx = torch.nonzero(is_neg, as_tuple=False).flatten()
+        if pos_idx.numel() == 0 or neg_idx.numel() == 0:
+            return {**empty, "pos_count": int(pos_idx.numel()),
+                    "neg_count": int(neg_idx.numel()), "unknown": unknown}
+        magnitude = torch.empty(samples, device=self._device, dtype=torch.float32)
+        chunk = 32768
+        for start in range(0, samples, chunk):
+            end = min(start + chunk, samples)
+            diff = demo[start:end] - obs[start:end]
+            norm = self._disc_obs_norm.normalize(diff)
+            magnitude[start:end] = torch.linalg.vector_norm(norm, dim=-1)
+        bins = max(1, self._disc_pair_bins)
+        tol = max(self._disc_pair_mag_tol, 1e-6)
+        phase_bin = torch.clamp((phase * bins).long(), 0, bins - 1)
+        mag_bin = torch.floor(magnitude / tol).long()
+        cell = phase_bin * (int(mag_bin.max()) + 1) + mag_bin
+        pool_pos, pool_neg = self._matched_rank_pairs(pos_idx, neg_idx, cell)
+        if pool_pos is None or pool_pos.numel() == 0:
+            return {**empty, "pos_count": int(pos_idx.numel()),
+                    "neg_count": int(neg_idx.numel()), "unknown": unknown,
+                    "cells": int(torch.unique(cell).numel())}
+        if pool_pos.numel() > self._disc_pair_pool_max:
+            stride = int(math.ceil(pool_pos.numel() / self._disc_pair_pool_max))
+            pool_pos = pool_pos[::stride]
+            pool_neg = pool_neg[::stride]
+        pos_diff = self._disc_obs_norm.normalize(demo[pool_pos] - obs[pool_pos])
+        neg_diff = self._disc_obs_norm.normalize(demo[pool_neg] - obs[pool_neg])
+        return {"pos": pos_diff, "neg": neg_diff, "pairs": int(pool_pos.numel()),
+                "pos_count": int(pos_idx.numel()), "neg_count": int(neg_idx.numel()),
+                "unknown": unknown, "cells": int(torch.unique(cell).numel())}
 
     def _init_iter(self):
         super()._init_iter()
@@ -61,50 +134,95 @@ class DAREAgent(add_agent.ADDAgent):
         neg_logits = self._model.eval_disc_raw(norm_diff).squeeze(-1)
         pos_loss = self._disc_loss_pos(pos_logits)
         neg_loss = self._disc_loss_neg(neg_logits)
-        disc_loss = 0.5 * (pos_loss + neg_loss)
+        cls_loss = 0.5 * (pos_loss + neg_loss)
+        # Separate storage: disc_loss is accumulated in place by the logger.
+        disc_loss = cls_loss.clone()
         neg_acc, pos_acc = self._compute_disc_acc(neg_logits, pos_logits)
 
         pairwise_loss = torch.zeros((), device=current_diff.device)
         pair_count = torch.zeros((), device=current_diff.device)
+        pos_count = torch.zeros((), device=current_diff.device)
+        neg_count = torch.zeros((), device=current_diff.device)
+        unknown_count = torch.zeros((), device=current_diff.device)
+        pool_pairs = torch.zeros((), device=current_diff.device)
         pairwise_weight = getattr(self, "_disc_pairwise_weight", 0.0)
-        if pairwise_weight > 0.0 and "disc_outcome" in batch:
-            current_norm_diff = norm_diff[:current_diff.shape[0]]
-            current_logits = self._model.eval_disc_raw(
-                current_norm_diff).squeeze(-1)
-            outcome = batch["disc_outcome"].flatten()
-            phase = batch.get("diag_phase", torch.zeros_like(outcome)).flatten()
-            phase_bin = torch.clamp((phase * 8).long(), 0, 7)
-            pos_indices = []
-            neg_indices = []
-            for bin_id in range(8):
-                ids = torch.nonzero(phase_bin == bin_id, as_tuple=False).flatten()
-                pos_ids = ids[outcome[ids] > 0.5]
-                neg_ids = ids[outcome[ids] < 0.5]
-                count = min(pos_ids.numel(), neg_ids.numel())
-                if count:
-                    pos_indices.append(pos_ids[:count])
-                    neg_indices.append(neg_ids[:count])
-            if pos_indices:
-                pos_ids = torch.cat(pos_indices)
-                neg_ids = torch.cat(neg_indices)
-                pairwise_loss = torch.nn.functional.softplus(
-                    current_logits[neg_ids] - current_logits[pos_ids]).mean()
-                pair_count = torch.tensor(
-                    float(pos_ids.numel()), device=current_diff.device)
-                disc_loss = disc_loss + pairwise_weight * pairwise_loss
+        pool = getattr(self, "_rank_pool", None) or {}
+        if pool:
+            pos_count = torch.tensor(float(pool.get("pos_count", 0)),
+                                     device=current_diff.device)
+            neg_count = torch.tensor(float(pool.get("neg_count", 0)),
+                                     device=current_diff.device)
+            unknown_count = torch.tensor(float(pool.get("unknown", 0)),
+                                         device=current_diff.device)
+            pool_pairs = torch.tensor(float(pool.get("pairs", 0)),
+                                      device=current_diff.device)
+        if (pairwise_weight > 0.0 and pool.get("pos") is not None
+                and int(pool.get("pairs", 0)) > 0):
+            take = min(int(self._disc_pair_batch), int(pool["pairs"]))
+            sel = torch.randint(0, int(pool["pairs"]), (take,), device=self._device)
+            pair_pos = pool["pos"][sel]
+            pair_neg = pool["neg"][sel]
+            # The auxiliary forward must not advance spectral-norm power
+            # iteration, otherwise an empty/zero ranking term would still
+            # perturb the CPL state. eval() freezes it; with no pairs we skip
+            # the forward entirely, so the term is a true no-op.
+            was_training = self._model.training
+            self._model.eval()
+            try:
+                logits = self._model.eval_disc_raw(
+                    torch.cat((pair_pos, pair_neg), dim=0)).squeeze(-1)
+            finally:
+                self._model.train(was_training)
+            pairwise_loss = torch.nn.functional.softplus(
+                logits[take:] - logits[:take]).mean()
+            pair_count = torch.tensor(float(take), device=current_diff.device)
+            disc_loss = disc_loss + pairwise_weight * pairwise_loss
 
         return {
             "disc_loss": disc_loss,
-            "disc_cls_loss": disc_loss.detach(),
+            # Keep a distinct storage: add_torch_dict accumulates in place, and
+            # a shared storage here would double-count disc_loss in the log.
+            "disc_cls_loss": disc_loss.detach().clone(),
+            "disc_bce_loss": cls_loss.detach().clone(),
+            "disc_pairwise_weighted": (pairwise_weight * pairwise_loss).detach().clone(),
             "disc_pos_acc": pos_acc.detach(),
             "disc_neg_acc": neg_acc.detach(),
             "disc_pos_logit": pos_logits.mean().detach(),
             "disc_neg_logit": neg_logits.mean().detach(),
             "disc_pairwise_loss": pairwise_loss.detach(),
             "disc_pairwise_pairs": pair_count.detach(),
+            "disc_rank_pos": pos_count,
+            "disc_rank_neg": neg_count,
+            "disc_rank_unknown": unknown_count,
+            "disc_rank_pool_pairs": pool_pairs,
             "disc_group_width": self._model.get_disc_group_width(),
             "disc_group_total_width": self._model.get_disc_group_total_width(),
         }
+
+    @staticmethod
+    def _matched_rank_pairs(pos_ids, neg_ids, cell):
+        """Aligned pos/neg indices with equal counts inside every cell."""
+        if pos_ids.numel() == 0 or neg_ids.numel() == 0:
+            return None, None
+        pos_cell = cell[pos_ids]
+        neg_cell = cell[neg_ids]
+        pos_ids = pos_ids[torch.argsort(pos_cell, stable=True)]
+        pos_cell = cell[pos_ids]
+        neg_ids = neg_ids[torch.argsort(neg_cell, stable=True)]
+        neg_cell = cell[neg_ids]
+        uniq = torch.unique(cell)
+        pos_slot = torch.searchsorted(uniq, pos_cell)
+        neg_slot = torch.searchsorted(uniq, neg_cell)
+        pos_counts = torch.bincount(pos_slot, minlength=uniq.numel())
+        neg_counts = torch.bincount(neg_slot, minlength=uniq.numel())
+        keep = torch.minimum(pos_counts, neg_counts)
+        # Global start of each cell inside the already sorted arrays; using the
+        # kept counts here would shift ranks whenever a cell keeps nothing.
+        pos_start = torch.cumsum(pos_counts, 0) - pos_counts
+        neg_start = torch.cumsum(neg_counts, 0) - neg_counts
+        pos_rank = torch.arange(pos_cell.numel(), device=pos_cell.device) - pos_start[pos_slot]
+        neg_rank = torch.arange(neg_cell.numel(), device=neg_cell.device) - neg_start[neg_slot]
+        return pos_ids[pos_rank < keep[pos_slot]], neg_ids[neg_rank < keep[neg_slot]]
 
     def _calc_disc_rewards(self, norm_diff):
         """Use the bounded ADD reward paired with the BCE discriminator."""

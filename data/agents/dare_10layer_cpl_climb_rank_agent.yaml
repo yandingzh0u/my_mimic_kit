@@ -38,3 +38,8 @@ disc_reward_weight: 1.0
 
 # Fixed physical-result pairwise term; zero-anchor BCE remains unchanged.
 disc_pairwise_weight: 1.0
+disc_pair_bins: 64
+disc_pair_mag_tol: 0.05
+disc_pair_pool_max: 20000
+disc_pair_batch: 256
+disc_rank_label: env_succ
