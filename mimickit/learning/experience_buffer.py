@@ -109,33 +109,6 @@ class ExperienceBuffer():
 
         return output
     
-    def sample_with_probabilities(self, n, probabilities, correction):
-        """Sample flat transitions with replacement and return IS factors.
-
-        ``probabilities`` and ``correction`` are rollout-sized flat vectors.
-        The buffer itself remains unchanged, so the default PPO sampler and
-        checkpoint format are unaffected.
-        """
-        probabilities = probabilities.to(device=self._device, dtype=torch.float32)
-        correction = correction.to(device=self._device, dtype=torch.float32)
-        if probabilities.ndim != 1 or correction.ndim != 1:
-            raise ValueError("LaBER probabilities/correction must be flat")
-        sample_count = self.get_sample_count()
-        if probabilities.numel() != sample_count or correction.numel() != sample_count:
-            raise ValueError("LaBER vectors must match the active rollout")
-        if (not torch.isfinite(probabilities).all()
-                or torch.any(probabilities < 0)
-                or float(probabilities.sum()) <= 0):
-            raise ValueError("invalid LaBER proposal distribution")
-        probabilities = probabilities / probabilities.sum()
-        rand_idx = torch.multinomial(probabilities, int(n), replacement=True)
-        output = {
-            key: data[rand_idx]
-            for key, data in self._flat_buffers.items()
-        }
-        output["laber_correction"] = correction[rand_idx]
-        return output
-
     def push(self, data_dict):
         input_n = next(iter(data_dict.values())).shape[0]
         if (input_n > self._buffer_length):
