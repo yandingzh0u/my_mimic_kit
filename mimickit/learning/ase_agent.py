@@ -155,6 +155,7 @@ class ASEAgent(amp_agent.AMPAgent):
         self.eval()
         
         self._record_disc_demo_data()
+        self._store_disc_replay_data()
         
         info = self._compute_rewards()
 

@@ -2,6 +2,7 @@ import numpy as np
 import torch
 
 import learning.amp_model as amp_model
+import learning.experience_buffer as experience_buffer
 import learning.mp_optimizer as mp_optimizer
 import learning.normalizer as normalizer
 import learning.ppo_agent as ppo_agent
@@ -17,6 +18,7 @@ class AMPAgent(ppo_agent.PPOAgent):
         
         self._disc_epochs = config["disc_epochs"]
         self._disc_batch_size = config["disc_batch_size"]
+        self._disc_replay_samples = config["disc_replay_samples"]
         self._disc_logit_reg = config.get("disc_logit_reg", 0.0)
         self._disc_grad_penalty = config.get("disc_grad_penalty", 0.0)
         self._disc_reward_scale = config.get("disc_reward_scale", 1.0)
@@ -52,6 +54,15 @@ class AMPAgent(ppo_agent.PPOAgent):
         self._disc_optimizer.sync()
         return
     
+    def _build_exp_buffer(self, config):
+        super()._build_exp_buffer(config)
+
+        disc_buffer_size = config["disc_buffer_size"]
+        self._disc_buffer = experience_buffer.ExperienceBuffer(
+            buffer_length=disc_buffer_size, batch_size=1,
+            device=self._device)
+        return
+    
     def _build_normalizers(self):
         super()._build_normalizers()
 
@@ -77,6 +88,7 @@ class AMPAgent(ppo_agent.PPOAgent):
 
     def _build_train_data(self):
         self._record_disc_demo_data()
+        self._store_disc_replay_data()
 
         reward_info = self._compute_rewards()
 
@@ -109,7 +121,25 @@ class AMPAgent(ppo_agent.PPOAgent):
             self._disc_obs_norm.record(disc_obs_demo)
         return
 
+    def _store_disc_replay_data(self):
+        disc_obs = self._exp_buffer.get_data_flat("disc_obs")
 
+        n = disc_obs.shape[0]
+        idx = self._sample_disc_replay_indices(n)
+        replay_disc_obs = disc_obs[idx]
+        disc_data = {"disc_obs": replay_disc_obs.unsqueeze(1)}
+        self._disc_buffer.push(disc_data)
+        return
+
+    def _sample_disc_replay_indices(self, num_candidates):
+        if (self._disc_buffer.is_full()):
+            num_samples = min(num_candidates, self._disc_replay_samples)
+        else:
+            num_samples = min(num_candidates,
+                              self._disc_buffer.get_capacity())
+        rand_idx = torch.randperm(
+            num_candidates, device=self._device, dtype=torch.long)
+        return rand_idx[:num_samples]
 
     def _compute_rewards(self):
         task_r = self._exp_buffer.get_data_flat("reward")
@@ -172,6 +202,9 @@ class AMPAgent(ppo_agent.PPOAgent):
         norm_disc_obs_demo = self._disc_obs_norm.normalize(disc_demo_obs)
         norm_disc_obs_demo.requires_grad_(True)
         
+        replay_data = self._disc_buffer.sample(disc_obs.shape[0])
+        replay_obs = replay_data["disc_obs"]
+        disc_obs = torch.cat([disc_obs, replay_obs], dim=0)
         norm_disc_obs = self._disc_obs_norm.normalize(disc_obs)
         norm_disc_obs.requires_grad_(True)
 
