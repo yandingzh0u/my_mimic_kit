@@ -5,13 +5,13 @@ import envs.base_env as base_env
 import learning.base_agent as base_agent
 import learning.distribution_gaussian_diag as distribution_gaussian_diag
 import learning.mp_optimizer as mp_optimizer
-import learning.phase_balance as phase_balance
 import learning.ppo_model as ppo_model
 import learning.rl_util as rl_util
 import util.mp_util as mp_util
 import util.torch_util as torch_util
 
 class PPOAgent(base_agent.BaseAgent):
+    _phase_balance_bins = 8
 
     def __init__(self, config, env, device):
         super().__init__(config, env, device)
@@ -34,13 +34,14 @@ class PPOAgent(base_agent.BaseAgent):
         self._action_reg_weight = config["action_reg_weight"]
 
         self._critic_eval_batch_size = int(config.get("critic_eval_batch_size", 0))
+
+        self._laber_enabled = bool(config.get("laber_enabled", False))
+        self._laber_eps = float(config.get("laber_eps", 1e-12))
+        self._laber_sampling = None
         
         self._exp_anneal_samples = config.get("exp_anneal_samples", np.inf)
         self._exp_prob_beg = config.get("exp_prob_beg", 1.0)
         self._exp_prob_end = config.get("exp_prob_end", 1.0)
-        self._laber_enabled = bool(config.get("laber_enabled", False))
-        self._laber_eps = float(config.get("laber_eps", 1e-12))
-        self._laber_sampling = None
         return
 
     def _build_model(self, config):
@@ -71,7 +72,6 @@ class PPOAgent(base_agent.BaseAgent):
     def _init_iter(self):
         super()._init_iter()
         self._exp_buffer.reset()
-        self._laber_sampling = None
         return
 
     def _decide_action(self, obs, info):
@@ -143,12 +143,18 @@ class PPOAgent(base_agent.BaseAgent):
         vals = torch_util.eval_minibatch(self._model.eval_critic, critic_inputs, self._critic_eval_batch_size)
         vals = vals.squeeze(-1).detach()
         adv = new_vals - vals
-
-        # One actor forward serves both consumers: the phase-reliability
-        # score and LaBER's segment proxy only differ by the advantage factor.
+        # One actor forward feeds the LaBER segment proxy; the phase weights
+        # keep using the original 8-bin phasebalanced scheme.
         unit_score = self._build_phase_score(obs, action, torch.ones_like(adv))
-        phase_weight, phase_info = self._build_phase_weights(
-            unit_score * adv.unsqueeze(-1))
+        self._laber_sampling = None
+
+        # PPO currently samples transitions uniformly from the rollout.  With
+        # early termination this makes the actor/critic objective depend on
+        # the policy's own phase occupancy: failed episodes contribute many
+        # freshly reset states while late phases become underrepresented.
+        # Reweight the existing motion-phase diagnostic so every occupied
+        # phase bin contributes equally to both value and policy updates.
+        phase_weight, phase_info = self._build_phase_weights()
 
         # Termination-conditioned TD-target statistics are diagnostics only.
         # They make it possible to distinguish a critic-scale jump caused by
@@ -209,6 +215,54 @@ class PPOAgent(base_agent.BaseAgent):
         }
         return info
 
+    def _build_phase_weights(self):
+        if (not self._exp_buffer.has_buffer("diag_phase")):
+            weights = torch.ones(
+                [self._steps_per_iter, self.get_num_envs()],
+                device=self._device, dtype=torch.float32)
+            return weights, {
+                "phase_weight_mean": weights.mean(),
+                "phase_weight_max": weights.max(),
+                "phase_bins_present": torch.tensor(
+                    1.0, device=self._device)
+            }
+
+        phase = self._exp_buffer.get_data("diag_phase").to(torch.float32)
+        phase = torch.nan_to_num(phase, nan=0.0, posinf=1.0, neginf=0.0)
+        phase = torch.clamp(phase, 0.0, 1.0 - torch.finfo(phase.dtype).eps)
+        phase_bin = (phase * self._phase_balance_bins).to(torch.long)
+        flat_bin = phase_bin.flatten()
+        counts = torch.bincount(
+            flat_bin, minlength=self._phase_balance_bins).to(torch.float32)
+        present = counts > 0.0
+        num_present = present.sum().to(torch.float32)
+        total = torch.tensor(
+            float(flat_bin.numel()), device=phase.device, dtype=torch.float32)
+        weights_by_bin = torch.zeros_like(counts)
+        weights_by_bin[present] = total / (num_present * counts[present])
+        weights = weights_by_bin[flat_bin].reshape(phase.shape)
+        return weights, {
+            "phase_weight_mean": weights.mean(),
+            "phase_weight_max": weights.max(),
+            "phase_bins_present": num_present,
+        }
+
+    def _build_phase_score(self, obs, action, adv):
+        """Per-sample actor-mean gradient signal used to judge reliability."""
+        flat_obs = obs.reshape(-1, obs.shape[-1])
+        chunk = 32768
+        means = []
+        stds = []
+        for start in range(0, flat_obs.shape[0], chunk):
+            dist = self._model.eval_actor(
+                self._obs_norm.normalize(flat_obs[start:start + chunk]))
+            means.append(dist.mean)
+            stds.append(dist.stddev)
+        mean = torch.cat(means, dim=0).reshape(action.shape)
+        std = torch.cat(stds, dim=0).reshape(action.shape)
+        norm_a = self._a_norm.normalize(action)
+        return adv.unsqueeze(-1) * (norm_a - mean) / std.square().clamp_min(1e-8)
+
     def _build_laber_sampling(self, done, rand_action_mask, norm_adv,
                               phase_weight, unit_score):
         """Build a rollout-local segment proposal for actor updates.
@@ -262,37 +316,6 @@ class PPOAgent(base_agent.BaseAgent):
         }
 
     @torch.no_grad()
-    def _build_phase_score(self, obs, action, adv):
-        """Per-sample actor-mean gradient signal used to judge reliability."""
-        flat_obs = obs.reshape(-1, obs.shape[-1])
-        chunk = 32768
-        means = []
-        stds = []
-        for start in range(0, flat_obs.shape[0], chunk):
-            dist = self._model.eval_actor(
-                self._obs_norm.normalize(flat_obs[start:start + chunk]))
-            means.append(dist.mean)
-            stds.append(dist.stddev)
-        mean = torch.cat(means, dim=0).reshape(action.shape)
-        std = torch.cat(stds, dim=0).reshape(action.shape)
-        norm_a = self._a_norm.normalize(action)
-        return adv.unsqueeze(-1) * (norm_a - mean) / std.square().clamp_min(1e-8)
-
-    def _build_phase_weights(self, score):
-        if (not self._exp_buffer.has_buffer("diag_phase")):
-            weights = torch.ones(
-                [self._steps_per_iter, self.get_num_envs()],
-                device=self._device, dtype=torch.float32)
-            return weights, {
-                "phase_weight_mean": weights.mean(),
-                "phase_weight_max": weights.max(),
-                "phase_bins_present": torch.tensor(
-                    1.0, device=self._device)
-            }
-
-        phase = self._exp_buffer.get_data("diag_phase").to(torch.float32)
-        num_frames = int(self._env._motion_lib._motion_num_frames.max().item()) - 1
-        return phase_balance.compute(phase, score, num_frames)
 
     def _weighted_mean_std(self, values, weights):
         weights = weights.to(dtype=values.dtype)

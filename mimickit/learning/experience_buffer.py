@@ -108,7 +108,7 @@ class ExperienceBuffer():
             output[key] = batch_data
 
         return output
-
+    
     def sample_with_probabilities(self, n, probabilities, correction):
         """Sample flat transitions with replacement and return IS factors.
 
@@ -135,7 +135,7 @@ class ExperienceBuffer():
         }
         output["laber_correction"] = correction[rand_idx]
         return output
-    
+
     def push(self, data_dict):
         input_n = next(iter(data_dict.values())).shape[0]
         if (input_n > self._buffer_length):
