@@ -38,6 +38,9 @@ class PPOAgent(base_agent.BaseAgent):
         self._exp_anneal_samples = config.get("exp_anneal_samples", np.inf)
         self._exp_prob_beg = config.get("exp_prob_beg", 1.0)
         self._exp_prob_end = config.get("exp_prob_end", 1.0)
+        self._laber_enabled = bool(config.get("laber_enabled", False))
+        self._laber_eps = float(config.get("laber_eps", 1e-12))
+        self._laber_sampling = None
         return
 
     def _build_model(self, config):
@@ -68,6 +71,7 @@ class PPOAgent(base_agent.BaseAgent):
     def _init_iter(self):
         super()._init_iter()
         self._exp_buffer.reset()
+        self._laber_sampling = None
         return
 
     def _decide_action(self, obs, info):
@@ -190,6 +194,9 @@ class PPOAgent(base_agent.BaseAgent):
         self._exp_buffer.set_data("tar_val", new_vals)
         self._exp_buffer.set_data("adv", norm_adv)
         self._exp_buffer.set_data("phase_weight", phase_weight)
+        if self._laber_enabled:
+            self._laber_sampling = self._build_laber_sampling(
+                done, rand_action_mask, norm_adv, phase_weight, obs, action)
         
         info = {
             "adv_mean": adv_mean,
@@ -198,6 +205,62 @@ class PPOAgent(base_agent.BaseAgent):
             **td_info,
         }
         return info
+
+    def _build_laber_sampling(self, done, rand_action_mask, norm_adv,
+                              phase_weight, obs, action):
+        """Build a rollout-local segment proposal for actor updates.
+
+        The target is exactly the existing phase-weighted random-action PPO
+        objective.  The score is intentionally documented as a mean-layer
+        proxy; it is not presented as an exact full-network gradient.
+        """
+        steps, envs = done.shape
+        sample_count = steps * envs
+        target = phase_weight.flatten().to(torch.float32)
+        random_mask = (rand_action_mask == 1.0).flatten()
+        target = torch.where(random_mask, target, torch.zeros_like(target))
+        target_sum = target.sum().clamp_min(1e-12)
+        target = target / target_sum
+
+        proxy = self._build_phase_score(obs, action, norm_adv)
+        proxy_norm = torch.linalg.vector_norm(proxy.reshape(sample_count, -1), dim=-1)
+        proxy_norm = torch.where(random_mask, proxy_norm,
+                                 torch.zeros_like(proxy_norm))
+
+        segments = []
+        for env_id in range(envs):
+            start = 0
+            for t in range(steps):
+                if done[t, env_id] != base_env.DoneFlags.NULL.value:
+                    indices = torch.arange(start, t + 1, device=done.device) * envs + env_id
+                    segments.append(indices)
+                    start = t + 1
+            if start < steps:
+                indices = torch.arange(start, steps, device=done.device) * envs + env_id
+                segments.append(indices)
+
+        scores = []
+        for indices in segments:
+            length = indices.numel()
+            score = length * torch.sum(
+                target[indices].square() * proxy_norm[indices].square())
+            scores.append(torch.sqrt(score.clamp_min(self._laber_eps)))
+        q = torch.stack(scores)
+        q = q / q.sum().clamp_min(self._laber_eps)
+
+        probabilities = torch.zeros(sample_count, device=done.device,
+                                    dtype=torch.float32)
+        for segment_prob, indices in zip(q, segments):
+            probabilities[indices] = segment_prob / indices.numel()
+        correction = target / probabilities.clamp_min(self._laber_eps)
+        return {
+            "probabilities": probabilities.detach(),
+            "correction": correction.detach(),
+            "q": q.detach(),
+            "segments": len(segments),
+            "proxy_norm_mean": proxy_norm.mean().detach(),
+            "proposal_ess": (1.0 / probabilities.square().sum()).detach(),
+        }
 
     @torch.no_grad()
     def _build_phase_score(self, obs, action, adv):
@@ -309,7 +372,12 @@ class PPOAgent(base_agent.BaseAgent):
         audit_obs, audit_old_dist, audit_phase = self._build_policy_audit_batch()
 
         for i in range(num_steps):
-            batch = self._exp_buffer.sample(batch_size)
+            if self._laber_sampling is None:
+                batch = self._exp_buffer.sample(batch_size)
+            else:
+                batch = self._exp_buffer.sample_with_probabilities(
+                    batch_size, self._laber_sampling["probabilities"],
+                    self._laber_sampling["correction"])
 
             with torch.amp.autocast(device_type=device_type, enabled=self._use_mixed_precision, dtype=torch.bfloat16):
                 loss_info = self._compute_actor_loss(batch)
@@ -328,6 +396,12 @@ class PPOAgent(base_agent.BaseAgent):
         info.update(self._compute_policy_audit(
             audit_obs, audit_old_dist, audit_phase))
         info.update(self._compute_first_layer_grad_info())
+        if self._laber_sampling is not None:
+            info["laber_segments"] = torch.tensor(
+                float(self._laber_sampling["segments"]), device=self._device)
+            info["laber_proxy_norm_mean"] = self._laber_sampling[
+                "proxy_norm_mean"]
+            info["laber_proposal_ess"] = self._laber_sampling["proposal_ess"]
         return info
 
     def _build_policy_audit_batch(self, max_samples=4096):
@@ -429,14 +503,20 @@ class PPOAgent(base_agent.BaseAgent):
         adv = batch["adv"]
         rand_action_mask = batch["rand_action_mask"]
         phase_weight = batch["phase_weight"]
+        laber_correction = batch.get("laber_correction", None)
 
-        # loss should only be computed using samples with random actions
+        # The default path preserves the historical uniform sampler exactly.
+        # LaBER keeps the full sampled batch so deterministic actions contribute
+        # zero rather than changing the Monte-Carlo denominator.
         rand_action_mask = (rand_action_mask == 1.0)
-        norm_obs = norm_obs[rand_action_mask]
-        norm_a = norm_a[rand_action_mask]
-        old_a_logp = old_a_logp[rand_action_mask]
-        adv = adv[rand_action_mask]
-        phase_weight = phase_weight[rand_action_mask]
+        if laber_correction is None:
+            norm_obs = norm_obs[rand_action_mask]
+            norm_a = norm_a[rand_action_mask]
+            old_a_logp = old_a_logp[rand_action_mask]
+            adv = adv[rand_action_mask]
+            phase_weight = phase_weight[rand_action_mask]
+        else:
+            laber_correction = laber_correction.to(dtype=norm_obs.dtype)
 
         a_dist = self._model.eval_actor(norm_obs)
         a_logp = a_dist.log_prob(norm_a)
@@ -445,11 +525,22 @@ class PPOAgent(base_agent.BaseAgent):
         actor_loss0 = adv * a_ratio
         actor_loss1 = adv * torch.clamp(a_ratio, 1.0 - self._ppo_clip_ratio, 1.0 + self._ppo_clip_ratio)
         actor_objective = torch.minimum(actor_loss0, actor_loss1)
-        actor_loss = -self._weighted_mean(actor_objective, phase_weight)
+        if laber_correction is None:
+            actor_loss = -self._weighted_mean(actor_objective, phase_weight)
+        else:
+            actor_objective = torch.where(rand_action_mask, actor_objective,
+                                          torch.zeros_like(actor_objective))
+            actor_loss = -torch.mean(laber_correction * actor_objective)
         
         clip_frac = (torch.abs(a_ratio - 1.0) > self._ppo_clip_ratio).type(torch.float)
-        clip_frac = self._weighted_mean(clip_frac, phase_weight)
-        imp_ratio = self._weighted_mean(a_ratio, phase_weight)
+        if laber_correction is None:
+            clip_frac = self._weighted_mean(clip_frac, phase_weight)
+            imp_ratio = self._weighted_mean(a_ratio, phase_weight)
+        else:
+            clip_frac = torch.mean(laber_correction * clip_frac
+                                   * rand_action_mask.to(laber_correction.dtype))
+            imp_ratio = torch.mean(laber_correction * a_ratio
+                                   * rand_action_mask.to(laber_correction.dtype))
         
         info = {
             "actor_loss": actor_loss,
@@ -458,22 +549,44 @@ class PPOAgent(base_agent.BaseAgent):
         }
 
         if (self._action_bound_weight != 0):
-            action_bound_loss = self._compute_action_bound_loss(a_dist)
+            if laber_correction is None:
+                bound_dist = a_dist
+                bound_weight = phase_weight
+            else:
+                bound_dist = distribution_gaussian_diag.DistributionGaussianDiag(
+                    mean=a_dist.mean[rand_action_mask],
+                    logstd=a_dist.logstd[rand_action_mask])
+                bound_weight = laber_correction[rand_action_mask]
+            action_bound_loss = self._compute_action_bound_loss(bound_dist)
             if (action_bound_loss is not None):
-                action_bound_loss = self._weighted_mean(
-                    action_bound_loss, phase_weight)
+                if laber_correction is None:
+                    action_bound_loss = self._weighted_mean(
+                        action_bound_loss, bound_weight)
+                else:
+                    action_bound_loss = torch.mean(
+                        action_bound_loss * bound_weight)
                 actor_loss += self._action_bound_weight * action_bound_loss
                 info["action_bound_loss"] = action_bound_loss.detach()
 
         if (self._action_entropy_weight != 0):
             action_entropy = a_dist.entropy()
-            action_entropy = self._weighted_mean(action_entropy, phase_weight)
+            if laber_correction is None:
+                action_entropy = self._weighted_mean(action_entropy, phase_weight)
+            else:
+                action_entropy = torch.mean(
+                    action_entropy * laber_correction
+                    * rand_action_mask.to(laber_correction.dtype))
             actor_loss += -self._action_entropy_weight * action_entropy
             info["action_entropy"] = action_entropy.detach()
         
         if (self._action_reg_weight != 0):
             action_reg_loss = a_dist.param_reg()
-            action_reg_loss = self._weighted_mean(action_reg_loss, phase_weight)
+            if laber_correction is None:
+                action_reg_loss = self._weighted_mean(action_reg_loss, phase_weight)
+            else:
+                action_reg_loss = torch.mean(
+                    action_reg_loss * laber_correction
+                    * rand_action_mask.to(laber_correction.dtype))
             actor_loss += self._action_reg_weight * action_reg_loss
             info["action_reg_loss"] = action_reg_loss.detach()
         
