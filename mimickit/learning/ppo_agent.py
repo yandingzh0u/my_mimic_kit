@@ -144,8 +144,11 @@ class PPOAgent(base_agent.BaseAgent):
         vals = vals.squeeze(-1).detach()
         adv = new_vals - vals
 
-        score = self._build_phase_score(obs, action, adv)
-        phase_weight, phase_info = self._build_phase_weights(score)
+        # One actor forward serves both consumers: the phase-reliability
+        # score and LaBER's segment proxy only differ by the advantage factor.
+        unit_score = self._build_phase_score(obs, action, torch.ones_like(adv))
+        phase_weight, phase_info = self._build_phase_weights(
+            unit_score * adv.unsqueeze(-1))
 
         # Termination-conditioned TD-target statistics are diagnostics only.
         # They make it possible to distinguish a critic-scale jump caused by
@@ -196,7 +199,7 @@ class PPOAgent(base_agent.BaseAgent):
         self._exp_buffer.set_data("phase_weight", phase_weight)
         if self._laber_enabled:
             self._laber_sampling = self._build_laber_sampling(
-                done, rand_action_mask, norm_adv, phase_weight, obs, action)
+                done, rand_action_mask, norm_adv, phase_weight, unit_score)
         
         info = {
             "adv_mean": adv_mean,
@@ -207,7 +210,7 @@ class PPOAgent(base_agent.BaseAgent):
         return info
 
     def _build_laber_sampling(self, done, rand_action_mask, norm_adv,
-                              phase_weight, obs, action):
+                              phase_weight, unit_score):
         """Build a rollout-local segment proposal for actor updates.
 
         The target is exactly the existing phase-weighted random-action PPO
@@ -219,47 +222,43 @@ class PPOAgent(base_agent.BaseAgent):
         target = phase_weight.flatten().to(torch.float32)
         random_mask = (rand_action_mask == 1.0).flatten()
         target = torch.where(random_mask, target, torch.zeros_like(target))
-        target_sum = target.sum().clamp_min(1e-12)
-        target = target / target_sum
+        target = target / target.sum().clamp_min(1e-12)
 
-        proxy = self._build_phase_score(obs, action, norm_adv)
-        proxy_norm = torch.linalg.vector_norm(proxy.reshape(sample_count, -1), dim=-1)
+        proxy = unit_score * norm_adv.unsqueeze(-1)
+        proxy_norm = torch.linalg.vector_norm(
+            proxy.reshape(sample_count, -1), dim=-1)
         proxy_norm = torch.where(random_mask, proxy_norm,
                                  torch.zeros_like(proxy_norm))
 
-        segments = []
-        for env_id in range(envs):
-            start = 0
-            for t in range(steps):
-                if done[t, env_id] != base_env.DoneFlags.NULL.value:
-                    indices = torch.arange(start, t + 1, device=done.device) * envs + env_id
-                    segments.append(indices)
-                    start = t + 1
-            if start < steps:
-                indices = torch.arange(start, steps, device=done.device) * envs + env_id
-                segments.append(indices)
+        # Segment id per (step, env). A terminal sample stays in the run that
+        # produced it, so the id is the inclusive cumsum minus the flag.
+        terminal = (done != base_env.DoneFlags.NULL.value).to(torch.long)
+        segment = terminal.cumsum(dim=0) - terminal
+        env_id = torch.arange(envs, device=done.device).repeat(steps)
+        segment_id = (env_id * (steps + 1) + segment.reshape(-1)).long()
+        capacity = envs * (steps + 1)
 
-        scores = []
-        for indices in segments:
-            length = indices.numel()
-            score = length * torch.sum(
-                target[indices].square() * proxy_norm[indices].square())
-            scores.append(torch.sqrt(score.clamp_min(self._laber_eps)))
-        q = torch.stack(scores)
-        q = q / q.sum().clamp_min(self._laber_eps)
+        lengths = torch.bincount(segment_id, minlength=capacity).to(torch.float32)
+        energy = torch.bincount(segment_id,
+                                weights=(target * proxy_norm).square(),
+                                minlength=capacity).to(torch.float32)
+        scores = torch.where(lengths > 0,
+                             (lengths * energy).clamp_min(self._laber_eps).sqrt(),
+                             torch.zeros_like(lengths))
+        scores = scores / scores.sum().clamp_min(self._laber_eps)
 
-        probabilities = torch.zeros(sample_count, device=done.device,
-                                    dtype=torch.float32)
-        for segment_prob, indices in zip(q, segments):
-            probabilities[indices] = segment_prob / indices.numel()
+        probabilities = scores[segment_id] / lengths[segment_id].clamp_min(1.0)
         correction = target / probabilities.clamp_min(self._laber_eps)
+        second_moment = (target * correction).sum().clamp_min(self._laber_eps)
         return {
             "probabilities": probabilities.detach(),
             "correction": correction.detach(),
-            "q": q.detach(),
-            "segments": len(segments),
+            "q": scores.detach(),
+            "segments": int((lengths > 0).sum().item()),
             "proxy_norm_mean": proxy_norm.mean().detach(),
             "proposal_ess": (1.0 / probabilities.square().sum()).detach(),
+            "is_ess_fraction": (1.0 / second_moment).detach(),
+            "correction_max": correction.max().detach(),
         }
 
     @torch.no_grad()
@@ -402,6 +401,10 @@ class PPOAgent(base_agent.BaseAgent):
             info["laber_proxy_norm_mean"] = self._laber_sampling[
                 "proxy_norm_mean"]
             info["laber_proposal_ess"] = self._laber_sampling["proposal_ess"]
+            info["laber_is_ess_fraction"] = self._laber_sampling[
+                "is_ess_fraction"]
+            info["laber_correction_max"] = self._laber_sampling[
+                "correction_max"]
         return info
 
     def _build_policy_audit_batch(self, max_samples=4096):
@@ -549,22 +552,18 @@ class PPOAgent(base_agent.BaseAgent):
         }
 
         if (self._action_bound_weight != 0):
-            if laber_correction is None:
-                bound_dist = a_dist
-                bound_weight = phase_weight
-            else:
-                bound_dist = distribution_gaussian_diag.DistributionGaussianDiag(
-                    mean=a_dist.mean[rand_action_mask],
-                    logstd=a_dist.logstd[rand_action_mask])
-                bound_weight = laber_correction[rand_action_mask]
-            action_bound_loss = self._compute_action_bound_loss(bound_dist)
+            action_bound_loss = self._compute_action_bound_loss(a_dist)
             if (action_bound_loss is not None):
                 if laber_correction is None:
                     action_bound_loss = self._weighted_mean(
-                        action_bound_loss, bound_weight)
+                        action_bound_loss, phase_weight)
                 else:
+                    # Same full-batch denominator as the main surrogate, so the
+                    # correction keeps its Monte-Carlo meaning when only part
+                    # of the batch carries random actions.
                     action_bound_loss = torch.mean(
-                        action_bound_loss * bound_weight)
+                        action_bound_loss * laber_correction
+                        * rand_action_mask.to(laber_correction.dtype))
                 actor_loss += self._action_bound_weight * action_bound_loss
                 info["action_bound_loss"] = action_bound_loss.detach()
 
