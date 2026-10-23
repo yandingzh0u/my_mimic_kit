@@ -108,6 +108,18 @@ class ExperienceBuffer():
             output[key] = batch_data
 
         return output
+
+    def sample_indices(self, indices):
+        """Return a minibatch at explicit flat rollout indices."""
+        indices = indices.to(device=self._device, dtype=torch.long).flatten()
+        sample_count = self.get_sample_count()
+        if (indices.numel() == 0 or torch.any(indices < 0)
+                or torch.any(indices >= sample_count)):
+            raise ValueError("sample indices outside the active rollout")
+        return {
+            key: data[indices]
+            for key, data in self._flat_buffers.items()
+        }
     
     def push(self, data_dict):
         input_n = next(iter(data_dict.values())).shape[0]

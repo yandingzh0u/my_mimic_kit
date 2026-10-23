@@ -5,6 +5,7 @@ import envs.base_env as base_env
 import learning.base_agent as base_agent
 import learning.distribution_gaussian_diag as distribution_gaussian_diag
 import learning.mp_optimizer as mp_optimizer
+import learning.phase_stratified_sampler as phase_stratified_sampler
 import learning.ppo_model as ppo_model
 import learning.rl_util as rl_util
 import util.mp_util as mp_util
@@ -38,6 +39,12 @@ class PPOAgent(base_agent.BaseAgent):
         self._exp_anneal_samples = config.get("exp_anneal_samples", np.inf)
         self._exp_prob_beg = config.get("exp_prob_beg", 1.0)
         self._exp_prob_end = config.get("exp_prob_end", 1.0)
+        self._phase_sampler_mode = config.get("phase_sampler", "uniform")
+        if self._phase_sampler_mode not in ("uniform", "stratified"):
+            raise ValueError("Unsupported phase_sampler: {}".format(
+                self._phase_sampler_mode))
+        self._phase_sampler_bins = int(config.get("phase_sampler_bins", 8))
+        self._phase_sampler = None
         return
 
     def _build_model(self, config):
@@ -68,6 +75,7 @@ class PPOAgent(base_agent.BaseAgent):
     def _init_iter(self):
         super()._init_iter()
         self._exp_buffer.reset()
+        self._phase_sampler = None
         return
 
     def _decide_action(self, obs, info):
@@ -194,6 +202,11 @@ class PPOAgent(base_agent.BaseAgent):
         self._exp_buffer.set_data("tar_val", new_vals)
         self._exp_buffer.set_data("adv", norm_adv)
         self._exp_buffer.set_data("phase_weight", phase_weight)
+        if (self._phase_sampler_mode == "stratified"
+                and self._exp_buffer.has_buffer("diag_phase")):
+            self._phase_sampler = phase_stratified_sampler.PhaseStratifiedSampler(
+                self._exp_buffer.get_data("diag_phase"),
+                self._phase_sampler_bins)
         
         info = {
             "adv_mean": adv_mean,
@@ -276,14 +289,38 @@ class PPOAgent(base_agent.BaseAgent):
         actor_info = self._update_actor(actor_batch_size, num_actor_steps)
         
         train_info = {**critic_info, **actor_info}
+        if self._phase_sampler is not None:
+            sampler_info = self._phase_sampler.diagnostics()
+            train_info.update({
+                "phase_sampler_active_bins": torch.tensor(
+                    float(sampler_info.get("active_bins", 0)), device=self._device),
+                "phase_sampler_max_reuse": torch.tensor(
+                    float(sampler_info.get("max_reuse", 0)), device=self._device),
+                "phase_sampler_unsampled_frac": torch.tensor(
+                    float(sampler_info.get("unsampled_fraction", 1.0)),
+                    device=self._device),
+            })
         return train_info
+
+    def _sample_ppo_batch(self, batch_size, actor=False):
+        if self._phase_sampler is None:
+            return self._exp_buffer.sample(batch_size)
+        eligible = None
+        if actor:
+            eligible = (self._exp_buffer.get_data_flat("rand_action_mask") == 1.0)
+        indices, phase_weights = self._phase_sampler.sample(batch_size, eligible)
+        batch = self._exp_buffer.sample_indices(indices)
+        # Replace, rather than multiply, the old rollout weight.  This is the
+        # defining phase-uniform objective and avoids double correction.
+        batch["phase_weight"] = phase_weights
+        return batch
 
     def _update_critic(self, batch_size, steps):
         info = dict()
         device_type = torch.device(self._device).type
 
         for i in range(steps):
-            batch = self._exp_buffer.sample(batch_size)
+            batch = self._sample_ppo_batch(batch_size, actor=False)
 
             with torch.amp.autocast(device_type=device_type, enabled=self._use_mixed_precision, dtype=torch.bfloat16):
                 loss_info = self._compute_critic_loss(batch)
@@ -312,7 +349,7 @@ class PPOAgent(base_agent.BaseAgent):
         audit_obs, audit_old_dist, audit_phase = self._build_policy_audit_batch()
 
         for i in range(num_steps):
-            batch = self._exp_buffer.sample(batch_size)
+            batch = self._sample_ppo_batch(batch_size, actor=True)
 
             with torch.amp.autocast(device_type=device_type, enabled=self._use_mixed_precision, dtype=torch.bfloat16):
                 loss_info = self._compute_actor_loss(batch)
