@@ -445,21 +445,9 @@ class PPOAgent(base_agent.BaseAgent):
         a_logp = a_dist.log_prob(norm_a)
 
         a_ratio = torch.exp(a_logp - old_a_logp)
-        # Rollback PPO (Truly Proximal Policy Optimization, UAI 2020): keep the
-        # full PPO gradient inside the trust region and, outside it, replace the
-        # zero-gradient plateau with a linear pull-back instead of a penalty
-        # that already shrinks the gradient inside the region.
-        eps = self._ppo_clip_ratio
-        rollback = 0.1
-        lower = 1.0 - eps
-        upper = 1.0 + eps
-        rollback_ratio = torch.where(
-            a_ratio < lower,
-            lower - rollback * (a_ratio - lower),
-            torch.where(a_ratio > upper,
-                        upper - rollback * (a_ratio - upper),
-                        a_ratio))
-        actor_objective = torch.minimum(adv * a_ratio, adv * rollback_ratio)
+        actor_loss0 = adv * a_ratio
+        actor_loss1 = adv * torch.clamp(a_ratio, 1.0 - self._ppo_clip_ratio, 1.0 + self._ppo_clip_ratio)
+        actor_objective = torch.minimum(actor_loss0, actor_loss1)
         actor_loss = -self._weighted_mean(actor_objective, phase_weight)
         
         clip_frac = (torch.abs(a_ratio - 1.0) > self._ppo_clip_ratio).type(torch.float)
