@@ -1,0 +1,79 @@
+{
+  "checkpoint": "/home/y/my_mimic_mixgrpo/MimicKit/output/paper_benchmark/dare_10layer_cpl_phasebalanced_climb_3000_8192_seed0_headless_20261012/int_models/model_0000002999.pt",
+  "num_samples": 65536,
+  "mean_abs_residual": 0.28361961245536804,
+  "mean_logit_zero": 1.4445216655731201,
+  "mean_logit_half": -0.1541130542755127,
+  "mean_logit_full": -1.747584581375122,
+  "zero_violation_rate": 0.0,
+  "direction_violation_rate": 0.0,
+  "overshoot_violation_rate": 0.0,
+  "mean_logit_neg": -1.7118003368377686,
+  "reward_mean": 0.42352762818336487,
+  "per_phase": {
+    "0": {
+      "n": 4479,
+      "zero_violation": 0.0,
+      "direction_violation": 0.0,
+      "overshoot_violation": 0.0,
+      "logit_zero": 1.4445215463638306,
+      "logit_full": -1.6202260255813599
+    },
+    "1": {
+      "n": 8004,
+      "zero_violation": 0.0,
+      "direction_violation": 0.0,
+      "overshoot_violation": 0.0,
+      "logit_zero": 1.4445215463638306,
+      "logit_full": -2.7114624977111816
+    },
+    "2": {
+      "n": 8007,
+      "zero_violation": 0.0,
+      "direction_violation": 0.0,
+      "overshoot_violation": 0.0,
+      "logit_zero": 1.444521427154541,
+      "logit_full": -1.5288727283477783
+    },
+    "3": {
+      "n": 8199,
+      "zero_violation": 0.0,
+      "direction_violation": 0.0,
+      "overshoot_violation": 0.0,
+      "logit_zero": 1.4445213079452515,
+      "logit_full": -1.25037682056427
+    },
+    "4": {
+      "n": 8309,
+      "zero_violation": 0.0,
+      "direction_violation": 0.0,
+      "overshoot_violation": 0.0,
+      "logit_zero": 1.444521427154541,
+      "logit_full": -1.2771954536437988
+    },
+    "5": {
+      "n": 8451,
+      "zero_violation": 0.0,
+      "direction_violation": 0.0,
+      "overshoot_violation": 0.0,
+      "logit_zero": 1.444521427154541,
+      "logit_full": -1.6253235340118408
+    },
+    "6": {
+      "n": 8915,
+      "zero_violation": 0.0,
+      "direction_violation": 0.0,
+      "overshoot_violation": 0.0,
+      "logit_zero": 1.444521427154541,
+      "logit_full": -1.6034928560256958
+    },
+    "7": {
+      "n": 11172,
+      "zero_violation": 0.0,
+      "direction_violation": 0.0,
+      "overshoot_violation": 0.0,
+      "logit_zero": 1.444521427154541,
+      "logit_full": -2.1870460510253906
+    }
+  }
+}
