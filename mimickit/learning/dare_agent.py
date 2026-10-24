@@ -31,7 +31,7 @@ class DAREAgent(add_agent.ADDAgent):
 
         return {
             "disc_loss": disc_loss,
-            "disc_cls_loss": disc_loss.detach().clone(),
+            "disc_cls_loss": disc_loss.detach(),
             "disc_pos_acc": pos_acc.detach(),
             "disc_neg_acc": neg_acc.detach(),
             "disc_pos_logit": pos_logits.mean().detach(),
