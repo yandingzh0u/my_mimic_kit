@@ -749,10 +749,13 @@ class BaseAgent(torch.nn.Module):
             if (isinstance(val, numbers.Integral)):
                 row[key] = int(val)
             elif (isinstance(val, numbers.Real)):
-                row[key] = float(val)
+                number = float(val)
+                # Diagnostic fields with no samples are NaN; strict JSON has
+                # no NaN literal, so emit null instead.
+                row[key] = number if np.isfinite(number) else None
 
         with open(self._train_metrics_file, "a") as metrics_file:
-            metrics_file.write(json.dumps(row, sort_keys=True) + "\n")
+            metrics_file.write(json.dumps(row, sort_keys=True, allow_nan=False) + "\n")
         return
 
     def _get_optimizers(self):

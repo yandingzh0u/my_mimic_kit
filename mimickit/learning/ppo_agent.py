@@ -40,11 +40,13 @@ class PPOAgent(base_agent.BaseAgent):
         self._exp_prob_beg = config.get("exp_prob_beg", 1.0)
         self._exp_prob_end = config.get("exp_prob_end", 1.0)
         self._phase_sampler_mode = config.get("phase_sampler", "uniform")
-        if self._phase_sampler_mode not in ("uniform", "stratified"):
+        if self._phase_sampler_mode not in (
+                "uniform", "stratified", "stratified_epoch"):
             raise ValueError("Unsupported phase_sampler: {}".format(
                 self._phase_sampler_mode))
         self._phase_sampler_bins = int(config.get("phase_sampler_bins", 8))
         self._phase_sampler = None
+        self._phase_sampler_actor = None
         return
 
     def _build_model(self, config):
@@ -76,6 +78,7 @@ class PPOAgent(base_agent.BaseAgent):
         super()._init_iter()
         self._exp_buffer.reset()
         self._phase_sampler = None
+        self._phase_sampler_actor = None
         return
 
     def _decide_action(self, obs, info):
@@ -202,11 +205,21 @@ class PPOAgent(base_agent.BaseAgent):
         self._exp_buffer.set_data("tar_val", new_vals)
         self._exp_buffer.set_data("adv", norm_adv)
         self._exp_buffer.set_data("phase_weight", phase_weight)
-        if (self._phase_sampler_mode == "stratified"
-                and self._exp_buffer.has_buffer("diag_phase")):
-            self._phase_sampler = phase_stratified_sampler.PhaseStratifiedSampler(
-                self._exp_buffer.get_data("diag_phase"),
-                self._phase_sampler_bins)
+        if self._exp_buffer.has_buffer("diag_phase"):
+            phase = self._exp_buffer.get_data("diag_phase")
+            if self._phase_sampler_mode == "stratified":
+                self._phase_sampler = (
+                    phase_stratified_sampler.PhaseStratifiedSampler(
+                        phase, self._phase_sampler_bins))
+            elif self._phase_sampler_mode == "stratified_epoch":
+                sampler_cls = (
+                    phase_stratified_sampler.EpochPhaseStratifiedSampler)
+                self._phase_sampler = sampler_cls(
+                    phase, self._phase_sampler_bins)
+                eligible = (
+                    self._exp_buffer.get_data_flat("rand_action_mask") == 1.0)
+                self._phase_sampler_actor = sampler_cls(
+                    phase, self._phase_sampler_bins, eligible=eligible)
         
         info = {
             "adv_mean": adv_mean,
@@ -284,12 +297,23 @@ class PPOAgent(base_agent.BaseAgent):
         critic_info = self._update_critic(critic_batch_size, num_critic_steps)
         
         actor_batch_size = int(np.ceil(self._actor_batch_size * num_envs))
-        num_actor_batches = int(np.ceil(float(num_samples) / actor_batch_size))
+        actor_samples = num_samples
+        if self._phase_sampler_actor is not None:
+            actor_samples = self._phase_sampler_actor.num_samples
+        num_actor_batches = int(np.ceil(float(actor_samples) / actor_batch_size))
         num_actor_steps = num_actor_batches * self._actor_epochs
         actor_info = self._update_actor(actor_batch_size, num_actor_steps)
         
         train_info = {**critic_info, **actor_info}
-        if self._phase_sampler is not None:
+        if self._phase_sampler_mode == "stratified_epoch":
+            for name, sampler in (("actor", self._phase_sampler_actor),
+                                  ("critic", self._phase_sampler)):
+                if sampler is None:
+                    continue
+                for key, value in sampler.diagnostics().items():
+                    train_info["phase_sampler_{}_{}".format(name, key)] = (
+                        torch.tensor(float(value), device=self._device))
+        elif self._phase_sampler is not None:
             sampler_info = self._phase_sampler.diagnostics()
             train_info.update({
                 "phase_sampler_active_bins": torch.tensor(
@@ -305,11 +329,19 @@ class PPOAgent(base_agent.BaseAgent):
     def _sample_ppo_batch(self, batch_size, actor=False):
         if self._phase_sampler is None:
             return self._exp_buffer.sample(batch_size)
-        eligible = None
-        if actor:
-            eligible = (self._exp_buffer.get_data_flat("rand_action_mask") == 1.0)
-        indices, phase_weights = self._phase_sampler.sample(batch_size, eligible)
-        batch = self._exp_buffer.sample_indices(indices)
+        if self._phase_sampler_mode == "stratified_epoch":
+            sampler = (self._phase_sampler_actor if actor
+                       else self._phase_sampler)
+            indices, phase_weights = sampler.sample(batch_size)
+            batch = self._exp_buffer.sample_indices(indices, validate=False)
+        else:
+            eligible = None
+            if actor:
+                eligible = (
+                    self._exp_buffer.get_data_flat("rand_action_mask") == 1.0)
+            indices, phase_weights = self._phase_sampler.sample(
+                batch_size, eligible)
+            batch = self._exp_buffer.sample_indices(indices)
         # Replace, rather than multiply, the old rollout weight.  This is the
         # defining phase-uniform objective and avoids double correction.
         batch["phase_weight"] = phase_weights

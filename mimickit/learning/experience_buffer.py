@@ -109,13 +109,21 @@ class ExperienceBuffer():
 
         return output
 
-    def sample_indices(self, indices):
-        """Return a minibatch at explicit flat rollout indices."""
+    def sample_indices(self, indices, validate=True):
+        """Return a minibatch at explicit flat rollout indices.
+
+        ``validate=False`` skips the range check; only samplers that build
+        indices from a verified rollout pool may use it, and it avoids a
+        GPU-to-CPU synchronisation on every minibatch.
+        """
         indices = indices.to(device=self._device, dtype=torch.long).flatten()
-        sample_count = self.get_sample_count()
-        if (indices.numel() == 0 or torch.any(indices < 0)
-                or torch.any(indices >= sample_count)):
-            raise ValueError("sample indices outside the active rollout")
+        if indices.numel() == 0:
+            raise ValueError("empty sample indices")
+        if validate:
+            sample_count = self.get_sample_count()
+            if (torch.any(indices < 0)
+                    or torch.any(indices >= sample_count)):
+                raise ValueError("sample indices outside the active rollout")
         return {
             key: data[indices]
             for key, data in self._flat_buffers.items()
