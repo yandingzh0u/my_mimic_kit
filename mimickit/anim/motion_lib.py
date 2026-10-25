@@ -98,6 +98,11 @@ class MotionLib():
     def get_motion_lengths(self):
         return self._motion_lengths
 
+    def get_motion_duration(self, motion_id):
+        # Avoid deriving control resolution from an already rounded float32
+        # duration (e.g. 299/30 s must produce 299, rather than 300, cells).
+        return (int(self._motion_num_frames[motion_id]) - 1) / float(self._motion_fps[motion_id])
+
     def get_motion_weights(self):
         return self._motion_weights
     

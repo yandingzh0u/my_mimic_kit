@@ -6,6 +6,8 @@ import learning.base_agent as base_agent
 import learning.distribution_gaussian_diag as distribution_gaussian_diag
 import learning.mp_optimizer as mp_optimizer
 import learning.ppo_model as ppo_model
+from learning.phase_sampler import PhaseSampler, control_cells
+from learning.phase_resolution import supported_resolution
 import learning.rl_util as rl_util
 import util.mp_util as mp_util
 import util.torch_util as torch_util
@@ -15,6 +17,10 @@ class PPOAgent(base_agent.BaseAgent):
 
     def __init__(self, config, env, device):
         super().__init__(config, env, device)
+        # Initialize reset randomization after network/buffer construction so
+        # enabling coverage does not change the seeded initial network.
+        if self._phase_coverage_reset:
+            self._env.enable_phase_coverage_resets(self._phase_control_cells)
         return
 
     def _load_params(self, config):
@@ -24,6 +30,18 @@ class PPOAgent(base_agent.BaseAgent):
         self._actor_batch_size = config["actor_batch_size"]
         self._critic_epochs = config["critic_epochs"]
         self._critic_batch_size = config["critic_batch_size"]
+
+        self._phase_sampler_mode = config.get("phase_sampler", "uniform")
+        if self._phase_sampler_mode not in ("none", "uniform", "adaptive_twostage", "adaptive_supported"):
+            raise ValueError("Unsupported PPO phase_sampler: " + self._phase_sampler_mode)
+        self._phase_coverage_reset = config.get("phase_coverage_reset", False)
+        if self._phase_sampler_mode in ("adaptive_twostage", "adaptive_supported"):
+            durations, timestep = self._env.get_motion_sampling_spec()
+            if len(durations) != 1 or mp_util.get_num_procs() != 1:
+                raise ValueError("Adaptive phase sampling currently supports one motion and one process")
+            self._phase_control_cells = control_cells(durations[0], timestep)
+        elif self._phase_coverage_reset:
+            raise ValueError("Phase coverage resets require an adaptive phase sampler")
 
         self._td_lambda = config["td_lambda"]
         self._ppo_clip_ratio = config["ppo_clip_ratio"]
@@ -139,12 +157,8 @@ class PPOAgent(base_agent.BaseAgent):
         vals = vals.squeeze(-1).detach()
         adv = new_vals - vals
 
-        # PPO currently samples transitions uniformly from the rollout.  With
-        # early termination this makes the actor/critic objective depend on
-        # the policy's own phase occupancy: failed episodes contribute many
-        # freshly reset states while late phases become underrepresented.
-        # Reweight the existing motion-phase diagnostic so every occupied
-        # phase bin contributes equally to both value and policy updates.
+        # Build the rollout target once. Minibatches replace its population
+        # weights with mass / actual quota, rather than multiplying weights.
         phase_weight, phase_info = self._build_phase_weights()
 
         # Termination-conditioned TD-target statistics are diagnostics only.
@@ -186,6 +200,8 @@ class PPOAgent(base_agent.BaseAgent):
         phase_weight_flat = phase_weight.flatten()
         rand_action_adv = adv_flat[rand_action_mask]
         rand_action_weight = phase_weight_flat[rand_action_mask]
+        if self._phase_sampler_mode in ("adaptive_twostage", "adaptive_supported"):
+            rand_action_weight = self._actor_phase_sampler.full_weights()[rand_action_mask]
         adv_mean, adv_std = self._weighted_mean_std(
             rand_action_adv, rand_action_weight)
         norm_adv = (adv - adv_mean) / torch.clamp_min(adv_std, 1e-5)
@@ -204,7 +220,27 @@ class PPOAgent(base_agent.BaseAgent):
         return info
 
     def _build_phase_weights(self):
-        if (not self._exp_buffer.has_buffer("diag_phase")):
+        if self._phase_sampler_mode in ("adaptive_twostage", "adaptive_supported"):
+            phase = self._exp_buffer.get_data("diag_phase")
+            actor_budget = int(np.ceil(self._actor_batch_size * self.get_num_envs()))
+            critic_budget = int(np.ceil(self._critic_batch_size * self.get_num_envs()))
+            budget = min(actor_budget, critic_budget)
+            eligible = self._exp_buffer.get_data_flat("rand_action_mask") == 1
+            resolution = self._phase_control_cells
+            if self._phase_sampler_mode == "adaptive_supported":
+                resolution = supported_resolution(phase, resolution,
+                    [actor_budget, critic_budget], [eligible, None])
+            self._critic_phase_sampler = PhaseSampler(phase, resolution, budget)
+            self._actor_phase_sampler = PhaseSampler(phase, resolution, budget, eligible)
+            weights = (self._critic_phase_sampler.full_weights() * phase.numel()).float().reshape(phase.shape)
+            info = {"phase_weight_mean": weights.mean(), "phase_weight_max": weights.max(),
+                    "phase_motion_control_cells": torch.tensor(float(self._phase_control_cells), device=phase.device),
+                    "phase_resolution_bins": torch.tensor(float(resolution), device=phase.device)}
+            for name, sampler in (("actor", self._actor_phase_sampler), ("critic", self._critic_phase_sampler)):
+                for key, value in sampler.coverage.items():
+                    info["phase_" + name + "_" + key] = torch.tensor(float(value), device=phase.device)
+            return weights, info
+        if (self._phase_sampler_mode == "none" or not self._exp_buffer.has_buffer("diag_phase")):
             weights = torch.ones(
                 [self._steps_per_iter, self.get_num_envs()],
                 device=self._device, dtype=torch.float32)
@@ -283,7 +319,7 @@ class PPOAgent(base_agent.BaseAgent):
         device_type = torch.device(self._device).type
 
         for i in range(steps):
-            batch = self._exp_buffer.sample(batch_size)
+            batch = self._sample_ppo_batch(batch_size, actor=False)
 
             with torch.amp.autocast(device_type=device_type, enabled=self._use_mixed_precision, dtype=torch.bfloat16):
                 loss_info = self._compute_critic_loss(batch)
@@ -304,6 +340,8 @@ class PPOAgent(base_agent.BaseAgent):
     def _update_actor(self, batch_size, num_steps):
         info = dict()
         device_type = torch.device(self._device).type
+        if not bool((self._exp_buffer.get_data_flat("rand_action_mask") == 1).any()):
+            return {"actor_skipped_no_eligible": torch.ones((), device=self._device)}
 
         # A fixed slice of the just-collected rollout gives an exact, cheap
         # pre/post-update policy diagnostic.  Unlike the PPO importance ratio,
@@ -312,7 +350,7 @@ class PPOAgent(base_agent.BaseAgent):
         audit_obs, audit_old_dist, audit_phase = self._build_policy_audit_batch()
 
         for i in range(num_steps):
-            batch = self._exp_buffer.sample(batch_size)
+            batch = self._sample_ppo_batch(batch_size, actor=True)
 
             with torch.amp.autocast(device_type=device_type, enabled=self._use_mixed_precision, dtype=torch.bfloat16):
                 loss_info = self._compute_actor_loss(batch)
@@ -332,6 +370,26 @@ class PPOAgent(base_agent.BaseAgent):
             audit_obs, audit_old_dist, audit_phase))
         info.update(self._compute_first_layer_grad_info())
         return info
+
+    def _sample_ppo_batch(self, batch_size, actor):
+        if self._phase_sampler_mode in ("none", "uniform"):
+            return self._exp_buffer.sample(batch_size)
+        sampler = self._actor_phase_sampler if actor else self._critic_phase_sampler
+        indices, weights, _ = sampler.sample(batch_size)
+        batch = self._exp_buffer.sample_indices(indices)
+        batch["phase_weight"] = weights.float()
+        return batch
+
+    def _get_checkpoint_extra_state(self):
+        state = super()._get_checkpoint_extra_state()
+        if self._phase_coverage_reset:
+            state["phase_coverage"] = self._env.get_phase_coverage_state()
+        return state
+
+    def _load_checkpoint_extra_state(self, state):
+        super()._load_checkpoint_extra_state(state)
+        if self._phase_coverage_reset:
+            self._env.load_phase_coverage_state(state["phase_coverage"])
 
     def _build_policy_audit_batch(self, max_samples=4096):
         obs = self._exp_buffer.get_data_flat("obs")

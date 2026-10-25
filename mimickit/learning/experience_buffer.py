@@ -100,11 +100,13 @@ class ExperienceBuffer():
         return
 
     def sample(self, n):
+        return self.sample_indices(self._sample_rand_idx(n))
+
+    def sample_indices(self, indices):
         output = dict()
-        rand_idx = self._sample_rand_idx(n)
 
         for key, data in self._flat_buffers.items():
-            batch_data = data[rand_idx]
+            batch_data = data[indices]
             output[key] = batch_data
 
         return output
