@@ -86,6 +86,8 @@ class DAREModel(add_model.ADDModel):
 
     def _build_disc(self, config, env):
         input_dict = {"disc_obs": env.get_disc_obs_space()}
+        # Preserve the historical RNG draws before constructing the actual
+        # discriminator; skipping this build changes every seeded weight.
         base_layers, _ = net_builder.build_net(
             config["disc_net"], input_dict, activation=self._activation)
         linears = [layer for layer in base_layers.modules()
@@ -105,14 +107,3 @@ class DAREModel(add_model.ADDModel):
         torch.nn.init.uniform_(self._disc_logits.weight, -1.0, 1.0)
         torch.nn.init.zeros_(self._disc_logits.bias)
         torch.nn.utils.parametrizations.spectral_norm(self._disc_logits)
-
-    def eval_disc_raw(self, disc_obs):
-        return self._disc_logits(self._disc_layers(disc_obs))
-
-    def get_disc_group_width(self):
-        return self._disc_logits.weight.new_tensor(
-            float(self._disc_layers.group_width))
-
-    def get_disc_group_total_width(self):
-        return self._disc_logits.weight.new_tensor(
-            float(self._disc_layers.total_width))

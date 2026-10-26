@@ -11,8 +11,7 @@ import torch
 
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/'mimickit'))
-from learning.phase_resolution import supported_resolution
-from learning.phase_sampler import PhaseSampler
+from learning.phase_sampler import PhaseSampler, supported_resolution
 
 
 def cpu(cases,seed):
@@ -31,7 +30,7 @@ def cpu(cases,seed):
         k=supported_resolution(phase,f,[ba,bc],[eligible,None])
         minimum_k=min(minimum_k,k);maximum_k=max(maximum_k,k)
         for mask,b in [(eligible,ba),(None,bc)]:
-            sampler=PhaseSampler(phase,k,min(ba,bc),mask)
+            sampler=PhaseSampler(phase,k,mask)
             if len(sampler.indices):
                 q=math.ceil(min(b,len(sampler.indices))/k)
                 assert len(sampler.present_bins)==k and int(sampler.counts.min())>=q
@@ -62,7 +61,7 @@ def gpu(seed):
             torch.cuda.synchronize();start=time.perf_counter()
             k=supported_resolution(phase,f,[32768,16384],[None,None])
             torch.cuda.synchronize();elapsed=1000*(time.perf_counter()-start)
-            sampler=PhaseSampler(phase,k,16384)
+            sampler=PhaseSampler(phase,k)
             for b in [16384,32768]:
                 for _ in range(20):
                     idx,w,q=sampler.sample(b)

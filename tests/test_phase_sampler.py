@@ -11,12 +11,10 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "mimickit"))
-from learning.phase_sampler import PhaseSampler, control_cells
+from learning.phase_sampler import PhaseSampler, control_cells, supported_resolution
 from learning.experience_buffer import ExperienceBuffer
 from learning.ppo_agent import PPOAgent
-from util.phase_coverage import PhaseCoverage
-import envs.base_env as base_env
-from envs.deepmimic_env import DeepMimicEnv
+from learning.dare_agent import DAREAgent
 
 
 @pytest.mark.parametrize("duration,cells", [(0, 1), (1/300, 1), (1, 30), (299/30, 299), (100, 3000)])
@@ -28,8 +26,9 @@ def test_resolution(duration, cells):
 def test_no_duplicates_or_starvation_and_correct_mass(frames, budget):
     phase = torch.linspace(0, 1, 129, dtype=torch.float64)
     eligible = torch.arange(len(phase)) % 3 != 1
-    sampler = PhaseSampler(phase, frames, budget, eligible)
     for b in (budget, budget + 7, 200):
+        k = supported_resolution(phase, frames, [b], [eligible])
+        sampler = PhaseSampler(phase, k, eligible)
         idx, weight, quota = sampler.sample(b)
         assert len(idx) == min(b, int(eligible.sum()))
         assert idx.unique().numel() == len(idx)
@@ -43,25 +42,32 @@ def test_no_duplicates_or_starvation_and_correct_mass(frames, budget):
             torch.testing.assert_close(full, sampler.full_weights())
 
 
-def test_sparse_pool_refunds_are_used_by_other_phases():
+def test_under_supported_pools_are_rejected_instead_of_refunded():
     phase = torch.tensor([.01] + [.4]*50 + [.8]*50)
-    sampler = PhaseSampler(phase, 3, 12)
-    for _ in range(50):
-        idx, weight, quota = sampler.sample(12)
-        assert quota[0] == 1 and len(idx.unique()) == 12
-        assert quota[1] >= 4 and quota[2] >= 4
-        assert float(weight.sum()) == pytest.approx(1)
+    sampler = PhaseSampler(phase, 3)
+    with pytest.raises(ValueError, match="supported resolution"):
+        sampler.sample(12)
+    k = supported_resolution(phase, 3, [12], [None])
+    indices, weights, _ = PhaseSampler(phase, k).sample(12)
+    assert len(indices.unique()) == 12
+    assert float(weights.sum()) == pytest.approx(1)
 
 
-def test_final_weights_use_time_width_not_equal_merged_bin_mass():
-    sampler = PhaseSampler(torch.tensor([.01, .21, .41, .61, .81]), 5, 4)
-    torch.testing.assert_close(sampler.target_mass, torch.tensor([.4, .2, .2, .2], dtype=torch.float64))
-    idx, weight, _ = sampler.sample(4)
-    assert float(weight[sampler.bin_ids[idx] == 0].sum()) == pytest.approx(.4)
+def test_supported_equal_width_bins_have_equal_target_mass():
+    sampler = PhaseSampler(torch.tensor([.01]*4 + [.4]*6 + [.8]*10), 3)
+    torch.testing.assert_close(sampler.target_mass, torch.full((3,), 1/3, dtype=torch.float64))
+    idx, weight, _ = sampler.sample(9)
+    for bin_id in range(3):
+        assert float(weight[sampler.bin_ids[idx] == bin_id].sum()) == pytest.approx(1/3)
+
+
+def test_empty_bins_require_resolution_selection():
+    with pytest.raises(ValueError, match="supported resolution"):
+        PhaseSampler(torch.tensor([0., .1, .9, 1.]), 4)
 
 
 def test_empty_eligibility_can_skip_actor_without_nan():
-    sampler = PhaseSampler(torch.linspace(0, 1, 10), 299, 8, torch.zeros(10, dtype=torch.bool))
+    sampler = PhaseSampler(torch.linspace(0, 1, 10), 8, torch.zeros(10, dtype=torch.bool))
     idx, w, q = sampler.sample(8)
     assert len(idx) == len(w) == len(q) == 0
     assert sampler.full_weights().sum() == 0
@@ -72,19 +78,19 @@ def test_empty_eligibility_can_skip_actor_without_nan():
                                    torch.tensor([float("inf")]), torch.tensor([-.1]), torch.tensor([1.1])])
 def test_invalid_population_is_rejected(phase):
     with pytest.raises(ValueError):
-        PhaseSampler(phase, 299, 8)
+        PhaseSampler(phase, 1)
 
 
 def test_impossible_minibatch_is_rejected():
-    sampler = PhaseSampler(torch.linspace(0, 1, 10), 10, 10)
+    sampler = PhaseSampler(torch.linspace(0, 1, 10), 10)
     with pytest.raises(ValueError, match="cover all"):
         sampler.sample(9)
 
 
 def test_monte_carlo_estimates_the_same_finite_population_target():
     torch.manual_seed(72)
-    phase = torch.tensor([.01] + [.4]*7 + [.8]*21)
-    sampler = PhaseSampler(phase, 3, 12)
+    phase = torch.tensor([.01]*5 + [.4]*7 + [.8]*21)
+    sampler = PhaseSampler(phase, 3)
     values = torch.randn(len(phase), 5, dtype=torch.float64)
     exact = (sampler.full_weights()[:, None] * values).sum(0)
     estimates = []
@@ -96,24 +102,6 @@ def test_monte_carlo_estimates_the_same_finite_population_target():
     assert bool(((estimates.mean(0) - exact).abs() < 5*se + 1e-12).all())
 
 
-@pytest.mark.parametrize("cells", [1, 7, 299, 3000, 100000])
-def test_coverage_and_exact_resume_after_float32_conversion(cells):
-    torch.manual_seed(7)
-    coverage = PhaseCoverage(cells)
-    lengths = torch.full((2*cells+17,), cells/30, dtype=torch.float32)
-    coverage.draw_times(lengths[:13])
-    saved = coverage.state_dict()
-    rng = torch.get_rng_state()
-    times = coverage.draw_times(lengths)
-    native = ((times/lengths).double()*cells).long().clamp_max(cells-1)
-    for start in (0, 1, cells//2):
-        assert len(native[start:start+cells].unique()) == cells
-    replica = PhaseCoverage(cells)
-    replica.load_state_dict(saved)
-    torch.set_rng_state(rng)
-    assert torch.equal(replica.draw_times(lengths), times)
-
-
 class _Env:
     def get_num_envs(self): return 8
     def get_obs_space(self): return spaces.Box(-1, 1, (3,), dtype=np.float32)
@@ -122,21 +110,33 @@ class _Env:
     def get_reward_bounds(self): return (0, 1)
     def get_reward_succ(self): return 1
     def get_reward_fail(self): return 0
-    def enable_phase_coverage_resets(self, cells): self._coverage = PhaseCoverage(cells)
-    def get_phase_coverage_state(self): return self._coverage.state_dict()
-    def load_phase_coverage_state(self, state): self._coverage.load_state_dict(state)
+    def get_disc_obs_space(self): return spaces.Box(-np.inf, np.inf, (172,), dtype=np.float32)
+    def get_disc_error_groups(self):
+        groups, start = [], 0
+        for i, dim in enumerate((3, 6, 45, 84, 3, 3, 28)):
+            groups.append((str(i), tuple(range(start, start + dim))))
+            start += dim
+        return groups
 
 
-def _agent(adaptive=True, coverage=False):
+class _SamplingPPO(PPOAgent):
+    # Exercise DARE's actual sampling methods with a small actor/critic.
+    _build_phase_weights = DAREAgent._build_phase_weights
+    _actor_population_weights = DAREAgent._actor_population_weights
+    _sample_ppo_batch = DAREAgent._sample_ppo_batch
+
+    def _load_params(self, config):
+        super()._load_params(config)
+        durations, dt = self._env.get_motion_sampling_spec()
+        self._phase_control_cells = control_cells(durations[0], dt)
+
+
+def _agent(agent_type=_SamplingPPO):
     config = yaml.safe_load((ROOT / "data/agents/dare_10layer_cpl_climb_agent.yaml").read_text())
-    config.update(model=dict(actor_net="fc_2layers_128units", critic_net="fc_2layers_128units",
-                             actor_init_output_scale=.01, actor_std_type="FIXED", action_std=.05),
-                  actor_epochs=1, critic_epochs=1, steps_per_iter=4)
-    if adaptive:
-        config["phase_sampler"] = "adaptive_twostage"
-        config["phase_coverage_reset"] = coverage
+    config["model"].update(actor_net="fc_2layers_128units", critic_net="fc_2layers_128units")
+    config.update(actor_epochs=1, critic_epochs=1, steps_per_iter=4)
     with mock.patch("util.mp_util.get_num_procs", return_value=1):
-        agent = PPOAgent(config, _Env(), "cpu")
+        agent = agent_type(config, _Env(), "cpu")
     shape = (4, 8)
     obs = torch.randn(*shape, 3)
     dist = agent._model.eval_actor(agent._obs_norm.normalize(obs))
@@ -185,10 +185,10 @@ def test_zero_eligible_actor_is_skipped_and_critic_still_trains():
     assert torch.isfinite(update["critic_loss"])
 
 
-def test_legacy_phase_balancing_and_default_sampling_unchanged():
-    agent = _agent(adaptive=False)
+def test_ordinary_ppo_remains_uniform():
+    agent = _agent(agent_type=PPOAgent)
     weights, _ = agent._build_phase_weights()
-    torch.testing.assert_close(weights, torch.ones_like(weights))  # four observations per 8-bin phase
+    torch.testing.assert_close(weights, torch.ones_like(weights))
     with mock.patch.object(agent._exp_buffer, "sample", return_value={"original": True}) as sample:
         assert agent._sample_ppo_batch(16, actor=True) == {"original": True}
         sample.assert_called_once_with(16)
@@ -200,49 +200,30 @@ def test_indexed_gather_preserves_order():
     torch.testing.assert_close(buffer.sample_indices(torch.tensor([5, 1, 4]))["value"], torch.tensor([5, 1, 4]))
 
 
-def test_evaluations_do_not_advance_training_coverage():
-    env = _Env()
-    env._motion_lib = mock.Mock()
-    env._motion_lib.sample_motions.side_effect = lambda n: torch.zeros(n, dtype=torch.long)
-    env._motion_lib.get_motion_length.side_effect = lambda ids: torch.ones_like(ids, dtype=torch.float)
-    env._motion_lib.sample_time.side_effect = lambda ids: torch.rand(len(ids))
-    env._phase_coverage = PhaseCoverage(30)
-    env._rand_reset, env._device = True, "cpu"
-    env._mode, env._test_random_start = base_env.EnvMode.TEST, False
-    state = env._phase_coverage.state_dict()
-    _, t = DeepMimicEnv._sample_motion_times(env, 50)
-    assert t.sum() == 0
-    env._test_random_start = True
-    DeepMimicEnv._sample_motion_times(env, 50)
-    assert env._phase_coverage.state_dict() == state
-    env._mode = base_env.EnvMode.TRAIN
-    DeepMimicEnv._sample_motion_times(env, 50)
-    assert env._phase_coverage.cursor == 20
-
-
 def test_seeded_network_initialization_is_unchanged():
     torch.manual_seed(0)
-    baseline = _agent(adaptive=False)
+    baseline = _agent(agent_type=PPOAgent)
     torch.manual_seed(0)
-    adaptive = _agent(adaptive=True, coverage=True)
+    adaptive = _agent()
     for a, b in zip(baseline._model.parameters(), adaptive._model.parameters()):
         assert torch.equal(a, b)
 
 
-def test_agent_checkpoint_hook_restores_reset_coverage():
-    agent = _agent(coverage=True)
-    coverage = agent._env._coverage
-    coverage.draw_times(torch.full((8217,), 299/30))
-    state, rng = agent._get_checkpoint_extra_state(), torch.get_rng_state()
-    expected = coverage.draw_times(torch.full((917,), 299/30))
-    agent._load_checkpoint_extra_state(state)
-    torch.set_rng_state(rng)
-    assert torch.equal(coverage.draw_times(torch.full((917,), 299/30)), expected)
+def test_dare_has_one_sampling_path_without_mode_parameters():
+    agent = _agent(agent_type=DAREAgent)
+    assert agent._phase_control_cells == 299
+    config = yaml.safe_load((ROOT / "data/agents/dare_10layer_cpl_climb_agent.yaml").read_text())
+    assert "phase_sampler" not in config
+    assert "phase_sampler_bins" not in config
+    assert "phase_coverage_reset" not in config
 
 
-def test_new_benchmark_only_enables_sampler_and_coverage():
-    baseline = yaml.safe_load((ROOT / "data/agents/dare_10layer_cpl_climb_agent.yaml").read_text())
-    candidate = yaml.safe_load((ROOT / "data/agents/dare_10layer_cpl_climb_twostage_agent.yaml").read_text())
-    assert candidate.pop("phase_sampler") == "adaptive_twostage"
-    assert candidate.pop("phase_coverage_reset") is True
-    assert baseline == candidate
+def test_selected_config_preserves_completed_supported_hyperparameters():
+    current = yaml.safe_load((ROOT / "data/agents/dare_10layer_cpl_climb_agent.yaml").read_text())
+    reference_path = ROOT / "output/paper_benchmark/dare_10layer_cpl_supported_climb_3000_8192_seed0_headless_20261025/agent_config.yaml"
+    if not reference_path.is_file():
+        pytest.skip("Historical run is not present in this checkout")
+    reference = yaml.safe_load(reference_path.read_text())
+    assert reference.pop("phase_sampler") == "adaptive_supported"
+    assert reference.pop("phase_coverage_reset") is False
+    assert current == reference

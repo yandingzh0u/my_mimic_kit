@@ -1,0 +1,169 @@
+{
+  "status": "complete",
+  "cleanup": {
+    "retired_scripts_configs_tests": 38,
+    "removed_active_files": 39,
+    "removed_paths": [
+      "args/paper_benchmark/dare_twostage_climb_3000_8192_args.txt",
+      "args/smp_dodgeball_humanoid_args.txt",
+      "data/agents/dare_10layer_cpl_climb_smoke_agent.yaml",
+      "mimickit/learning/phase_resolution.py",
+      "tests/test_adaptive_phase_candidate.py",
+      "tests/test_capacity_phase_sampler.py",
+      "tools/diagnostics/adaptive_phase_candidate.py",
+      "tools/diagnostics/adaptive_phase_live.py",
+      "tools/diagnostics/adaptive_phase_report.py",
+      "tools/diagnostics/adaptive_phase_stress.py",
+      "tools/diagnostics/add_group_response.py",
+      "tools/diagnostics/audit_reward_monotonicity.py",
+      "tools/diagnostics/capacity_phase_report.py",
+      "tools/diagnostics/capacity_phase_stress.py",
+      "tools/diagnostics/dare_control_probe.py",
+      "tools/diagnostics/dare_cpl_add_probe.py",
+      "tools/diagnostics/dare_cpl_certification_probe.py",
+      "tools/diagnostics/dare_eval_reset_probe.py",
+      "tools/diagnostics/dare_final_audit.py",
+      "tools/diagnostics/dare_mgda_probe.py",
+      "tools/diagnostics/dare_paper_report.py",
+      "tools/diagnostics/dare_paper_stress.py",
+      "tools/diagnostics/dare_potential_attribution.py",
+      "tools/diagnostics/dare_potential_probe.py",
+      "tools/diagnostics/dare_ray_candidate.py",
+      "tools/diagnostics/dare_ray_live.py",
+      "tools/diagnostics/dare_semantic_probe.py",
+      "tools/diagnostics/dare_std_pilot.py",
+      "tools/diagnostics/dare_unified_probe.py",
+      "tools/diagnostics/eval_checkpoint.py",
+      "tools/diagnostics/resetfix_paired_eval.py",
+      "tools/diagnostics/secant_residual_gates.py",
+      "tools/paper_benchmark/audit_physics_contrast.py",
+      "tools/paper_benchmark/check_resume_equivalence.py",
+      "tools/paper_benchmark/laber_gradient_audit.py",
+      "tools/paper_benchmark/laber_sampler_smoke.py",
+      "tools/paper_benchmark/phase_weight_audit.py",
+      "tools/paper_benchmark/resume_climb_four_500.py",
+      "tools/paper_benchmark/run_resume_reset_comparison.py"
+    ],
+    "modified_paths": [
+      "mimickit/learning/base_agent.py",
+      "mimickit/learning/dare_agent.py",
+      "mimickit/learning/dare_model.py",
+      "mimickit/learning/phase_sampler.py",
+      "mimickit/learning/ppo_agent.py",
+      "mimickit/run.py",
+      "tests/test_dare.py",
+      "tests/test_phase_resolution.py",
+      "tests/test_phase_sampler.py",
+      "tools/diagnostics/phase_resolution_stress.py"
+    ],
+    "net_removed_lines": 6862,
+    "test_configuration_added": "pytest.ini",
+    "argument_config_paths_checked": 114,
+    "missing_argument_config_paths": [],
+    "historical_assets_unchanged": {
+      "data/assets/humanoid/humanoid.usd": true,
+      "data/assets/humanoid/humanoid.xml": true,
+      "data/assets/objects/climbing_box.usd": true,
+      "data/assets/objects/climbing_box.xml": true,
+      "data/motions/humanoid/humanoid_climbing_up_down.pkl": true
+    },
+    "backup": "source_before",
+    "previous_working_tree_saved": "working_tree_before.patch",
+    "formal_tests_passed": 167,
+    "cpu_stress": {
+      "distributions": 25000,
+      "minibatches": 100000,
+      "sampled_indices": 26684144,
+      "selected_bins_range": [
+        1,
+        186
+      ],
+      "support_violations": 0,
+      "empty_bin_violations": 0,
+      "duplicate_violations": 0,
+      "weight_violations": 0
+    },
+    "gpu_stress_profiles": 8
+  },
+  "reproduction": {
+    "iterations": {
+      "0": {
+        "model_tensors": 92,
+        "different_model_tensors": 0,
+        "state_differences": [],
+        "metric_count": 119,
+        "metric_differences": [],
+        "original_console_fields": 77,
+        "original_console_differences": {},
+        "samples": 262144,
+        "phase_bins": 110.0,
+        "actor_loss": -0.0026594502851366997,
+        "critic_loss": 61.234153747558594,
+        "disc_loss": 0.042689353227615356
+      },
+      "1": {
+        "model_tensors": 92,
+        "different_model_tensors": 0,
+        "state_differences": [],
+        "metric_count": 119,
+        "metric_differences": [],
+        "original_console_fields": 77,
+        "original_console_differences": {},
+        "samples": 524288,
+        "phase_bins": 140.0,
+        "actor_loss": -0.0031991309951990843,
+        "critic_loss": 41.20359420776367,
+        "disc_loss": 0.04223167523741722
+      },
+      "2": {
+        "model_tensors": 92,
+        "different_model_tensors": 0,
+        "state_differences": [],
+        "metric_count": 119,
+        "metric_differences": [],
+        "original_console_fields": 77,
+        "original_console_differences": {},
+        "samples": 786432,
+        "phase_bins": 82.0,
+        "actor_loss": -0.004303682129830122,
+        "critic_loss": 26.624757766723633,
+        "disc_loss": 0.04139246046543121
+      }
+    },
+    "performance_fields_excluded": [
+      "Peak_GPU_Memory_MB",
+      "Samples_Per_Second",
+      "Wall_Time"
+    ],
+    "protocol": "Original 8192 environments, seed 0, 32 steps/iteration, 3000-iteration output/evaluation/reset schedule; stop before update 3",
+    "status": "exact_match",
+    "historical_iteration0_model_tensors": 92,
+    "historical_iteration0_different_tensors": 0,
+    "historical_iteration0_full_precision_metrics": 119,
+    "initial_state": {
+      "sha256": "32b425d7c1305bc6365c2b51777dca5e901f000fd8db08abcd767cbbc5e21fac",
+      "historical_sha256": "32b425d7c1305bc6365c2b51777dca5e901f000fd8db08abcd767cbbc5e21fac",
+      "exact_match": true
+    },
+    "state_scope": [
+      "all model and normalizer tensors",
+      "optimizer state",
+      "replay buffers and sampling cursor",
+      "rollout buffers and sampling cursor",
+      "pending normalizer statistics",
+      "next observations/info",
+      "Python/NumPy/CPU-Torch/CUDA-Torch RNG state"
+    ],
+    "limitation": "Historical iterations 1 and 2 survive only at console display precision. Full-precision equivalence for these iterations is against the original frozen source rerun, not a nonexistent historical tensor dump."
+  },
+  "artifacts": {
+    "full_precision_metrics": "cleaned/all_metrics.jsonl",
+    "last_state_after_three_iterations": "cleaned/state_2.pt",
+    "historical_schedule_checkpoint": "cleaned/checkpoint.pt",
+    "checkpoint_note": "The normal output schedule saves iteration 0 only in this three-iteration prefix; state_2.pt is the final observed model/normalizer state.",
+    "source_backup": "source_before",
+    "retired_manifest": "retired_files.json",
+    "tests": "full_pytest_final.log"
+  },
+  "git_diff_check": "passed"
+}

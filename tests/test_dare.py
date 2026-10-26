@@ -1,5 +1,6 @@
 import inspect
 import pathlib
+from types import SimpleNamespace
 
 import gymnasium.spaces as spaces
 import torch
@@ -57,7 +58,7 @@ def test_cpl_discriminator_is_finite_and_spectrally_normalized():
     assert len(blocks) == 7
     assert all(hasattr(block.linear.parametrizations, "weight")
                for block in blocks)
-    logits = model.eval_disc_raw(torch.randn(32, 172))
+    logits = model.eval_disc(torch.randn(32, 172))
     assert torch.isfinite(logits).all()
     logits.square().mean().backward()
     assert all(p.grad is None or torch.isfinite(p.grad).all()
@@ -77,13 +78,13 @@ def test_dare_reward_is_bounded_raw_logit_reward():
     anchor_reward = agent._calc_disc_rewards(anchor_input)
     assert reward.shape == (31,)
     assert torch.isfinite(reward).all()
-    anchor_logits = agent._model.eval_disc_raw(anchor_input).squeeze(-1)
+    anchor_logits = agent._model.eval_disc(anchor_input).squeeze(-1)
     expected_anchor_reward = agent._disc_reward_scale * (
         -torch.log(torch.clamp_min(1.0 - torch.sigmoid(anchor_logits), 1e-4)))
     torch.testing.assert_close(anchor_reward, expected_anchor_reward,
                                atol=1e-6, rtol=0.0)
     assert torch.all(reward >= 0.0)
-    logits = agent._model.eval_disc_raw(inputs).squeeze(-1)
+    logits = agent._model.eval_disc(inputs).squeeze(-1)
     expected = agent._disc_reward_scale * (
         -torch.log(torch.clamp_min(1.0 - torch.sigmoid(logits), 1e-4)))
     torch.testing.assert_close(reward, expected)
@@ -92,16 +93,16 @@ def test_dare_reward_is_bounded_raw_logit_reward():
 
 def test_dare_discriminator_uses_only_the_differential():
     model = DAREModel(_config(), _Env()).eval()
-    logits = model.eval_disc_raw(torch.zeros(8, 172))
+    logits = model.eval_disc(torch.zeros(8, 172))
     assert logits.shape == (8, 1)
-    assert model.get_disc_group_width().item() == 146
-    assert model.get_disc_group_total_width().item() == 1022
+    assert model._disc_layers.group_width == 146
+    assert model._disc_layers.total_width == 1022
 
 
 def test_dare_disc_path_uses_zero_vs_residual_bce():
     disc_src = inspect.getsource(DAREAgent._compute_disc_loss)
     reward_src = inspect.getsource(DAREAgent._calc_disc_rewards)
-    assert "eval_disc_raw" in disc_src
+    assert "eval_disc" in disc_src
     assert "replay_diff" in disc_src
     assert "_disc_loss_pos" in disc_src
     assert "_disc_loss_neg" in disc_src
@@ -117,19 +118,14 @@ class _LogitModel(torch.nn.Module):
         super().__init__()
         self.anchor = torch.nn.Parameter(torch.tensor(0.0))
         self.residual = torch.nn.Parameter(torch.tensor(0.0))
+        self._disc_layers = SimpleNamespace(group_width=146, total_width=1022)
         self.calls = []
 
-    def eval_disc_raw(self, disc_obs):
+    def eval_disc(self, disc_obs):
         self.calls.append(disc_obs.detach().clone())
         logit = torch.where(disc_obs.square().sum(dim=-1) == 0,
                             self.anchor, self.residual)
         return logit.unsqueeze(-1)
-
-    def get_disc_group_width(self):
-        return self.anchor.new_tensor(146.0)
-
-    def get_disc_group_total_width(self):
-        return self.anchor.new_tensor(1022.0)
 
 
 class _Replay:
@@ -163,7 +159,7 @@ def test_dare_bounded_reward_is_finite_monotone_and_detached():
     agent = object.__new__(DAREAgent)
     torch.nn.Module.__init__(agent)
     agent._model = torch.nn.Module()
-    agent._model.eval_disc_raw = lambda disc_obs: disc_obs[:, :1]
+    agent._model.eval_disc = lambda disc_obs: disc_obs[:, :1]
     agent._disc_eval_batch_size = 0
     agent._disc_reward_scale = 1.0
     logits = torch.tensor([[-1000.], [-1.], [0.], [1.], [1000.]],
@@ -179,20 +175,15 @@ def test_dare_bounded_reward_is_finite_monotone_and_detached():
 def test_dare_configs_have_single_adversarial_path():
     import yaml
 
-    paths = [
-        ROOT / "data/agents/dare_10layer_cpl_climb_agent.yaml",
-        ROOT / "data/agents/dare_10layer_cpl_climb_smoke_agent.yaml",
-    ]
-    for path in paths:
-        config = yaml.safe_load(path.read_text())
-        assert config["disc_buffer_size"] == 200000
-        assert config["disc_replay_samples"] == 1000
-        assert "disc_anchor_calibration" not in config
-        assert config["disc_reward_scale"] == 2.0
-        assert config["normalizer_samples"] == 100000000
-        assert "disc_grad_penalty" not in config
-        assert "disc_logit_reg" not in config
-        assert config["agent_name"] == "DARE"
+    config = yaml.safe_load((ROOT / "data/agents/dare_10layer_cpl_climb_agent.yaml").read_text())
+    assert config["disc_buffer_size"] == 200000
+    assert config["disc_replay_samples"] == 1000
+    assert "disc_anchor_calibration" not in config
+    assert config["disc_reward_scale"] == 2.0
+    assert config["normalizer_samples"] == 100000000
+    assert "disc_grad_penalty" not in config
+    assert "disc_logit_reg" not in config
+    assert config["agent_name"] == "DARE"
 
 
 def test_official_add_is_not_modified_by_dare():

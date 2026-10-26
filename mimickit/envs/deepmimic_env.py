@@ -180,18 +180,6 @@ class DeepMimicEnv(char_env.CharEnv):
                  for i in range(self._motion_lib.get_num_motions())],
                 self._engine.get_timestep())
 
-    def enable_phase_coverage_resets(self, cells):
-        from util.phase_coverage import PhaseCoverage
-        if not self._rand_reset or self._motion_lib.get_num_motions() != 1:
-            raise ValueError("Phase coverage requires random resets and one reference motion")
-        self._phase_coverage = PhaseCoverage(cells)
-
-    def get_phase_coverage_state(self):
-        return self._phase_coverage.state_dict()
-
-    def load_phase_coverage_state(self, state):
-        self._phase_coverage.load_state_dict(state)
-
     def record_diagnostics(self):
         if (self._log_tracking_error):
             err_stats = self._error_tracker.get_mean()
@@ -462,11 +450,7 @@ class DeepMimicEnv(char_env.CharEnv):
                         or (self._mode == base_env.EnvMode.TEST
                             and getattr(self, "_test_random_start", False)))
         if (self._rand_reset and random_start):
-            coverage = getattr(self, "_phase_coverage", None)
-            if self._mode == base_env.EnvMode.TRAIN and coverage is not None:
-                motion_times = coverage.draw_times(self._motion_lib.get_motion_length(motion_ids))
-            else:
-                motion_times = self._motion_lib.sample_time(motion_ids)
+            motion_times = self._motion_lib.sample_time(motion_ids)
         else:
             motion_times = torch.zeros(n, dtype=torch.float, device=self._device)
 
