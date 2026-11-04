@@ -1,0 +1,10 @@
+{
+  "training_state": "complete",
+  "evaluation_3000_state": "complete",
+  "acceptance_3000": {
+    "random": true,
+    "phase0": true
+  },
+  "acceptance_3100_random": false,
+  "completed": true
+}
