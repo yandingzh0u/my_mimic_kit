@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 
 import learning.add_model as add_model
+from learning.coordinate_disc import CoordinateInteractionEncoder
 import learning.nets.net_builder as net_builder
 
 
@@ -29,25 +30,14 @@ class ConvexPotentialBlock(torch.nn.Module):
         return inputs - 2.0 * F.linear(self.activation(pre), weight.transpose(-1, -2))
 
 
-class GroupSeparableDiscLayers(torch.nn.Module):
-    """Semantic group frontend and fixed CPL trunk for DARE."""
+class CoordinateDiscLayers(torch.nn.Module):
+    """Coordinate tokens, one similarity interaction, and the original CPL trunk."""
 
-    def __init__(self, groups, first_width, trunk_widths, activation):
+    def __init__(self, input_dim, trunk_widths, activation):
         super().__init__()
-        num_groups = len(groups)
-        self.group_width = first_width // num_groups
-        if self.group_width < 1:
-            raise ValueError("Discriminator width must cover every error group")
-        self.total_width = self.group_width * num_groups
-
-        self.encoders = torch.nn.ModuleList()
-        for group_id, (_, indices) in enumerate(groups):
-            self.register_buffer(
-                "group_indices_{}".format(group_id),
-                torch.tensor(indices, dtype=torch.long))
-            layer = self._build_linear(len(indices), self.group_width)
-            self.encoders.append(torch.nn.Sequential(
-                layer, activation()))
+        self.frontend = CoordinateInteractionEncoder(input_dim, token_dim=6)
+        self.token_dim = self.frontend.token_dim
+        self.total_width = self.frontend.total_width
 
         trunk = []
         in_size = self.total_width
@@ -72,17 +62,11 @@ class GroupSeparableDiscLayers(torch.nn.Module):
         return torch.nn.utils.parametrizations.spectral_norm(layer)
 
     def forward(self, inputs):
-        encoded = []
-        for group_id, encoder in enumerate(self.encoders):
-            indices = getattr(
-                self, "group_indices_{}".format(group_id))
-            group_input = torch.index_select(inputs, -1, indices)
-            encoded.append(encoder(group_input))
-        return self.trunk(torch.cat(encoded, dim=-1))
+        return self.trunk(self.frontend(inputs))
 
 
 class DAREModel(add_model.ADDModel):
-    """DARE's fixed 10-layer convex-potential discriminator."""
+    """Group-free coordinate interaction followed by DARE's CPL discriminator."""
 
     def _build_disc(self, config, env):
         input_dict = {"disc_obs": env.get_disc_obs_space()}
@@ -96,9 +80,8 @@ class DAREModel(add_model.ADDModel):
             raise ValueError(
                 "DARE requires a shared discriminator trunk")
 
-        self._disc_layers = GroupSeparableDiscLayers(
-            groups=env.get_disc_error_groups(),
-            first_width=linears[0].out_features,
+        self._disc_layers = CoordinateDiscLayers(
+            input_dim=env.get_disc_obs_space().shape[0],
             trunk_widths=[layer.out_features for layer in linears[1:]],
             activation=self._activation)
         disc_out = self._disc_layers.out_features

@@ -74,6 +74,6 @@ class DAREAgent(add_agent.ADDAgent):
             "disc_neg_acc": neg_acc.detach(),
             "disc_pos_logit": pos_logits.mean().detach(),
             "disc_neg_logit": neg_logits.mean().detach(),
-            "disc_group_width": norm_diff.new_tensor(float(self._model._disc_layers.group_width)),
-            "disc_group_total_width": norm_diff.new_tensor(float(self._model._disc_layers.total_width)),
+            "disc_token_dim": norm_diff.new_tensor(float(self._model._disc_layers.token_dim)),
+            "disc_frontend_width": norm_diff.new_tensor(float(self._model._disc_layers.total_width)),
         }

@@ -13,8 +13,6 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 class _Env:
-    dims = (3, 6, 45, 84, 3, 3, 28)
-
     def get_obs_space(self):
         return spaces.Box(-float("inf"), float("inf"), shape=(10,))
 
@@ -23,14 +21,6 @@ class _Env:
 
     def get_disc_obs_space(self):
         return spaces.Box(-float("inf"), float("inf"), shape=(172,))
-
-    def get_disc_error_groups(self):
-        groups, start = [], 0
-        for group_id, dim in enumerate(self.dims):
-            groups.append(("group{}".format(group_id),
-                           tuple(range(start, start + dim))))
-            start += dim
-        return tuple(groups)
 
 
 def _config():
@@ -95,8 +85,10 @@ def test_dare_discriminator_uses_only_the_differential():
     model = DAREModel(_config(), _Env()).eval()
     logits = model.eval_disc(torch.zeros(8, 172))
     assert logits.shape == (8, 1)
-    assert model._disc_layers.group_width == 146
-    assert model._disc_layers.total_width == 1022
+    assert model._disc_layers.token_dim == 6
+    assert model._disc_layers.total_width == 1032
+    assert not hasattr(model._disc_layers, "encoders")
+    assert not any("group_indices" in key for key in model.state_dict())
 
 
 def test_dare_disc_path_uses_zero_vs_residual_bce():
@@ -118,7 +110,7 @@ class _LogitModel(torch.nn.Module):
         super().__init__()
         self.anchor = torch.nn.Parameter(torch.tensor(0.0))
         self.residual = torch.nn.Parameter(torch.tensor(0.0))
-        self._disc_layers = SimpleNamespace(group_width=146, total_width=1022)
+        self._disc_layers = SimpleNamespace(token_dim=6, total_width=1032)
         self.calls = []
 
     def eval_disc(self, disc_obs):
@@ -189,6 +181,6 @@ def test_dare_configs_have_single_adversarial_path():
 def test_official_add_is_not_modified_by_dare():
     add_model = (ROOT / "mimickit/learning/add_model.py").read_text()
     add_agent = (ROOT / "mimickit/learning/add_agent.py").read_text()
-    assert "DARE" not in add_model and "GroupSeparableDiscLayers" not in add_model
+    assert "DARE" not in add_model
     assert "DARE" not in add_agent
     assert "grad_penalty = 0.5 * (neg_gp + pos_gp)" in add_agent

@@ -5,10 +5,8 @@ import torch
 def build_net(input_dict, activation):
     """Ten-affine-layer MLP used only for the discriminator depth stress test.
 
-    DARE replaces the first affine layer by seven semantic encoders and keeps
-    the remaining eight affine layers as the shared trunk.  Its scalar output
-    head is added by DAREModel, so one input-to-logit path contains ten Linear
-    modules in total: 1 encoder + 8 trunk layers + 1 output layer.
+    DARE uses the remaining eight widths for its shared fusion/CPL trunk;
+    its coordinate-token frontend and scalar head are built by DAREModel.
     """
     layer_sizes = [1024] + [512] * 8
 

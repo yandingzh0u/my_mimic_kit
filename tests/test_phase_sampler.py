@@ -111,13 +111,6 @@ class _Env:
     def get_reward_succ(self): return 1
     def get_reward_fail(self): return 0
     def get_disc_obs_space(self): return spaces.Box(-np.inf, np.inf, (172,), dtype=np.float32)
-    def get_disc_error_groups(self):
-        groups, start = [], 0
-        for i, dim in enumerate((3, 6, 45, 84, 3, 3, 28)):
-            groups.append((str(i), tuple(range(start, start + dim))))
-            start += dim
-        return groups
-
 
 class _SamplingPPO(PPOAgent):
     # Exercise DARE's actual sampling methods with a small actor/critic.
