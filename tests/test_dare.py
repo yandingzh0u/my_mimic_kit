@@ -1,13 +1,16 @@
 import inspect
+import io
 import pathlib
 from types import SimpleNamespace
 
 import gymnasium.spaces as spaces
+import pytest
 import torch
+import torch.nn.functional as F
 
 import learning.diff_normalizer as diff_normalizer
 from learning.dare_agent import DAREAgent
-from learning.dare_model import DAREModel, ConvexPotentialBlock
+from learning.dare_model import DAREModel, ConvexPotentialBlock, LearnableCReLUStem
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -21,6 +24,9 @@ class _Env:
 
     def get_disc_obs_space(self):
         return spaces.Box(-float("inf"), float("inf"), shape=(172,))
+
+    def get_disc_error_groups(self):
+        raise AssertionError("Learnable CReLU must not request semantic groups")
 
 
 def _config():
@@ -85,10 +91,128 @@ def test_dare_discriminator_uses_only_the_differential():
     model = DAREModel(_config(), _Env()).eval()
     logits = model.eval_disc(torch.zeros(8, 172))
     assert logits.shape == (8, 1)
-    assert model._disc_layers.token_dim == 6
-    assert model._disc_layers.total_width == 1032
+    stem = model._disc_layers.stem
+    assert isinstance(stem, LearnableCReLUStem)
+    assert stem.lift.shape == (511, 172)
+    assert stem.output_width == 1022
+    assert model._disc_layers.trunk[0].in_features == 1022
+    assert model._disc_layers.trunk[0].out_features == 512
     assert not hasattr(model._disc_layers, "encoders")
     assert not any("group_indices" in key for key in model.state_dict())
+
+
+def test_learnable_crelu_initializes_from_seeded_qr_without_consuming_global_rng():
+    random_state = torch.get_rng_state()
+    stem = LearnableCReLUStem(172)
+    assert torch.equal(torch.get_rng_state(), random_state)
+    generator = torch.Generator(device="cpu").manual_seed(0)
+    raw = torch.randn(511, 172, generator=generator, device="cpu",
+                      dtype=torch.float64)
+    expected, _ = torch.linalg.qr(raw, mode="reduced")
+    torch.testing.assert_close(stem.lift, expected.to(stem.lift.dtype),
+                               atol=3e-7, rtol=1e-5)
+    assert len(list(stem.parameters())) == 1
+    assert not list(stem.named_buffers())
+    assert stem.lift.requires_grad
+    assert "parametrizations.lift.original" in stem.state_dict()
+
+
+def test_learnable_crelu_preserves_zero_anchor_norm_and_input_information():
+    stem = LearnableCReLUStem(172)
+    inputs = torch.randn(12, 172, requires_grad=True)
+    features = stem(inputs)
+    positive, negative = features.chunk(2, dim=-1)
+
+    torch.testing.assert_close(stem.lift.T @ stem.lift, torch.eye(172),
+                               atol=1e-6, rtol=1e-5)
+    reconstructed = F.linear(positive - negative, stem.lift.T)
+    torch.testing.assert_close(reconstructed, inputs, atol=3e-6, rtol=1e-5)
+    torch.testing.assert_close(stem(torch.zeros_like(inputs)),
+                               torch.zeros_like(features))
+    torch.testing.assert_close(features.norm(dim=-1), inputs.norm(dim=-1),
+                               atol=3e-6, rtol=1e-5)
+
+    # The constrained projection also passes gradients back to its input.
+    features.square().sum().backward()
+    torch.testing.assert_close(inputs.grad, 2.0 * inputs,
+                               atol=6e-6, rtol=1e-5)
+
+
+def _agent_with_real_optimizers():
+    agent = object.__new__(DAREAgent)
+    torch.nn.Module.__init__(agent)
+    agent._model = DAREModel(_config(), _Env()).train()
+    agent._build_optimizer({
+        "actor_optimizer": {"type": "SGD", "learning_rate": 1e-4},
+        "critic_optimizer": {"type": "SGD", "learning_rate": 1e-4},
+        "disc_optimizer": {"type": "SGD", "learning_rate": 2.5e-4,
+                           "weight_decay": 1e-4}})
+    return agent
+
+
+def test_learnable_lift_updates_with_real_optimizer_and_stays_orthogonal():
+    agent = _agent_with_real_optimizers()
+    stem = agent._model._disc_layers.stem
+    initial_lift = stem.lift.detach().clone()
+    raw_parameter = stem.parametrizations.lift.original
+    initial_diagonal = raw_parameter.detach().diagonal().clone()
+    groups = agent._disc_optimizer._optimizer.param_groups
+    assert len(groups) == 2
+    assert groups[0]["weight_decay"] == 1e-4
+    assert groups[1]["weight_decay"] == 0.0
+    assert groups[0]["lr"] == groups[1]["lr"] == 2.5e-4
+    assert groups[0]["momentum"] == groups[1]["momentum"] == 0.9
+    assert groups[1]["params"] == [raw_parameter]
+
+    inputs = torch.randn(8, 172)
+    for _ in range(5):
+        logits = agent._model.eval_disc(inputs)
+        agent._disc_optimizer.step((logits + 2.0).square().mean())
+
+    assert (stem.lift.detach() - initial_lift).norm().item() > 1e-7
+    assert torch.equal(raw_parameter.detach().diagonal(), initial_diagonal)
+    assert torch.all(raw_parameter.detach().diagonal().abs() == 1)
+    identity_error = (stem.lift.T @ stem.lift - torch.eye(172)).abs().max()
+    assert identity_error.item() <= 1e-5
+
+
+def test_learnable_crelu_model_and_optimizer_resume_without_drift():
+    original = _agent_with_real_optimizers()
+    inputs = torch.randn(8, 172)
+    for _ in range(2):
+        loss = (original._model.eval_disc(inputs) + 1.0).square().mean()
+        original._disc_optimizer.step(loss)
+    checkpoint = io.BytesIO()
+    torch.save({"model": original._model.state_dict(),
+                "optimizer": original._disc_optimizer.state_dict()}, checkpoint)
+    checkpoint.seek(0)
+    restored = _agent_with_real_optimizers()
+    saved = torch.load(checkpoint, map_location="cpu", weights_only=True)
+    restored._model.load_state_dict(saved["model"], strict=True)
+    restored._disc_optimizer.load_state_dict(saved["optimizer"])
+    original._model.eval()
+    restored._model.eval()
+    torch.testing.assert_close(restored._model.eval_disc(inputs),
+                               original._model.eval_disc(inputs),
+                               atol=0, rtol=0)
+    assert restored._disc_optimizer.get_steps() == 2
+    for agent in (original, restored):
+        agent._model.train()
+        loss = (agent._model.eval_disc(inputs) + 1.0).square().mean()
+        agent._disc_optimizer.step(loss)
+    for name, value in original._model.state_dict().items():
+        torch.testing.assert_close(restored._model.state_dict()[name], value,
+                                   atol=0, rtol=0)
+    assert restored._disc_optimizer.get_steps() == 3
+    lift = restored._model._disc_layers.stem.lift
+    assert (lift.T @ lift - torch.eye(172)).abs().max().item() <= 1e-5
+
+
+@pytest.mark.parametrize("input_dim,output_width", [(0, 1022), (512, 1022),
+                                                   (7, 0), (7, 15)])
+def test_learnable_crelu_rejects_invalid_dimensions(input_dim, output_width):
+    with pytest.raises(ValueError):
+        LearnableCReLUStem(input_dim, output_width)
 
 
 def test_dare_disc_path_uses_zero_vs_residual_bce():
@@ -110,7 +234,8 @@ class _LogitModel(torch.nn.Module):
         super().__init__()
         self.anchor = torch.nn.Parameter(torch.tensor(0.0))
         self.residual = torch.nn.Parameter(torch.tensor(0.0))
-        self._disc_layers = SimpleNamespace(token_dim=6, total_width=1032)
+        self._disc_layers = SimpleNamespace(stem=SimpleNamespace(
+            lift_width=511, output_width=1022))
         self.calls = []
 
     def eval_disc(self, disc_obs):
@@ -145,6 +270,9 @@ def test_dare_bce_uses_current_replay_and_correct_gradient_directions():
     assert agent._model.anchor.grad < 0   # Gradient descent raises anchor logit.
     assert agent._model.residual.grad > 0 # Gradient descent lowers residual logit.
     assert "disc_quality_loss" not in info and "disc_pair_acc" not in info
+    assert info["disc_lift_width"].item() == 511
+    assert info["disc_frontend_width"].item() == 1022
+    assert "disc_token_dim" not in info
 
 
 def test_dare_bounded_reward_is_finite_monotone_and_detached():

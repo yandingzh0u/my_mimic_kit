@@ -7,5 +7,4 @@ pyyaml
 pyglet
 tensorboardX
 torch>=1.9.1
-triton>=3.3.0; platform_system == "Linux"
 wandb>=0.17.4

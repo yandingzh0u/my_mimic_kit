@@ -5,8 +5,9 @@ import torch
 def build_net(input_dict, activation):
     """Ten-affine-layer MLP used only for the discriminator depth stress test.
 
-    DARE uses the remaining eight widths for its shared fusion/CPL trunk;
-    its coordinate-token frontend and scalar head are built by DAREModel.
+    DARE uses the remaining eight widths for one fusion layer and seven CPL
+    blocks; its learnable semiorthogonal CReLU stem and scalar head are built by
+    DAREModel.  Constructing this template preserves historical RNG draws.
     """
     layer_sizes = [1024] + [512] * 8
 

@@ -2,7 +2,6 @@ import torch
 import torch.nn.functional as F
 
 import learning.add_model as add_model
-from learning.coordinate_disc import CoordinateInteractionEncoder
 import learning.nets.net_builder as net_builder
 
 
@@ -30,17 +29,49 @@ class ConvexPotentialBlock(torch.nn.Module):
         return inputs - 2.0 * F.linear(self.activation(pre), weight.transpose(-1, -2))
 
 
-class CoordinateDiscLayers(torch.nn.Module):
-    """Coordinate tokens, one similarity interaction, and the original CPL trunk."""
+class LearnableCReLUStem(torch.nn.Module):
+    """Learnable column-orthogonal lift with paired signed responses.
+
+    A local seed initializes from the completed fixed-CReLU experiment's
+    lift without consuming the policy/discriminator random stream.
+    Householder parametrization preserves column orthogonality as the
+    projection directions learn.  CReLU retains both signs and preserves
+    distance to zero; it does not preserve every pairwise distance.
+    """
+
+    def __init__(self, input_dim, output_width=1022):
+        super().__init__()
+        if output_width < 2 or output_width % 2:
+            raise ValueError("CReLU output width must be positive and even")
+        lift_width = output_width // 2
+        if input_dim < 1 or input_dim > lift_width:
+            raise ValueError(
+                "The isometric lift requires input_dim <= output_width / 2")
+        self.output_width = output_width
+        self.lift_width = lift_width
+        generator = torch.Generator(device="cpu").manual_seed(0)
+        raw = torch.randn(lift_width, input_dim, generator=generator,
+                          device="cpu", dtype=torch.float64)
+        lift, _ = torch.linalg.qr(raw, mode="reduced")
+        self.lift = torch.nn.Parameter(lift.to(dtype=torch.get_default_dtype()))
+        torch.nn.utils.parametrizations.orthogonal(
+            self, "lift", orthogonal_map="householder",
+            use_trivialization=False)
+
+    def forward(self, inputs):
+        projected = F.linear(inputs, self.lift)
+        return torch.cat((F.relu(projected), F.relu(-projected)), dim=-1)
+
+
+class GroupFreeDiscLayers(torch.nn.Module):
+    """Learnable semiorthogonal CReLU and the original fusion/CPL trunk."""
 
     def __init__(self, input_dim, trunk_widths, activation):
         super().__init__()
-        self.frontend = CoordinateInteractionEncoder(input_dim, token_dim=6)
-        self.token_dim = self.frontend.token_dim
-        self.total_width = self.frontend.total_width
+        self.stem = LearnableCReLUStem(input_dim, output_width=1022)
 
         trunk = []
-        in_size = self.total_width
+        in_size = self.stem.output_width
         if not trunk_widths:
             raise ValueError("CPL trunk requires at least one fusion layer")
         fusion_width = trunk_widths[0]
@@ -62,11 +93,11 @@ class CoordinateDiscLayers(torch.nn.Module):
         return torch.nn.utils.parametrizations.spectral_norm(layer)
 
     def forward(self, inputs):
-        return self.trunk(self.frontend(inputs))
+        return self.trunk(self.stem(inputs))
 
 
 class DAREModel(add_model.ADDModel):
-    """Group-free coordinate interaction followed by DARE's CPL discriminator."""
+    """Group-free learnable CReLU followed by DARE's CPL discriminator."""
 
     def _build_disc(self, config, env):
         input_dict = {"disc_obs": env.get_disc_obs_space()}
@@ -80,8 +111,8 @@ class DAREModel(add_model.ADDModel):
             raise ValueError(
                 "DARE requires a shared discriminator trunk")
 
-        self._disc_layers = CoordinateDiscLayers(
-            input_dim=env.get_disc_obs_space().shape[0],
+        self._disc_layers = GroupFreeDiscLayers(
+            input_dim=linears[0].in_features,
             trunk_widths=[layer.out_features for layer in linears[1:]],
             activation=self._activation)
         disc_out = self._disc_layers.out_features

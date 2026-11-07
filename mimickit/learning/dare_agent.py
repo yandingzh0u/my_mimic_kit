@@ -49,6 +49,28 @@ class DAREAgent(add_agent.ADDAgent):
     def _build_model(self, config):
         self._model = dare_model.DAREModel(config["model"], self._env)
 
+    def _build_optimizer(self, config):
+        """Preserve the existing optimizers and exempt Householder A from decay.
+
+        The raw Householder diagonal stores discrete signs.  Weight decay
+        would shrink those entries and can invalidate PyTorch's effective
+        orthogonal matrix.  Only A receives zero decay; every discriminator
+        parameter retains the configured learning rate, and all other
+        discriminator parameters retain the configured weight decay.
+        """
+        super()._build_optimizer(config)
+        lift_parameters = list(self._model._disc_layers.stem.parametrizations
+                               .lift.parameters())
+        lift_ids = {id(parameter) for parameter in lift_parameters}
+        raw_optimizer = self._disc_optimizer._optimizer
+        original_group = raw_optimizer.param_groups[0]
+        original_group["params"] = [parameter for parameter in original_group["params"]
+                                    if id(parameter) not in lift_ids]
+        lift_group = dict(original_group)
+        lift_group["params"] = lift_parameters
+        lift_group["weight_decay"] = 0.0
+        raw_optimizer.add_param_group(lift_group)
+
     def _compute_disc_loss(self, batch):
         """Classify the zero anchor against current and replay residuals."""
         # Preserve the positive-first spectral-normalization update order.
@@ -74,6 +96,8 @@ class DAREAgent(add_agent.ADDAgent):
             "disc_neg_acc": neg_acc.detach(),
             "disc_pos_logit": pos_logits.mean().detach(),
             "disc_neg_logit": neg_logits.mean().detach(),
-            "disc_token_dim": norm_diff.new_tensor(float(self._model._disc_layers.token_dim)),
-            "disc_frontend_width": norm_diff.new_tensor(float(self._model._disc_layers.total_width)),
+            "disc_lift_width": norm_diff.new_tensor(
+                float(self._model._disc_layers.stem.lift_width)),
+            "disc_frontend_width": norm_diff.new_tensor(
+                float(self._model._disc_layers.stem.output_width)),
         }
