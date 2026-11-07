@@ -29,10 +29,42 @@ class ConvexPotentialBlock(torch.nn.Module):
         return inputs - 2.0 * F.linear(self.activation(pre), weight.transpose(-1, -2))
 
 
-class GroupSeparableDiscLayers(torch.nn.Module):
-    """Semantic group frontend and fixed CPL trunk for DARE."""
+class GroupConvexPotentialEncoder(torch.nn.Module):
+    """Zero-anchored group embedding with a bounded residual step.
 
-    def __init__(self, groups, first_width, trunk_widths, activation):
+    Zero padding is an isometry.  For ||W||_2 <= 1 and 0 < step < 1,
+    E(x) = Px - step W^T [ReLU(WPx + b) - ReLU(b)]
+    has distance bounds [1 - step, 1].  Spectral normalization is a
+    numerical approximation; verify effective singular values separately.
+    """
+
+    def __init__(self, input_width, output_width, step):
+        super().__init__()
+        if not 0 < input_width <= output_width:
+            raise ValueError("Group input must fit within the encoder width")
+        if not 0.0 < step < 1.0:
+            raise ValueError("Group encoder step must be strictly between 0 and 1")
+        self.input_width = int(input_width)
+        self.output_width = int(output_width)
+        self.step = float(step)
+        linear = torch.nn.Linear(output_width, output_width)
+        torch.nn.init.zeros_(linear.bias)
+        self.linear = torch.nn.utils.parametrizations.spectral_norm(linear)
+
+    def forward(self, inputs):
+        lifted = F.pad(inputs, (0, self.output_width - self.input_width))
+        # Reuse the same effective weight for both tied operations.  The
+        # zero-anchor term stays in the graph, including its bias gradient.
+        weight = self.linear.weight
+        responses = F.relu(F.linear(lifted, weight, self.linear.bias))
+        responses = responses - F.relu(self.linear.bias)
+        return lifted - self.step * F.linear(responses, weight.transpose(-1, -2))
+
+
+class GroupSeparableDiscLayers(torch.nn.Module):
+    """Independent group potential encoders and the original shared CPL trunk."""
+
+    def __init__(self, groups, first_width, trunk_widths, activation, encoder_step):
         super().__init__()
         num_groups = len(groups)
         self.group_width = first_width // num_groups
@@ -45,9 +77,8 @@ class GroupSeparableDiscLayers(torch.nn.Module):
             self.register_buffer(
                 "group_indices_{}".format(group_id),
                 torch.tensor(indices, dtype=torch.long))
-            layer = self._build_linear(len(indices), self.group_width)
-            self.encoders.append(torch.nn.Sequential(
-                layer, activation()))
+            self.encoders.append(GroupConvexPotentialEncoder(
+                len(indices), self.group_width, encoder_step))
 
         trunk = []
         in_size = self.total_width
@@ -82,7 +113,7 @@ class GroupSeparableDiscLayers(torch.nn.Module):
 
 
 class DAREModel(add_model.ADDModel):
-    """DARE's fixed 10-layer convex-potential discriminator."""
+    """Group potential encoding followed by the original CPL discriminator."""
 
     def _build_disc(self, config, env):
         input_dict = {"disc_obs": env.get_disc_obs_space()}
@@ -98,7 +129,8 @@ class DAREModel(add_model.ADDModel):
             groups=env.get_disc_error_groups(),
             first_width=linears[0].out_features,
             trunk_widths=[layer.out_features for layer in linears[1:]],
-            activation=self._activation)
+            activation=self._activation,
+            encoder_step=config.get("disc_encoder_step", 0.5))
         disc_out = self._disc_layers.out_features
 
         self._disc_logits = torch.nn.Linear(disc_out, 1, bias=True)

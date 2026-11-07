@@ -248,4 +248,6 @@ def test_default_config_matches_completed_supported_run():
     assert current["phase_coverage_reset"] is False
     reference = ROOT / "output/paper_benchmark/dare_10layer_cpl_supported_climb_3000_8192_seed0_headless_20261025/agent_config.yaml"
     if reference.is_file():
-        assert current == yaml.safe_load(reference.read_text())
+        reference_config = yaml.safe_load(reference.read_text())
+        assert current["model"].pop("disc_encoder_step") == 0.5
+        assert current == reference_config

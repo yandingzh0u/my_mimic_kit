@@ -7,6 +7,7 @@ model:
   action_std: 0.05
   critic_net: "fc_2layers_1024units"
   disc_net: "fc_10layers_1024units"
+  disc_encoder_step: 0.5
 
 actor_optimizer: {type: "SGD", learning_rate: 1e-4}
 critic_optimizer: {type: "SGD", learning_rate: 1e-4}

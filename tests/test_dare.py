@@ -6,7 +6,7 @@ import torch
 
 import learning.diff_normalizer as diff_normalizer
 from learning.dare_agent import DAREAgent
-from learning.dare_model import DAREModel, ConvexPotentialBlock
+from learning.dare_model import DAREModel, ConvexPotentialBlock, GroupConvexPotentialEncoder
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -96,6 +96,45 @@ def test_dare_discriminator_uses_only_the_differential():
     assert logits.shape == (8, 1)
     assert model.get_disc_group_width().item() == 146
     assert model.get_disc_group_total_width().item() == 1022
+
+
+def test_group_potential_encoders_preserve_zero_and_learn_from_residuals():
+    model = DAREModel(_config(), _Env()).eval()
+    for dim, encoder in zip(_Env.dims, model._disc_layers.encoders):
+        assert isinstance(encoder, GroupConvexPotentialEncoder)
+        assert encoder.output_width == 146 and encoder.step == 0.5
+        torch.testing.assert_close(encoder(torch.zeros(3, dim)), torch.zeros(3, 146),
+                                   atol=0.0, rtol=0.0)
+        loss = encoder(torch.randn(8, dim)).square().sum()
+        loss.backward()
+        assert encoder.linear.parametrizations.weight.original.grad.norm() > 0
+        assert torch.isfinite(encoder.linear.bias.grad).all()
+    indices = torch.cat([getattr(model._disc_layers, f"group_indices_{g}")
+                         for g in range(7)])
+    torch.testing.assert_close(indices.sort().values, torch.arange(172))
+
+
+def test_group_potential_encoder_response_bounds_with_true_spectral_constraint():
+    torch.manual_seed(41)
+    encoder = GroupConvexPotentialEncoder(3, 12, 0.5).double().eval()
+    # Set a known contraction while keeping the production parametrization.
+    with torch.no_grad():
+        raw = encoder.linear.parametrizations.weight.original
+        _, singular, vh = torch.linalg.svd(raw, full_matrices=False)
+        encoder.linear.parametrizations.weight[0]._u.copy_(
+            (raw @ vh[0]) / singular[0])
+        encoder.linear.parametrizations.weight[0]._v.copy_(vh[0])
+        encoder.linear.bias.copy_(torch.linspace(-0.7, 0.8, 12))
+    pairs = torch.randn(100, 2, 3, dtype=torch.float64)
+    before = torch.linalg.vector_norm(pairs[:, 0] - pairs[:, 1], dim=-1)
+    after = torch.linalg.vector_norm(encoder(pairs[:, 0]) - encoder(pairs[:, 1]), dim=-1)
+    assert bool((after >= 0.5 * before - 1e-10).all())
+    assert bool((after <= before + 1e-10).all())
+    jacobian = torch.autograd.functional.jacobian(encoder, pairs[0, 0])
+    singular = torch.linalg.svdvals(jacobian)
+    assert singular.min() >= 0.5 - 1e-10
+    assert singular.max() <= 1.0 + 1e-10
+    assert torch.autograd.gradcheck(encoder, (pairs[0, 0].requires_grad_(),))
 
 
 def test_dare_disc_path_uses_zero_vs_residual_bce():
