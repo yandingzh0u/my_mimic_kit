@@ -10,9 +10,9 @@ import torch
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'mimickit'))
-from learning.phase_sampler import PhaseSampler, supported_resolution
+from learning.phase_resolution import supported_resolution
+from learning.phase_sampler import PhaseSampler
 from test_phase_sampler import _agent
-from learning.ppo_agent import PPOAgent
 
 
 def brute(phase,frames,budgets,masks):
@@ -57,7 +57,7 @@ def test_joint_actor_support_can_force_coarser_resolution():
 def test_no_empty_bins_and_population_weight_bound():
     phase=torch.linspace(0,1,1024,dtype=torch.float64)**4
     k=supported_resolution(phase,299,[128,64],[None,None])
-    sampler=PhaseSampler(phase,k)
+    sampler=PhaseSampler(phase,k,64)
     assert sampler.num_present==k
     assert int(sampler.counts.min())>=math.ceil(128/k)
     assert float(sampler.full_weights().max())<=1/128+1e-14
@@ -72,8 +72,9 @@ def test_empty_actor_does_not_disable_critic_partition():
     assert supported_resolution(phase,299,[128,64],[torch.zeros(256,dtype=torch.bool),None])==supported_resolution(phase,299,[64],[None])
 
 
-def test_ordinary_ppo_uses_uniform_advantage_statistics():
-    agent=_agent(agent_type=PPOAgent)
+def test_no_phase_mode_really_removes_weighting_and_normalization():
+    agent=_agent(adaptive=False)
+    agent._phase_sampler_mode='none'
     agent._exp_buffer.get_data('diag_phase').zero_()
     with torch.no_grad():
         info=agent._build_train_data()
@@ -87,8 +88,9 @@ def test_ordinary_ppo_uses_uniform_advantage_statistics():
         draw.assert_called_once_with(16)
 
 
-def test_supported_sampling_integrates_with_actual_ppo_updates():
+def test_supported_mode_integrates_with_actual_ppo_updates():
     agent=_agent()
+    agent._phase_sampler_mode='adaptive_supported'
     with torch.no_grad(): info=agent._build_train_data()
     for sampler,b in [(agent._actor_phase_sampler,32),(agent._critic_phase_sampler,16)]:
         assert sampler.num_present==sampler.num_bins

@@ -29,49 +29,28 @@ class ConvexPotentialBlock(torch.nn.Module):
         return inputs - 2.0 * F.linear(self.activation(pre), weight.transpose(-1, -2))
 
 
-class LearnableCReLUStem(torch.nn.Module):
-    """Learnable column-orthogonal lift with paired signed responses.
+class GroupSeparableDiscLayers(torch.nn.Module):
+    """Semantic group frontend and fixed CPL trunk for DARE."""
 
-    A local seed initializes from the completed fixed-CReLU experiment's
-    lift without consuming the policy/discriminator random stream.
-    Householder parametrization preserves column orthogonality as the
-    projection directions learn.  CReLU retains both signs and preserves
-    distance to zero; it does not preserve every pairwise distance.
-    """
-
-    def __init__(self, input_dim, output_width=1022):
+    def __init__(self, groups, first_width, trunk_widths, activation):
         super().__init__()
-        if output_width < 2 or output_width % 2:
-            raise ValueError("CReLU output width must be positive and even")
-        lift_width = output_width // 2
-        if input_dim < 1 or input_dim > lift_width:
-            raise ValueError(
-                "The isometric lift requires input_dim <= output_width / 2")
-        self.output_width = output_width
-        self.lift_width = lift_width
-        generator = torch.Generator(device="cpu").manual_seed(0)
-        raw = torch.randn(lift_width, input_dim, generator=generator,
-                          device="cpu", dtype=torch.float64)
-        lift, _ = torch.linalg.qr(raw, mode="reduced")
-        self.lift = torch.nn.Parameter(lift.to(dtype=torch.get_default_dtype()))
-        torch.nn.utils.parametrizations.orthogonal(
-            self, "lift", orthogonal_map="householder",
-            use_trivialization=False)
+        num_groups = len(groups)
+        self.group_width = first_width // num_groups
+        if self.group_width < 1:
+            raise ValueError("Discriminator width must cover every error group")
+        self.total_width = self.group_width * num_groups
 
-    def forward(self, inputs):
-        projected = F.linear(inputs, self.lift)
-        return torch.cat((F.relu(projected), F.relu(-projected)), dim=-1)
-
-
-class GroupFreeDiscLayers(torch.nn.Module):
-    """Learnable semiorthogonal CReLU and the original fusion/CPL trunk."""
-
-    def __init__(self, input_dim, trunk_widths, activation):
-        super().__init__()
-        self.stem = LearnableCReLUStem(input_dim, output_width=1022)
+        self.encoders = torch.nn.ModuleList()
+        for group_id, (_, indices) in enumerate(groups):
+            self.register_buffer(
+                "group_indices_{}".format(group_id),
+                torch.tensor(indices, dtype=torch.long))
+            layer = self._build_linear(len(indices), self.group_width)
+            self.encoders.append(torch.nn.Sequential(
+                layer, activation()))
 
         trunk = []
-        in_size = self.stem.output_width
+        in_size = self.total_width
         if not trunk_widths:
             raise ValueError("CPL trunk requires at least one fusion layer")
         fusion_width = trunk_widths[0]
@@ -93,16 +72,20 @@ class GroupFreeDiscLayers(torch.nn.Module):
         return torch.nn.utils.parametrizations.spectral_norm(layer)
 
     def forward(self, inputs):
-        return self.trunk(self.stem(inputs))
+        encoded = []
+        for group_id, encoder in enumerate(self.encoders):
+            indices = getattr(
+                self, "group_indices_{}".format(group_id))
+            group_input = torch.index_select(inputs, -1, indices)
+            encoded.append(encoder(group_input))
+        return self.trunk(torch.cat(encoded, dim=-1))
 
 
 class DAREModel(add_model.ADDModel):
-    """Group-free learnable CReLU followed by DARE's CPL discriminator."""
+    """DARE's fixed 10-layer convex-potential discriminator."""
 
     def _build_disc(self, config, env):
         input_dict = {"disc_obs": env.get_disc_obs_space()}
-        # Preserve the historical RNG draws before constructing the actual
-        # discriminator; skipping this build changes every seeded weight.
         base_layers, _ = net_builder.build_net(
             config["disc_net"], input_dict, activation=self._activation)
         linears = [layer for layer in base_layers.modules()
@@ -111,8 +94,9 @@ class DAREModel(add_model.ADDModel):
             raise ValueError(
                 "DARE requires a shared discriminator trunk")
 
-        self._disc_layers = GroupFreeDiscLayers(
-            input_dim=linears[0].in_features,
+        self._disc_layers = GroupSeparableDiscLayers(
+            groups=env.get_disc_error_groups(),
+            first_width=linears[0].out_features,
             trunk_widths=[layer.out_features for layer in linears[1:]],
             activation=self._activation)
         disc_out = self._disc_layers.out_features
@@ -121,3 +105,14 @@ class DAREModel(add_model.ADDModel):
         torch.nn.init.uniform_(self._disc_logits.weight, -1.0, 1.0)
         torch.nn.init.zeros_(self._disc_logits.bias)
         torch.nn.utils.parametrizations.spectral_norm(self._disc_logits)
+
+    def eval_disc_raw(self, disc_obs):
+        return self._disc_logits(self._disc_layers(disc_obs))
+
+    def get_disc_group_width(self):
+        return self._disc_logits.weight.new_tensor(
+            float(self._disc_layers.group_width))
+
+    def get_disc_group_total_width(self):
+        return self._disc_logits.weight.new_tensor(
+            float(self._disc_layers.total_width))

@@ -35,3 +35,7 @@ disc_replay_samples: 1000
 disc_reward_scale: 2.0
 task_reward_weight: 0.0
 disc_reward_weight: 1.0
+
+# Resolution is limited by actual per-phase support and existing PPO batch budgets.
+phase_sampler: "adaptive_supported"
+phase_coverage_reset: false

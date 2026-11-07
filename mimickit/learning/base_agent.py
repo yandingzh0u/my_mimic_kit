@@ -122,7 +122,10 @@ class BaseAgent(torch.nn.Module):
                     test_info = self.test_model(
                         self._test_episodes, random_start=False)
                     self._last_test_info = test_info
-            env_diag_info = self._env.record_diagnostics()
+                env_diag_info = self._env.record_diagnostics()
+            else:
+                env_diag_info = self._env.record_diagnostics()
+
             self._log_train_info(
                 train_info, test_info, env_diag_info, start_time,
                 test_random_info=test_random_info)
