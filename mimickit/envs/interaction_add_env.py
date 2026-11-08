@@ -280,21 +280,6 @@ class InteractionADDEnv(add_env.ADDEnv):
         else:
             self._disc_obs_buf[env_ids] = disc
 
-    def get_disc_error_groups(self):
-        if not self._track_object:
-            return super().get_disc_error_groups()
-        char_id = self._get_char_id()
-        total_dim = int(self.get_disc_obs_space().shape[0])
-        object_dim = 9
-        groups = list(add_env.build_disc_error_groups(
-            num_steps=self._num_disc_obs_steps,
-            num_joints=self._kin_char_model.get_num_joints(),
-            num_bodies=self._engine.get_obj_num_bodies(char_id),
-            num_dofs=self._engine.get_obj_num_dofs(char_id),
-            total_dim=total_dim - object_dim))
-        groups.append(("object_pose", tuple(range(total_dim - object_dim, total_dim))))
-        return tuple(groups)
-
     def record_diagnostics(self):
         self._diagnostics["sim2real_strength"] = self._sim2real_strength()
         if self._track_object:

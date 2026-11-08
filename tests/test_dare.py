@@ -5,15 +5,14 @@ import gymnasium.spaces as spaces
 import torch
 
 import learning.diff_normalizer as diff_normalizer
+import util.torch_util as torch_util
 from learning.dare_agent import DAREAgent
-from learning.dare_model import DAREModel, ConvexPotentialBlock, GroupConvexPotentialEncoder
+from learning.dare_model import DAREModel, ConvexPotentialBlock
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 class _Env:
-    dims = (3, 6, 45, 84, 3, 3, 28)
-
     def get_obs_space(self):
         return spaces.Box(-float("inf"), float("inf"), shape=(10,))
 
@@ -23,21 +22,13 @@ class _Env:
     def get_disc_obs_space(self):
         return spaces.Box(-float("inf"), float("inf"), shape=(172,))
 
-    def get_disc_error_groups(self):
-        groups, start = [], 0
-        for group_id, dim in enumerate(self.dims):
-            groups.append(("group{}".format(group_id),
-                           tuple(range(start, start + dim))))
-            start += dim
-        return tuple(groups)
-
 
 def _config():
     return {"actor_net": "fc_2layers_128units",
             "actor_init_output_scale": 0.01,
             "actor_std_type": "FIXED", "action_std": 0.05,
             "critic_net": "fc_2layers_128units",
-            "disc_net": "fc_10layers_1024units"}
+            "disc_hidden_sizes": [512] * 8}
 
 
 def test_coordinate_normalizer_round_trip():
@@ -94,47 +85,19 @@ def test_dare_discriminator_uses_only_the_differential():
     model = DAREModel(_config(), _Env()).eval()
     logits = model.eval_disc_raw(torch.zeros(8, 172))
     assert logits.shape == (8, 1)
-    assert model.get_disc_group_width().item() == 146
-    assert model.get_disc_group_total_width().item() == 1022
-
-
-def test_group_potential_encoders_preserve_zero_and_learn_from_residuals():
-    model = DAREModel(_config(), _Env()).eval()
-    for dim, encoder in zip(_Env.dims, model._disc_layers.encoders):
-        assert isinstance(encoder, GroupConvexPotentialEncoder)
-        assert encoder.output_width == 146 and encoder.step == 0.5
-        torch.testing.assert_close(encoder(torch.zeros(3, dim)), torch.zeros(3, 146),
-                                   atol=0.0, rtol=0.0)
-        loss = encoder(torch.randn(8, dim)).square().sum()
-        loss.backward()
-        assert encoder.linear.parametrizations.weight.original.grad.norm() > 0
-        assert torch.isfinite(encoder.linear.bias.grad).all()
-    indices = torch.cat([getattr(model._disc_layers, f"group_indices_{g}")
-                         for g in range(7)])
-    torch.testing.assert_close(indices.sort().values, torch.arange(172))
-
-
-def test_group_potential_encoder_response_bounds_with_true_spectral_constraint():
-    torch.manual_seed(41)
-    encoder = GroupConvexPotentialEncoder(3, 12, 0.5).double().eval()
-    # Set a known contraction while keeping the production parametrization.
-    with torch.no_grad():
-        raw = encoder.linear.parametrizations.weight.original
-        _, singular, vh = torch.linalg.svd(raw, full_matrices=False)
-        encoder.linear.parametrizations.weight[0]._u.copy_(
-            (raw @ vh[0]) / singular[0])
-        encoder.linear.parametrizations.weight[0]._v.copy_(vh[0])
-        encoder.linear.bias.copy_(torch.linspace(-0.7, 0.8, 12))
-    pairs = torch.randn(100, 2, 3, dtype=torch.float64)
-    before = torch.linalg.vector_norm(pairs[:, 0] - pairs[:, 1], dim=-1)
-    after = torch.linalg.vector_norm(encoder(pairs[:, 0]) - encoder(pairs[:, 1]), dim=-1)
-    assert bool((after >= 0.5 * before - 1e-10).all())
-    assert bool((after <= before + 1e-10).all())
-    jacobian = torch.autograd.functional.jacobian(encoder, pairs[0, 0])
-    singular = torch.linalg.svdvals(jacobian)
-    assert singular.min() >= 0.5 - 1e-10
-    assert singular.max() <= 1.0 + 1e-10
-    assert torch.autograd.gradcheck(encoder, (pairs[0, 0].requires_grad_(),))
+    fusion = model._disc_layers.trunk[0]
+    assert fusion.in_features == 172 and fusion.out_features == 512
+    assert hasattr(fusion.parametrizations, "weight")
+    assert isinstance(model._disc_layers.trunk[1], torch.nn.ReLU)
+    assert not hasattr(model._disc_layers, "encoders")
+    assert not any("group_indices" in key or "encoders" in key
+                   for key in model.state_dict())
+    assert sum(parameter.numel() for parameter in model.get_disc_params()) == 1927681
+    assert len([module for module in model._disc_layers.modules()
+                if isinstance(module, torch.nn.Linear)]) + 1 == 9
+    # Keep the existing shared CPL state names; no extra input layer is added.
+    assert [name for name, module in model._disc_layers.trunk.named_children()
+            if isinstance(module, ConvexPotentialBlock)] == [str(i) for i in range(2, 9)]
 
 
 def test_dare_disc_path_uses_zero_vs_residual_bce():
@@ -164,12 +127,6 @@ class _LogitModel(torch.nn.Module):
                             self.anchor, self.residual)
         return logit.unsqueeze(-1)
 
-    def get_disc_group_width(self):
-        return self.anchor.new_tensor(146.0)
-
-    def get_disc_group_total_width(self):
-        return self.anchor.new_tensor(1022.0)
-
 
 class _Replay:
     def sample(self, count):
@@ -196,6 +153,32 @@ def test_dare_bce_uses_current_replay_and_correct_gradient_directions():
     assert agent._model.anchor.grad < 0   # Gradient descent raises anchor logit.
     assert agent._model.residual.grad > 0 # Gradient descent lowers residual logit.
     assert "disc_quality_loss" not in info and "disc_pair_acc" not in info
+    assert not any(key.startswith("disc_group_") for key in info)
+
+
+def test_dare_loss_logging_preserves_the_mean_across_disc_updates():
+    agent = object.__new__(DAREAgent)
+    torch.nn.Module.__init__(agent)
+    agent._model = _LogitModel()
+    agent._pos_diff = torch.zeros(4)
+    agent._disc_obs_norm = diff_normalizer.DiffNormalizer((4,), "cpu")
+    agent._disc_buffer = _Replay()
+    batch = {"disc_obs_demo": torch.ones(3, 4),
+             "disc_obs": torch.zeros(3, 4)}
+    accumulated, expected = {}, []
+    for step in range(32):
+        with torch.no_grad():
+            agent._model.anchor.fill_(step / 16.0)
+            agent._model.residual.fill_(-step / 8.0)
+        info = agent._compute_disc_loss(batch)
+        loss = info["disc_loss"]
+        expected.append(loss.detach().clone())
+        torch_util.add_torch_dict(info, accumulated)
+        torch.testing.assert_close(loss.detach(), expected[-1])
+    torch_util.scale_torch_dict(1.0 / 32, accumulated)
+    mean = torch.stack(expected).mean()
+    torch.testing.assert_close(accumulated["disc_loss"], mean)
+    torch.testing.assert_close(accumulated["disc_cls_loss"], mean)
 
 
 def test_dare_bounded_reward_is_finite_monotone_and_detached():
@@ -231,6 +214,8 @@ def test_dare_configs_have_single_adversarial_path():
         assert "disc_grad_penalty" not in config
         assert "disc_logit_reg" not in config
         assert config["agent_name"] == "DARE"
+        assert config["model"]["disc_hidden_sizes"] == [512] * 8
+        assert "disc_net" not in config["model"]
 
 
 def test_official_add_is_not_modified_by_dare():

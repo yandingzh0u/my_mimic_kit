@@ -31,13 +31,11 @@ class DAREAgent(add_agent.ADDAgent):
 
         return {
             "disc_loss": disc_loss,
-            "disc_cls_loss": disc_loss.detach(),
+            "disc_cls_loss": disc_loss.detach().clone(),
             "disc_pos_acc": pos_acc.detach(),
             "disc_neg_acc": neg_acc.detach(),
             "disc_pos_logit": pos_logits.mean().detach(),
             "disc_neg_logit": neg_logits.mean().detach(),
-            "disc_group_width": self._model.get_disc_group_width(),
-            "disc_group_total_width": self._model.get_disc_group_total_width(),
         }
 
     def _calc_disc_rewards(self, norm_diff):

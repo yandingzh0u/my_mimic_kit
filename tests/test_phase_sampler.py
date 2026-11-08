@@ -242,12 +242,13 @@ def test_agent_checkpoint_hook_restores_reset_coverage():
     assert torch.equal(coverage.draw_times(torch.full((917,), 299/30)), expected)
 
 
-def test_default_config_matches_completed_supported_run():
+def test_default_config_only_removes_encoder_from_completed_supported_run():
     current = yaml.safe_load((ROOT / "data/agents/dare_10layer_cpl_climb_agent.yaml").read_text())
     assert current["phase_sampler"] == "adaptive_supported"
     assert current["phase_coverage_reset"] is False
     reference = ROOT / "output/paper_benchmark/dare_10layer_cpl_supported_climb_3000_8192_seed0_headless_20261025/agent_config.yaml"
     if reference.is_file():
-        reference_config = yaml.safe_load(reference.read_text())
-        assert current["model"].pop("disc_encoder_step") == 0.5
-        assert current == reference_config
+        expected = yaml.safe_load(reference.read_text())
+        assert expected["model"].pop("disc_net") == "fc_10layers_1024units"
+        expected["model"]["disc_hidden_sizes"] = [512] * 8
+        assert current == expected
