@@ -40,6 +40,10 @@ def build_agent(agent_file, env, device):
         import learning.dare_multi_agent as dare_multi_agent
         agent = dare_multi_agent.DAREMultiAgent(
             config=agent_config, env=env, device=device)
+    elif (agent_name == "DAREMulti4NS"):
+        import learning.dare_multi4_ns_agent as dare_multi4_ns_agent
+        agent = dare_multi4_ns_agent.DAREMulti4NSAgent(
+            config=agent_config, env=env, device=device)
     elif (agent_name == "LCP"):
         import learning.lcp_agent as lcp_agent
         agent = lcp_agent.LCPAgent(config=agent_config, env=env, device=device)
