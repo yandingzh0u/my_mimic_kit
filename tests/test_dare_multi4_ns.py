@@ -11,7 +11,7 @@ import yaml
 
 from envs.add_env import build_disc_error_groups
 from learning.add_agent import calc_unscaled_disc_reward
-from learning.dare_model import ANCHOR_GAP_TARGET, DAREModel
+from learning.dare_model import DAREModel
 from learning.dare_multi4_ns_agent import DAREMulti4NSAgent
 from learning.dare_multi4_ns_model import (
     DAREMulti4NSModel, build_multi4_disc_groups, newton_schulz_column_step_,
@@ -57,8 +57,6 @@ def _bare_agent(model=None):
         _config(), _Env()).eval()
     agent._disc_group_negative_sampler = None
     agent._phase_coverage_reset = False
-    agent._calibration_gap_raw = float("nan")
-    agent._calibration_gaps_raw = None
     return agent
 
 
@@ -267,11 +265,10 @@ def test_real_sgd_step_runs_exactly_one_ns_update_and_leaves_actor_critic_untouc
         torch.testing.assert_close(actual, saved, rtol=0, atol=0)
 
 
-def test_resume_restores_ns_count_optimizer_momentum_scale_and_next_update():
+def test_resume_restores_ns_count_optimizer_momentum_and_next_update():
     torch.manual_seed(137)
     source = _bare_agent()
     _build_optimizers(source)
-    source._model.set_disc_logit_scale(1.4)
     data = torch.randn(8, 172)
     source._disc_optimizer.step(_classification_loss(source._model, data))
     saved_model = copy.deepcopy(source._model.state_dict())
@@ -281,8 +278,7 @@ def test_resume_restores_ns_count_optimizer_momentum_scale_and_next_update():
     restored._model.load_state_dict(saved_model, strict=True)
     restored._disc_optimizer.load_state_dict(saved_optimizer)
     assert int(restored._model.get_ns_update_count()) == 1
-    assert restored._model.is_disc_logit_calibrated()
-    assert restored._model.get_disc_logit_scale().ndim == 0
+    assert not hasattr(restored._model, "get_disc_logit_scale")
     for agent in (source, restored):
         agent._disc_optimizer.step(_classification_loss(agent._model, data))
         assert agent._disc_optimizer.get_steps() == 2
@@ -297,8 +293,6 @@ class _AnalyticModel(torch.nn.Module):
         super().__init__()
         self.weight = torch.nn.Parameter(torch.tensor([-.1, -.4, -.8, -.3]))
         self.bias = torch.nn.Parameter(torch.tensor([.1, -.2, .4, -.1]))
-        self.register_buffer("scale", torch.ones(()))
-        self.register_buffer("calibrated", torch.zeros((), dtype=torch.bool))
         self.calls = []
 
     def get_disc_error_groups(self):
@@ -310,7 +304,7 @@ class _AnalyticModel(torch.nn.Module):
         return disc_obs * self.weight + self.bias
 
     def eval_disc(self, disc_obs):
-        return self.scale * self.eval_disc_raw(disc_obs)
+        return self.eval_disc_raw(disc_obs)
 
     def get_disc_logit_weights(self):
         return self.weight
@@ -321,18 +315,9 @@ class _AnalyticModel(torch.nn.Module):
     def get_disc_group_total_width(self):
         return self.weight.new_tensor(1024.)
 
-    def get_disc_logit_scale(self):
-        return self.scale.clone()
 
     def get_ns_update_count(self):
         return torch.zeros((), dtype=torch.int64)
-
-    def is_disc_logit_calibrated(self):
-        return bool(self.calibrated)
-
-    def set_disc_logit_scale(self, value):
-        self.scale.fill_(value)
-        self.calibrated.fill_(True)
 
 
 class _Replay:
@@ -365,7 +350,6 @@ def _analytic_agent():
     agent._disc_buffer = _Replay(replay)
     agent._disc_logit_reg = 0.
     agent._disc_eval_batch_size = 0
-    agent._disc_reward_scale = 2.
     agent._iter = 386
     return agent, {"disc_obs_demo": current,
                    "disc_obs": torch.zeros_like(current)}
@@ -401,25 +385,11 @@ def test_rewards_are_mean_of_four_individually_mapped_and_clipped_logits():
                           requires_grad=True)
     agent._model.eval_disc = lambda disc_obs: disc_obs
     actual = agent._calc_disc_rewards(values)
-    expected = 2 * calc_unscaled_disc_reward(values.detach()).mean(-1)
+    expected = calc_unscaled_disc_reward(values.detach()).mean(-1)
     torch.testing.assert_close(actual, expected)
     assert actual.shape == (2,) and not actual.requires_grad
     assert not torch.allclose(actual,
-                              2 * calc_unscaled_disc_reward(values.mean(-1)))
-
-
-def test_calibration_retains_one_common_scale_for_four_logits():
-    agent, _ = _analytic_agent()
-    agent._calibrate_disc_logit_scale()
-    assert agent._model.get_disc_logit_scale().ndim == 0
-    assert agent._model.is_disc_logit_calibrated()
-    assert len(agent._calibration_gaps_raw) == 4
-    positive = agent._model.eval_disc(torch.zeros(1, 4)).mean()
-    negative = .5 * (
-        agent._model.eval_disc(agent._exp_buffer.values).mean()
-        + agent._model.eval_disc(agent._disc_buffer.values).mean())
-    torch.testing.assert_close(positive - negative,
-                               torch.tensor(ANCHOR_GAP_TARGET))
+                              calc_unscaled_disc_reward(values.mean(-1)))
 
 
 def test_checkpoint_rejects_different_group_indices_and_old_scalar_model():
@@ -448,12 +418,11 @@ def test_checkpoint_rejects_wrong_constraint_schema_or_invalid_maintenance_count
 
 def test_agent_resume_rejects_changed_reward_loss_and_ns_semantics():
     source = _bare_agent()
-    source._calibration_gap_raw = .75
-    source._calibration_gaps_raw = [.5, .75, 1., .75]
     saved = source._get_checkpoint_extra_state()
     restored = _bare_agent()
     restored._load_checkpoint_extra_state(copy.deepcopy(saved))
-    assert restored._calibration_gaps_raw == [.5, .75, 1., .75]
+    assert saved["dare_reward"]["version"] == 2
+    assert saved["multi4_ns"]["version"] == 2
     assert "multi4_ns" in saved
     semantic_state = saved["multi4_ns"]
     for key in ("version", "groups", "reward_aggregation", "loss_aggregation",

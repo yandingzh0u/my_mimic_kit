@@ -10,7 +10,7 @@ import torch
 from learning.dare_multi_model import DAREMultiModel
 
 
-MULTI4_NS_SCHEMA_VERSION = 1
+MULTI4_NS_SCHEMA_VERSION = 2
 MULTI4_DISC_GROUPS = (
     ("root", ("root_pos", "root_rot", "root_vel", "root_ang_vel")),
     ("body_pos", ("body_pos",)),

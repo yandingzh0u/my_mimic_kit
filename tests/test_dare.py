@@ -8,9 +8,14 @@ import yaml
 
 from envs.add_env import build_disc_error_groups
 import learning.diff_normalizer as diff_normalizer
-from learning.dare_agent import DAREAgent, anchor_gap
-from learning.dare_model import (ANCHOR_GAP_TARGET, DAREModel,
-                                 GroupSeparableDiscLayers)
+from learning.dare_agent import DAREAgent
+from learning.dare_model import DAREModel, GroupSeparableDiscLayers
+from learning.dare_multi_model import DAREMultiModel
+from learning.dare_multi4_ns_model import DAREMulti4NSModel
+from learning.dare_body_split_sn_model import DAREBodySplitSNModel
+from learning.dare_multi_agent import DAREMultiAgent
+from learning.dare_multi4_ns_agent import DAREMulti4NSAgent
+from learning.dare_body_split_sn_agent import DAREBodySplitSNAgent
 import util.torch_util as torch_util
 
 
@@ -86,73 +91,51 @@ def test_model_forward_backward_is_finite():
                for parameter in model.get_disc_params())
 
 
-def test_uncalibrated_model_is_bitwise_v6():
+def test_model_exposes_only_unscaled_network_logits():
     model = DAREModel(_config(), _Env()).eval()
     inputs = torch.randn(64, 172)
-    assert not model.is_disc_logit_calibrated()
-    assert float(model.get_disc_logit_scale()) == 1.0
-    torch.testing.assert_close(
-        model.eval_disc(inputs), model.eval_disc_raw(inputs),
-        rtol=0.0, atol=0.0)
+    torch.testing.assert_close(model.eval_disc(inputs), model.eval_disc_raw(inputs), rtol=0, atol=0)
+    assert not hasattr(model, "get_disc_logit_scale")
+    assert not hasattr(model, "set_disc_logit_scale")
+    assert not hasattr(model, "is_disc_logit_calibrated")
+    assert not any("logit_scale" in key or "calibrated" in key for key in model.state_dict())
 
 
-def test_anchor_gap_calibration_hits_ln16():
-    torch.manual_seed(0)
-    model = DAREModel(_config(), _Env()).eval()
-    norm = diff_normalizer.DiffNormalizer((172,), device="cpu")
-    pos = torch.zeros(172)
-    current = torch.randn(2048, 172)
-    replay = torch.randn(1024, 172)
-
-    gap = anchor_gap(model, norm, pos, current, replay, 512)
-    assert gap != 0.0
-    model.set_disc_logit_scale(ANCHOR_GAP_TARGET / gap)
-
-    def mean_scaled(raw_diff):
-        def eval_scaled(disc_obs):
-            return model.eval_disc(norm.normalize(disc_obs))
-
-        return torch_util.eval_minibatch(
-            eval_scaled, {"disc_obs": raw_diff}, 512).mean()
-
-    scaled_gap = (model.eval_disc(pos.unsqueeze(0)).mean()
-                  - 0.5 * (mean_scaled(current) + mean_scaled(replay)))
-    torch.testing.assert_close(
-        scaled_gap, torch.tensor(ANCHOR_GAP_TARGET), rtol=0.0, atol=1e-5)
+@pytest.mark.parametrize("strict", [True, False])
+@pytest.mark.parametrize("scale", [1.0, 2.5])
+@pytest.mark.parametrize("model_type", [DAREModel, DAREMultiModel,
+                                      DAREMulti4NSModel, DAREBodySplitSNModel])
+def test_historical_scaled_weights_are_rejected_even_in_partial_loads(strict, scale, model_type):
+    source = model_type(_config(), _Env()).eval()
+    state = source.state_dict()
+    state["_disc_logit_scale"] = torch.tensor(scale)
+    state["_disc_logit_calibrated"] = torch.tensor(True)
+    with pytest.raises(RuntimeError, match="Historical scaled"):
+        model_type(_config(), _Env()).load_state_dict(state, strict=strict)
 
 
-def test_anchor_gap_leaves_spectral_norm_state_untouched():
-    model = DAREModel(_config(), _Env()).eval()
-    norm = diff_normalizer.DiffNormalizer((172,), device="cpu")
-    before = {
-        name: value.clone()
-        for name, value in model.named_buffers()
-        if name.endswith("._u") or name.endswith("._v")
-    }
-    anchor_gap(model, norm, torch.zeros(172),
-               torch.randn(256, 172), torch.randn(256, 172), 128)
-    after = dict(model.named_buffers())
-    assert before
-    assert all(torch.equal(before[name], after[name]) for name in before)
+@pytest.mark.parametrize("model_type", [DAREModel, DAREMultiModel,
+                                      DAREMulti4NSModel, DAREBodySplitSNModel])
+def test_unversioned_weights_cannot_silently_load_as_new_reward_semantics(model_type):
+    source = model_type(_config(), _Env()).eval()
+    state = source.state_dict()
+    del state["_dare_schema_version"]
+    with pytest.raises(RuntimeError, match="different DARE reward schema"):
+        source.load_state_dict(state, strict=False)
 
 
-def test_legacy_state_dict_without_calibration_loads_as_v6():
-    source = DAREModel(_config(), _Env())
-    legacy_state = source.state_dict()
-    del legacy_state["_disc_logit_scale"]
-    del legacy_state["_disc_logit_calibrated"]
-
-    restored = DAREModel(_config(), _Env())
-    restored.load_state_dict(legacy_state, strict=True)
-    assert not restored.is_disc_logit_calibrated()
-    assert float(restored.get_disc_logit_scale()) == 1.0
+@pytest.mark.parametrize("agent_type", [DAREAgent, DAREMultiAgent,
+                                      DAREMulti4NSAgent, DAREBodySplitSNAgent])
+def test_removed_reward_multiplier_config_is_rejected(agent_type):
+    instance = object.__new__(agent_type)
+    with pytest.raises(ValueError, match="no longer accepts disc_reward_scale"):
+        instance._load_params({"disc_reward_scale": 2.0})
 
 
 def test_reward_forward_uses_training_mode_sn_updates_like_a30():
     agent = object.__new__(DAREAgent)
     torch.nn.Module.__init__(agent)
     agent._model = DAREModel(_config(), _Env()).train()
-    agent._disc_reward_scale = 2.0
     agent._disc_eval_batch_size = 0
 
     before = {
@@ -243,7 +226,6 @@ class _LogitModel(torch.nn.Module):
         self.anchor = torch.nn.Parameter(torch.tensor(0.0))
         self.residual = torch.nn.Parameter(torch.tensor(0.0))
         self.calls = []
-        self.register_buffer("scale", torch.ones(()))
 
     def eval_disc_raw(self, disc_obs):
         self.calls.append(disc_obs.detach().clone())
@@ -252,7 +234,7 @@ class _LogitModel(torch.nn.Module):
         return logit.unsqueeze(-1)
 
     def eval_disc(self, disc_obs):
-        return self.scale * self.eval_disc_raw(disc_obs)
+        return self.eval_disc_raw(disc_obs)
 
     def get_disc_logit_weights(self):
         return self.anchor.new_zeros(1)
@@ -262,9 +244,6 @@ class _LogitModel(torch.nn.Module):
 
     def get_disc_group_total_width(self):
         return self.anchor.new_tensor(1022.0)
-
-    def get_disc_logit_scale(self):
-        return self.scale.clone()
 
 
 class _Replay:
@@ -283,7 +262,6 @@ def _logit_agent():
     agent._disc_buffer = _Replay()
     agent._disc_logit_reg = 0.0
     agent._disc_eval_batch_size = 0
-    agent._disc_reward_scale = 2.0
     return agent
 
 
@@ -323,22 +301,19 @@ def test_dare_loss_logging_preserves_the_mean_across_disc_updates():
     torch.testing.assert_close(accumulated["disc_cls_loss"], mean)
 
 
-def test_dare_calibration_scale_is_used_for_both_bce_and_reward():
+def test_dare_bce_and_reward_both_use_unscaled_logits():
     agent = _logit_agent()
     with torch.no_grad():
         agent._model.anchor.fill_(0.25)
         agent._model.residual.fill_(-0.5)
-        agent._model.scale.fill_(2.0)
-    batch = {"disc_obs_demo": torch.ones(3, 4),
-             "disc_obs": torch.zeros(3, 4)}
+    batch = {"disc_obs_demo": torch.ones(3, 4), "disc_obs": torch.zeros(3, 4)}
     info = agent._compute_disc_loss(batch)
-    expected_bce = 0.5 * (torch.nn.functional.softplus(torch.tensor(-0.5))
-                          + torch.nn.functional.softplus(torch.tensor(-1.0)))
+    expected_bce = 0.5 * (torch.nn.functional.softplus(torch.tensor(-0.25))
+                          + torch.nn.functional.softplus(torch.tensor(-0.5)))
     torch.testing.assert_close(info["disc_cls_loss"], expected_bce)
-    reward = agent._calc_disc_rewards(torch.ones(3, 4))
-    torch.testing.assert_close(
-        reward, torch.full((3,), 2 * torch.nn.functional.softplus(
-            torch.tensor(-1.0))))
+    torch.testing.assert_close(agent._calc_disc_rewards(torch.ones(3, 4)),
+                               torch.full((3,), torch.nn.functional.softplus(torch.tensor(-0.5))))
+    assert not any("scale" in key or "gap" in key for key in info)
 
 
 def test_dare_bounded_reward_is_finite_monotone_and_detached():
@@ -347,7 +322,6 @@ def test_dare_bounded_reward_is_finite_monotone_and_detached():
     agent._model = torch.nn.Module()
     agent._model.eval_disc = lambda disc_obs: disc_obs[:, :1]
     agent._disc_eval_batch_size = 0
-    agent._disc_reward_scale = 1.0
     logits = torch.tensor([[-1000.], [-1.], [0.], [1.], [1000.]],
                           requires_grad=True)
     reward = agent._calc_disc_rewards(logits)

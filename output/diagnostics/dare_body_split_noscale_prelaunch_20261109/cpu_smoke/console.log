@@ -1,0 +1,71 @@
+/home/y/miniconda3/envs/env_isaaclab/lib/python3.11/site-packages/requests/__init__.py:113: RequestsDependencyWarning: urllib3 (2.6.3) or chardet (7.4.3)/charset_normalizer (3.3.2) doesn't match a supported version!
+  warnings.warn(
+Loading user config located at: '/home/y/miniconda3/envs/env_isaaclab/lib/python3.11/site-packages/isaacsim/kit/data/Kit/Isaac-Sim/5.1/user.config.json'
+[Info] [carb] Logging to file: /home/y/miniconda3/envs/env_isaaclab/lib/python3.11/site-packages/isaacsim/kit/logs/Kit/Isaac-Sim/5.1/kit_20261109_230134.log
+2026-11-09T15:01:34Z [3ms] [Warning] [omni.ext.plugin] [ext: isaaclab_contrib] Extensions config 'extension.toml' doesn't exist '/home/y/IsaacLab/source/isaaclab_contrib' or '/home/y/IsaacLab/source/isaaclab_contrib/config'
+2026-11-09T15:01:34Z [65ms] [Warning] [omni.usd_config.extension] Enable omni.materialx.libs extension to use MaterialX
+2026-11-09T15:01:34Z [388ms] [Warning] [carb] Acquiring non optional plugin interface which is not listed as dependency: [omni::physx::IPhysxBenchmarks v1.0] (plugin: <default plugin>), by client: omni.physics.physx.plugin. Add it to CARB_PLUGIN_IMPL_DEPS() macro of a client.
+2026-11-09T15:01:35Z [520ms] [Warning] [omni.isaac.dynamic_control] omni.isaac.dynamic_control is deprecated as of Isaac Sim 4.5. No action is needed from end-users.
+2026-11-09T15:01:36Z [2,125ms] [Warning] [gpu.foundation.plugin] Skipping unsupported non-NVIDIA GPU: Intel(R) UHD Graphics 770 (ADL-S GT1)
+2026-11-09T15:01:36Z [2,126ms] [Warning] [gpu.foundation.plugin] Skipping unsupported non-NVIDIA GPU: Intel(R) UHD Graphics 770 (ADL-S GT1)
+
+|---------------------------------------------------------------------------------------------|
+| Driver Version: 580.173.02    | Graphics API: Vulkan
+|=============================================================================================|
+| GPU | Name                             | Active | LDA | GPU Memory | Vendor-ID | LUID       |
+|     |                                  |        |     |            | Device-ID | UUID       |
+|     |                                  |        |     |            | Bus-ID    |            |
+|---------------------------------------------------------------------------------------------|
+| 0   | NVIDIA GeForce RTX 5080          | Yes: 0 |     | 16303   MB | 10de      | 0          |
+|     |                                  |        |     |            | 2c02      | e16ebef7.. |
+|     |                                  |        |     |            | 1         |            |
+|---------------------------------------------------------------------------------------------|
+| 1   | Intel(R) UHD Graphics 770 (ADL.. |        |     | 48013   MB | 8086      | 0          |
+|     |                                  |        |     |            | 4680      | 86808046.. |
+|     |                                  |        |     |            | 0         |            |
+|=============================================================================================|
+| OS: 22.04.5 LTS (Jammy Jellyfish) ubuntu, Version: 22.04.5, Kernel: 6.8.0-138-generic
+| XServer Vendor: The X.Org Foundation, XServer Version: 12101004 (1.21.1.4)
+| Processor: 12th Gen Intel(R) Core(TM) i9-12900K
+| Bare Metal Cores: 16 | Bare Metal Logical Cores: 32
+| Available Cores:  24 
+|---------------------------------------------------------------------------------------------|
+| Total Memory (MB): 64017 | Free Memory: 55815
+| Total Page/Swap (MB): 2047 | Free Page/Swap: 2047
+|---------------------------------------------------------------------------------------------|
+2026-11-09T15:01:37Z [2,454ms] [Warning] [gpu.foundation.plugin] CPU performance profile is set to powersave. This profile sets the CPU to the lowest frequency reducing performance.
+2026-11-09T15:01:37Z [2,462ms] [Warning] [gpu.foundation.plugin] PCIe link width current (1) and maximum (16) for device 0 don't match.
+2026-11-09T15:01:37Z [2,462ms] [Warning] [gpu.foundation.plugin] IOMMU is enabled.
+2026-11-09T15:01:37Z [2,462ms] [Warning] [gpu.foundation.plugin] Detected IOMMU is enabled. Running CUDA peer-to-peer bandwidth and latency validation.
+Unidirectional P2P=Enabled Bandwidth (P2P Writes) Matrix (GB/s)
+   D\D     0 
+     0 816.35 
+P2P=Enabled Latency (P2P Writes) Matrix (us)
+   GPU     0 
+     0   2.32 
+
+   CPU     0 Building add env
+[INFO][AppLauncher]: Using device: cpu
+[INFO][AppLauncher]: Loading experience file: /home/y/IsaacLab/apps/isaaclab.python.headless.kit
+[INFO] IsaacLab logging to file: /tmp/isaaclab_2026-11-09_23-01-37.log
+Building 1/8 envsBuilding 2/8 envsBuilding 3/8 envsBuilding 4/8 envsBuilding 5/8 envsBuilding 6/8 envsBuilding 7/8 envsBuilding 8/8 envs
+
+Loading 1/1 motion files: data/motions/humanoid/humanoid_backflip.pkl
+Loaded motion file: data/motions/humanoid/humanoid_backflip.pkl
+Loaded 1 motions with a total length of 1.750s.
+Building Obj:0 in 8/8 envs
+Initializing simulation...
+Char 0 properties
+	DoFs: 28
+	Mass: 50.050 kg
+
+Building DAREBodySplitSN agent
+Total parameter count: 2779281
+SMOKE_ITER {"iteration": 0, "samples": 256, "disc_loss": 2.805436849594116, "actor_loss": 0.09471818059682846, "critic_loss": 14.80526351928711, "reward_mean": 0.7014570236206055, "normalizer_count": 256.0, "normalizer_still_updating": true, "reward_equals_unscaled_ADD_hierarchy": true, "expected_empty_population_diagnostics": ["td_target_succ_mean", "td_target_succ_std", "td_target_succ_p10", "td_target_succ_p50", "td_target_succ_p90", "td_target_time_mean", "td_target_time_std", "td_target_time_p10", "td_target_time_p50", "td_target_time_p90"]}
+SMOKE_ITER {"iteration": 1, "samples": 512, "disc_loss": 2.7479426860809326, "actor_loss": 0.29465940594673157, "critic_loss": 6.050510406494141, "reward_mean": 0.6772801280021667, "normalizer_count": 512.0, "normalizer_still_updating": false, "reward_equals_unscaled_ADD_hierarchy": true, "expected_empty_population_diagnostics": ["td_target_succ_mean", "td_target_succ_std", "td_target_succ_p10", "td_target_succ_p50", "td_target_succ_p90", "td_target_time_mean", "td_target_time_std", "td_target_time_p10", "td_target_time_p50", "td_target_time_p90"]}
+SMOKE_ITER {"iteration": 2, "samples": 768, "disc_loss": 2.6952292919158936, "actor_loss": 0.3146830201148987, "critic_loss": 6.3408660888671875, "reward_mean": 0.6571205258369446, "normalizer_count": 512.0, "normalizer_still_updating": false, "reward_equals_unscaled_ADD_hierarchy": true, "expected_empty_population_diagnostics": ["td_target_succ_mean", "td_target_succ_std", "td_target_succ_p10", "td_target_succ_p50", "td_target_succ_p90", "td_target_time_mean", "td_target_time_std", "td_target_time_p10", "td_target_time_p50", "td_target_time_p90"]}
+SMOKE_ITER {"iteration": 3, "samples": 1024, "disc_loss": 2.6085164546966553, "actor_loss": 0.3137055039405823, "critic_loss": 3.6573421955108643, "reward_mean": 0.6224398612976074, "normalizer_count": 512.0, "normalizer_still_updating": false, "reward_equals_unscaled_ADD_hierarchy": true, "expected_empty_population_diagnostics": ["td_target_succ_mean", "td_target_succ_std", "td_target_succ_p10", "td_target_succ_p50", "td_target_succ_p90", "td_target_time_mean", "td_target_time_std", "td_target_time_p10", "td_target_time_p50", "td_target_time_p90"]}
+Building DAREBodySplitSN agent
+Total parameter count: 2779281
+Resuming training from /home/y/my_project/MimicKit/output/diagnostics/dare_body_split_noscale_prelaunch_20261109/cpu_smoke/checkpoint.pt at iteration 4, sample 1024.
+NOSCALE_SMOKE_COMPLETE

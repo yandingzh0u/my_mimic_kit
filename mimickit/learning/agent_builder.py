@@ -40,6 +40,10 @@ def build_agent(agent_file, env, device):
         import learning.dare_multi_agent as dare_multi_agent
         agent = dare_multi_agent.DAREMultiAgent(
             config=agent_config, env=env, device=device)
+    elif (agent_name == "DAREBodySplitSN"):
+        import learning.dare_body_split_sn_agent as dare_body_split_sn_agent
+        agent = dare_body_split_sn_agent.DAREBodySplitSNAgent(
+            config=agent_config, env=env, device=device)
     elif (agent_name == "DAREMulti4NS"):
         import learning.dare_multi4_ns_agent as dare_multi4_ns_agent
         agent = dare_multi4_ns_agent.DAREMulti4NSAgent(

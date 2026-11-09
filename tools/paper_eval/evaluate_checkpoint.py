@@ -768,13 +768,15 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
                     active_before, action_delta, torch.zeros_like(action_delta)
                 )
                 action = torch.where(active_before.unsqueeze(-1), action, torch.zeros_like(action))
+                obs, env_reward, done, info = env.step(action)
                 if args.save_disc_diffs:
+                    # Match the post-step physical states and tracking errors
+                    # saved below; a pre-step diff silently shifts this column.
                     raw_diff = info["disc_obs_demo"] - info["disc_obs"]
                     raw_diff = torch.where(
                         active_before.unsqueeze(-1), raw_diff,
                         torch.full_like(raw_diff, torch.nan))
                     ts_disc_diff.append(_to_numpy(raw_diff))
-                obs, env_reward, done, info = env.step(action)
                 reward_diagnostic = _policy_reward(agent, info, env_reward)
 
                 sim = _query_sim(env)
@@ -1047,6 +1049,8 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
                 "deterministic_mean_action": True,
                 "no_automatic_reset": True,
                 "completion_protocol_valid": completion_protocol_valid,
+                **({"disc_diff_timing": "post_step"}
+                   if args.save_disc_diffs else {}),
             },
             "metrics": {
                 "tracking": {

@@ -6,7 +6,7 @@ import learning.dare_model as dare_model
 import learning.nets.net_builder as net_builder
 
 
-MULTI_DISC_SCHEMA_VERSION = 1
+MULTI_DISC_SCHEMA_VERSION = 2
 MULTI_DISC_GROUPS = (
     ("root_pose", ("root_pos", "root_rot")),
     ("body_pose", ("body_pos", "body_rot")),
@@ -76,7 +76,7 @@ class IndependentDiscriminators(torch.nn.Module):
 
 
 class DAREMultiModel(dare_model.DAREModel):
-    """Three disjoint SN MLPs with the baseline's single shared output scale."""
+    """Three disjoint SN MLPs returning their unscaled network logits."""
 
     def _build_disc(self, config, env):
         space = env.get_disc_obs_space()
@@ -105,7 +105,9 @@ class DAREMultiModel(dare_model.DAREModel):
                           for branch in self._disc_branches.branches])
 
     def get_disc_group_width(self):
-        return self._disc_logit_scale.new_tensor(float(self._disc_branches.group_width))
+        return self._dare_schema_version.new_tensor(
+            float(self._disc_branches.group_width), dtype=torch.float32)
 
     def get_disc_group_total_width(self):
-        return self._disc_logit_scale.new_tensor(float(self._disc_branches.total_width))
+        return self._dare_schema_version.new_tensor(
+            float(self._disc_branches.total_width), dtype=torch.float32)

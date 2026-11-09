@@ -1,22 +1,15 @@
-"""Three independent zero-anchor classifiers; equal mean of ADD rewards."""
-
-import math
+"""Three independent zero-anchor classifiers; ADD reward of their mean logit."""
 
 import torch
 import torch.nn.functional as F
 
 from learning.add_agent import calc_unscaled_disc_reward
 from learning.dare_agent import DAREAgent
-from learning.dare_model import ANCHOR_GAP_TARGET
 from learning.dare_multi_model import DAREMultiModel, MULTI_DISC_SCHEMA_VERSION
-from util.logger import Logger
 import util.torch_util as torch_util
 
 
 class DAREMultiAgent(DAREAgent):
-    def __init__(self, config, env, device):
-        super().__init__(config, env, device)
-        self._calibration_gaps_raw = None
 
     def _load_params(self, config):
         if config.get("disc_group_negatives", False):
@@ -31,10 +24,8 @@ class DAREMultiAgent(DAREAgent):
         state["multi_disc"] = {
             "version": MULTI_DISC_SCHEMA_VERSION,
             "groups": self._model.get_disc_error_groups(),
-            "reward_aggregation": "mean_of_mapped_rewards",
+            "reward_aggregation": "mapped_mean_logit",
             "loss_aggregation": "sum_of_independent_losses",
-            "calibration_gap_raw": self._calibration_gap_raw,
-            "calibration_gaps_raw": self._calibration_gaps_raw,
         }
         return state
 
@@ -44,11 +35,9 @@ class DAREMultiAgent(DAREAgent):
         groups = tuple((name, tuple(indices)) for name, indices in saved.get("groups", ()))
         if (saved.get("version") != MULTI_DISC_SCHEMA_VERSION
                 or groups != self._model.get_disc_error_groups()
-                or saved.get("reward_aggregation") != "mean_of_mapped_rewards"
+                or saved.get("reward_aggregation") != "mapped_mean_logit"
                 or saved.get("loss_aggregation") != "sum_of_independent_losses"):
             raise ValueError("Cannot resume with different multi-discriminator semantics")
-        self._calibration_gap_raw = saved["calibration_gap_raw"]
-        self._calibration_gaps_raw = saved["calibration_gaps_raw"]
 
     def _compute_disc_loss(self, batch):
         # Preserve baseline SN forward ordering: positive, negative, head weights.
@@ -74,8 +63,6 @@ class DAREMultiAgent(DAREAgent):
         reg_loss = self._disc_logit_reg * logit_loss
         # Independent parameter blocks each receive their full baseline gradient.
         disc_loss = cls_losses.sum() + reg_loss
-        gap = pos_logit.squeeze(0) - neg_logit.mean(dim=0)
-        scale = self._model.get_disc_logit_scale()
         zero = neg_logit.new_zeros(())
         info = {
             "disc_loss": disc_loss,
@@ -92,9 +79,6 @@ class DAREMultiAgent(DAREAgent):
             "disc_neg_logit": neg_logit.mean().detach(),
             "disc_group_width": self._model.get_disc_group_width(),
             "disc_group_total_width": self._model.get_disc_group_total_width(),
-            "disc_logit_scale": scale,
-            "disc_anchor_gap": gap.mean().detach(),
-            "disc_anchor_gap_raw": (gap.mean() / scale).detach(),
         }
         for group_id, (name, _) in enumerate(groups):
             prefix = "disc_" + name + "_"
@@ -106,7 +90,6 @@ class DAREMultiAgent(DAREAgent):
                 prefix + "neg_valid_fraction": valid[:, group_id].float().mean().detach(),
                 prefix + "pos_logit": pos_logit[:, group_id].mean().detach(),
                 prefix + "neg_logit": neg_logit[:, group_id].mean().detach(),
-                prefix + "anchor_gap_raw": (gap[group_id] / scale).detach(),
             })
         return info
 
@@ -114,38 +97,5 @@ class DAREMultiAgent(DAREAgent):
     def _calc_disc_rewards(self, norm_diff):
         logits = torch_util.eval_minibatch(
             self._model.eval_disc, {"disc_obs": norm_diff}, self._disc_eval_batch_size)
-        return self._disc_reward_scale * calc_unscaled_disc_reward(logits).mean(dim=-1)
-
-    @torch.no_grad()
-    def _calibrate_disc_logit_scale(self):
-        was_training = self._model.training
-        self._model.eval()
-        try:
-            current_diff = (self._exp_buffer.get_data_flat("disc_obs_demo")
-                            - self._exp_buffer.get_data_flat("disc_obs"))
-            count = self._disc_buffer.get_sample_count()
-            if count < 1:
-                raise RuntimeError("Anchor calibration needs real replay samples")
-            replay_diff = (self._disc_buffer.get_data_flat("disc_obs_demo")[:count]
-                           - self._disc_buffer.get_data_flat("disc_obs")[:count])
-
-            def mean_raw(diff):
-                return torch_util.eval_minibatch(
-                    lambda disc_obs: self._model.eval_disc_raw(
-                        self._disc_obs_norm.normalize(disc_obs)),
-                    {"disc_obs": diff}, self.CALIBRATION_BATCH).mean(dim=0)
-
-            gaps = (self._model.eval_disc_raw(self._pos_diff.unsqueeze(0)).squeeze(0)
-                    - .5 * (mean_raw(current_diff) + mean_raw(replay_diff)))
-            gap = float(gaps.mean().item())
-            if not torch.isfinite(gaps).all() or not math.isfinite(gap) or gap <= 0:
-                raise RuntimeError("Anchor calibration requires finite positive mean separation: {}"
-                                   .format(gaps.tolist()))
-            scale = ANCHOR_GAP_TARGET / gap
-            self._model.set_disc_logit_scale(scale)
-            self._calibration_gap_raw = gap
-            self._calibration_gaps_raw = gaps.cpu().tolist()
-        finally:
-            self._model.train(was_training)
-        Logger.print("DAREMulti shared calibration at iter {}: gaps={} mean={:.4f} kappa={:.4f}"
-                     .format(self._iter, self._calibration_gaps_raw, gap, scale))
+        joint_logit = logits.mean(dim=-1)
+        return calc_unscaled_disc_reward(joint_logit)

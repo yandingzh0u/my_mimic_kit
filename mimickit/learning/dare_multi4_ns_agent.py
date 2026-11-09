@@ -8,10 +8,15 @@ from learning.dare_multi4_ns_model import (
 
 
 class DAREMulti4NSAgent(DAREMultiAgent):
-    """Reuse summed BCE, four mapped-reward mean, and one shared calibration."""
+    """Reuse summed BCE and average four unscaled ADD rewards."""
 
     def _build_model(self, config):
         self._model = DAREMulti4NSModel(config["model"], self._env)
+
+    def _calc_disc_rewards(self, norm_diff):
+        # Keep this historical variant's mapped-reward mean independent of
+        # later changes to the three-discriminator parent's aggregation.
+        return DAREAgent._calc_disc_rewards(self, norm_diff).mean(dim=-1)
 
     def _build_optimizer(self, config):
         super()._build_optimizer(config)
@@ -51,8 +56,6 @@ class DAREMulti4NSAgent(DAREMultiAgent):
             "head_constraint": "spectral_norm",
             "reward_aggregation": "mean_of_mapped_rewards",
             "loss_aggregation": "sum_of_independent_losses",
-            "calibration_gap_raw": self._calibration_gap_raw,
-            "calibration_gaps_raw": self._calibration_gaps_raw,
             "ns_update_count": int(self._model.get_ns_update_count().item()),
         }
         return state
@@ -72,5 +75,3 @@ class DAREMulti4NSAgent(DAREMultiAgent):
                 != int(self._model.get_ns_update_count().item())):
             raise ValueError("Cannot resume with different four-discriminator NS semantics")
         DAREAgent._load_checkpoint_extra_state(self, state)
-        self._calibration_gap_raw = saved["calibration_gap_raw"]
-        self._calibration_gaps_raw = saved["calibration_gaps_raw"]

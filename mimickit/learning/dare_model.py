@@ -1,14 +1,10 @@
-import math
-
 import torch
 
 import learning.add_model as add_model
 import learning.nets.net_builder as net_builder
 
 
-# Fixed 20%-80% softplus-slope transition span.  This is a method constant,
-# not a task or motion configuration parameter.
-ANCHOR_GAP_TARGET = math.log(16.0)
+DARE_MODEL_SCHEMA_VERSION = 2
 
 
 class GroupSeparableDiscLayers(torch.nn.Module):
@@ -58,13 +54,12 @@ class GroupSeparableDiscLayers(torch.nn.Module):
 
 
 class DAREModel(add_model.ADDModel):
-    """DARE critic with a one-shot, anchor-relative output calibration."""
+    """Ordinary-SN DARE discriminator with unscaled network logits."""
 
     def __init__(self, config, env):
         super().__init__(config, env)
-        self.register_buffer("_disc_logit_scale", torch.ones(()))
-        self.register_buffer(
-            "_disc_logit_calibrated", torch.zeros((), dtype=torch.bool))
+        self.register_buffer("_dare_schema_version", torch.tensor(
+            DARE_MODEL_SCHEMA_VERSION, dtype=torch.int64))
 
     def _build_disc(self, config, env):
         input_dict = {"disc_obs": env.get_disc_obs_space()}
@@ -92,27 +87,24 @@ class DAREModel(add_model.ADDModel):
         return self._disc_logits(self._disc_layers(disc_obs))
 
     def eval_disc(self, disc_obs):
-        return self._disc_logit_scale * self.eval_disc_raw(disc_obs)
-
-    @torch.no_grad()
-    def set_disc_logit_scale(self, scale):
-        self._disc_logit_scale.fill_(float(scale))
-        self._disc_logit_calibrated.fill_(True)
-
-    def is_disc_logit_calibrated(self):
-        return bool(self._disc_logit_calibrated.item())
-
-    def get_disc_logit_scale(self):
-        return self._disc_logit_scale.clone()
+        return self.eval_disc_raw(disc_obs)
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata,
                               strict, missing_keys, unexpected_keys,
                               error_msgs):
-        # Legacy v6 model/checkpoint state dicts have no calibration buffers.
-        state_dict.setdefault(prefix + "_disc_logit_scale", torch.ones(()))
-        state_dict.setdefault(
-            prefix + "_disc_logit_calibrated",
-            torch.zeros((), dtype=torch.bool))
+        # Never silently reinterpret a historical scaled checkpoint, including
+        # callers that request strict=False for otherwise partial model loads.
+        legacy_keys = (prefix + "_disc_logit_scale",
+                       prefix + "_disc_logit_calibrated")
+        if any(key in state_dict for key in legacy_keys):
+            error_msgs.append("Historical scaled DARE checkpoints cannot be "
+                              "loaded into the unscaled discriminator")
+        saved_version = state_dict.get(prefix + "_dare_schema_version")
+        if (saved_version is None or saved_version.numel() != 1
+                or saved_version.dtype != torch.int64
+                or int(saved_version.item()) != DARE_MODEL_SCHEMA_VERSION):
+            error_msgs.append("Cannot load a different DARE reward schema: "
+                              + prefix + "_dare_schema_version")
         super()._load_from_state_dict(
             state_dict, prefix, local_metadata, strict, missing_keys,
             unexpected_keys, error_msgs)

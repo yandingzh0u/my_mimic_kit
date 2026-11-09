@@ -132,9 +132,6 @@ class _Model(torch.nn.Module):
     def get_disc_group_total_width(self):
         return self.bias.new_tensor(1022.)
 
-    def get_disc_logit_scale(self):
-        return self.bias.new_tensor(1.)
-
 
 class _Replay:
     def __init__(self, data):
@@ -157,7 +154,6 @@ def agent_and_batch(enabled=True, zeros=False):
     agent._disc_buffer = _Replay(replay)
     agent._disc_logit_reg = .01
     agent._disc_eval_batch_size = 0
-    agent._disc_reward_scale = 2.
     agent._disc_group_negatives = enabled
     agent._disc_group_negative_sampler = sampler() if enabled else None
     agent._phase_coverage_reset = False
@@ -213,7 +209,7 @@ def test_disabled_loss_keeps_real_batch_and_global_rng_unchanged():
     torch.testing.assert_close(agent._model.calls[1], expected)
     assert torch.equal(before, torch.get_rng_state())
     assert not any(key.startswith("disc_group_negative_") for key in info)
-    assert agent._get_checkpoint_extra_state() == {}
+    assert set(agent._get_checkpoint_extra_state()) == {"dare_reward"}
 
 
 def test_agent_extra_state_round_trip_and_mode_mismatch_rejection():
@@ -228,11 +224,11 @@ def test_agent_extra_state_round_trip_and_mode_mismatch_rejection():
     assert torch.equal(actual.values, expected.values)
     assert torch.equal(actual.group_ids, expected.group_ids)
     with pytest.raises(ValueError, match="different structured-negative mode"):
-        restored._load_checkpoint_extra_state({})
+        restored._load_checkpoint_extra_state({"dare_reward": saved["dare_reward"]})
     disabled, _ = agent_and_batch(enabled=False)
     with pytest.raises(ValueError, match="different structured-negative mode"):
         disabled._load_checkpoint_extra_state(saved)
-    disabled._load_checkpoint_extra_state({})
+    disabled._load_checkpoint_extra_state({"dare_reward": saved["dare_reward"]})
 
 
 def test_enabled_config_diff_is_only_the_boolean_switch():

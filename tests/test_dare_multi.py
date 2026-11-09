@@ -11,8 +11,8 @@ import yaml
 
 from envs.add_env import build_disc_error_groups
 from learning.add_agent import calc_unscaled_disc_reward
-from learning.dare_agent import DAREAgent, anchor_gap
-from learning.dare_model import ANCHOR_GAP_TARGET, DAREModel
+from learning.dare_agent import DAREAgent
+from learning.dare_model import DAREModel
 from learning.dare_multi_agent import DAREMultiAgent
 from learning.dare_multi_model import DAREMultiModel, build_multi_disc_groups
 from learning.diff_normalizer import DiffNormalizer
@@ -162,8 +162,6 @@ class _AnalyticModel(torch.nn.Module):
         self.weight = torch.nn.Parameter(torch.tensor([.3, -.4, .2]))
         self.bias = torch.nn.Parameter(torch.tensor([.1, -.2, .4]))
         self.calls = []
-        self.register_buffer("scale", torch.ones(()))
-        self.register_buffer("calibrated", torch.zeros((), dtype=torch.bool))
 
     def get_disc_error_groups(self):
         return (("root_pose", (0,)), ("body_pose", (1,)),
@@ -174,7 +172,7 @@ class _AnalyticModel(torch.nn.Module):
         return disc_obs * self.weight + self.bias
 
     def eval_disc(self, disc_obs):
-        return self.scale * self.eval_disc_raw(disc_obs)
+        return self.eval_disc_raw(disc_obs)
 
     def get_disc_logit_weights(self):
         return self.weight
@@ -184,16 +182,6 @@ class _AnalyticModel(torch.nn.Module):
 
     def get_disc_group_total_width(self):
         return self.weight.new_tensor(126.)
-
-    def get_disc_logit_scale(self):
-        return self.scale.clone()
-
-    def is_disc_logit_calibrated(self):
-        return bool(self.calibrated)
-
-    def set_disc_logit_scale(self, value):
-        self.scale.fill_(value)
-        self.calibrated.fill_(True)
 
 
 class _Replay:
@@ -231,13 +219,10 @@ def _agent(current=None, replay=None):
     agent._exp_buffer = _Replay(current)
     agent._disc_logit_reg = 0.
     agent._disc_eval_batch_size = 0
-    agent._disc_reward_scale = 2.
     agent._disc_group_negatives = False
     agent._disc_group_negative_sampler = None
     agent._phase_coverage_reset = False
     agent._iter = 386
-    agent._calibration_gap_raw = float("nan")
-    agent._calibration_gaps_raw = None
     batch = {"disc_obs_demo": current,
              "disc_obs": torch.zeros_like(current)}
     return agent, batch
@@ -284,52 +269,44 @@ def test_zero_local_errors_are_excluded_without_discarding_other_groups():
     assert all(torch.isfinite(value).all() for value in info.values())
 
 
-def test_reward_maps_and_clips_each_head_before_averaging():
+@pytest.mark.parametrize("eval_batch_size", [0, 1, 3])
+def test_reward_averages_logits_before_mapping_and_clipping(eval_batch_size):
     agent, _ = _agent()
-    values = torch.tensor([[-1000., 0., 1000.], [-1., 2., -3.]],
+    agent._disc_eval_batch_size = eval_batch_size
+    values = torch.tensor([[-1000., 0., 1000.], [-1., 2., -3.],
+                           [1000., 1000., 1000.], [-1000., -1000., -1000.]],
                           requires_grad=True)
     agent._model.eval_disc = lambda disc_obs: disc_obs
     actual = agent._calc_disc_rewards(values)
-    expected = 2 * calc_unscaled_disc_reward(values.detach()).mean(-1)
+    expected = torch.tensor([torch.log(torch.tensor(2.)),
+                             F.softplus(torch.tensor(-2. / 3)),
+                             -torch.log(torch.tensor(.0001)), 0.])
     torch.testing.assert_close(actual, expected)
-    assert actual.shape == (2,) and not actual.requires_grad
+    assert actual.shape == (4,) and not actual.requires_grad
     assert torch.isfinite(actual).all()
     assert not torch.allclose(actual,
-                              2 * calc_unscaled_disc_reward(values.mean(-1)))
+                              calc_unscaled_disc_reward(values).mean(-1))
+    assert agent._calc_disc_rewards(values[:1]).shape == (1,)
 
 
-def test_public_calibration_uses_one_scale_from_mean_of_three_anchor_gaps():
+def test_equal_logit_improvements_have_equal_reward_gain_across_branches():
     agent, _ = _agent()
-    with torch.no_grad():
-        agent._model.weight.copy_(torch.tensor([-.1, -.4, -.8]))
-    before = anchor_gap(agent._model, agent._disc_obs_norm,
-                        agent._pos_diff,
-                        agent._exp_buffer.values,
-                        agent._disc_buffer.values, 128)
-    assert before > 0
-    agent._calibrate_disc_logit_scale()
-    torch.testing.assert_close(agent._model.scale,
-                               torch.tensor(ANCHOR_GAP_TARGET / before))
-    assert agent._model.is_disc_logit_calibrated()
-    assert agent._model.training
-    positive = agent._model.eval_disc(torch.zeros(1, 3)).mean()
-    negative = .5 * (
-        agent._model.eval_disc(agent._exp_buffer.values).mean()
-        + agent._model.eval_disc(agent._disc_buffer.values).mean())
-    torch.testing.assert_close(positive - negative,
-                               torch.tensor(ANCHOR_GAP_TARGET))
+    agent._model.eval_disc = lambda disc_obs: disc_obs
+    before = torch.tensor([[0., -4., -1.]])
+    changed = before.expand(3, -1).clone() + .1 * torch.eye(3)
+    delta = agent._calc_disc_rewards(changed) - agent._calc_disc_rewards(before)
+    assert bool((delta > 0).all())
+    torch.testing.assert_close(delta, delta[0].expand_as(delta))
 
 
-def test_multi_model_checkpoint_round_trip_retains_logits_and_single_scale():
+def test_multi_model_checkpoint_round_trip_retains_unscaled_logits():
     source = DAREMultiModel(_config(), _Env()).eval()
-    source.set_disc_logit_scale(4.25)
     restored = DAREMultiModel(_config(), _Env()).eval()
     restored.load_state_dict(copy.deepcopy(source.state_dict()), strict=True)
     data = torch.randn(7, 172)
     torch.testing.assert_close(restored.eval_disc(data), source.eval_disc(data),
                                rtol=0, atol=0)
-    assert restored.get_disc_logit_scale().ndim == 0
-    assert restored.is_disc_logit_calibrated()
+    assert not hasattr(restored, "get_disc_logit_scale")
     baseline = DAREModel(_config(), _Env())
     with pytest.raises(RuntimeError):
         restored.load_state_dict(baseline.state_dict(), strict=True)
@@ -344,26 +321,23 @@ def test_model_checkpoint_rejects_same_shape_but_different_group_indices():
         model.load_state_dict(saved, strict=True)
 
 
-def test_agent_resume_retains_calibration_and_rejects_different_semantics():
+def test_agent_resume_rejects_legacy_scaled_and_changed_aggregation_semantics():
     source, _ = _agent()
-    source._calibration_gap_raw = .75
-    source._calibration_gaps_raw = [.5, .75, 1.]
     saved = source._get_checkpoint_extra_state()
+    assert saved["dare_reward"]["version"] == 2
+    assert saved["multi_disc"]["version"] == 2
+    assert saved["multi_disc"]["reward_aggregation"] == "mapped_mean_logit"
+    assert not any("calibrat" in key for key in saved["multi_disc"])
     restored, _ = _agent()
     restored._load_checkpoint_extra_state(copy.deepcopy(saved))
-    assert restored._calibration_gap_raw == .75
-    assert restored._calibration_gaps_raw == [.5, .75, 1.]
-    for key, value in (
-            ("version", -1),
-            ("reward_aggregation", "mean_of_logits"),
-            ("loss_aggregation", "mean_of_independent_losses"),
-            ("groups", (("root_pose", (1,)), ("body_pose", (0,)),
-                        ("velocity", (2,))))):
+    for key, value in (("version", 1), ("reward_aggregation", "mean_of_mapped_rewards"),
+                       ("loss_aggregation", "mean_of_independent_losses"),
+                       ("groups", (("root_pose", (1,)), ("body_pose", (0,)), ("velocity", (2,))))):
         invalid = copy.deepcopy(saved)
         invalid["multi_disc"][key] = value
-        with pytest.raises(ValueError, match="different multi-discriminator semantics"):
+        with pytest.raises(ValueError):
             restored._load_checkpoint_extra_state(invalid)
-    with pytest.raises(ValueError, match="different multi-discriminator semantics"):
+    with pytest.raises(ValueError, match="legacy scaled"):
         restored._load_checkpoint_extra_state({})
 
 
@@ -371,17 +345,6 @@ def test_multi_agent_rejects_structured_negative_mode():
     agent = object.__new__(DAREMultiAgent)
     with pytest.raises(ValueError, match="real group errors"):
         agent._load_params({"disc_group_negatives": True})
-
-
-def test_failed_calibration_keeps_scale_and_restores_training_mode():
-    agent, _ = _agent()
-    with torch.no_grad():
-        agent._model.weight.fill_(1.)
-    with pytest.raises(RuntimeError, match="positive mean separation"):
-        agent._calibrate_disc_logit_scale()
-    assert agent._model.training
-    assert not agent._model.is_disc_logit_calibrated()
-    assert agent._model.scale == 1
 
 
 def test_multi_agent_config_only_switches_agent_and_preserves_training_defaults():

@@ -3,38 +3,17 @@ import torch.nn.functional as F
 
 import learning.add_agent as add_agent
 import learning.dare_model as dare_model
-from learning.dare_model import ANCHOR_GAP_TARGET
 from learning.group_negatives import GroupNegativeSampler
-from util.logger import Logger
 import util.torch_util as torch_util
 
 
-def anchor_gap(model, norm, pos_diff, current_diff, replay_diff,
-               batch_size):
-    """Measure raw-logit separation from the zero differential anchor."""
-    def mean_raw(raw_diff):
-        def eval_raw(disc_obs):
-            return model.eval_disc_raw(norm.normalize(disc_obs))
-
-        return torch_util.eval_minibatch(
-            eval_raw, {"disc_obs": raw_diff}, batch_size).mean()
-
-    pos_logit = model.eval_disc_raw(pos_diff.unsqueeze(0)).mean()
-    current_logit = mean_raw(current_diff)
-    replay_logit = mean_raw(replay_diff)
-    return float((pos_logit - 0.5 * (current_logit + replay_logit)).item())
-
-
 class DAREAgent(add_agent.ADDAgent):
-    """DARE with one-shot output-scale calibration after input normalization."""
-
-    CALIBRATION_BATCH = 16384
+    """SN discriminator with raw logits and the original unscaled ADD mapping."""
 
     def __init__(self, config, env, device):
         super().__init__(config, env, device)
         if self._disc_grad_penalty != 0:
             raise ValueError("DARE requires disc_grad_penalty=0")
-        self._calibration_gap_raw = float("nan")
         self._disc_group_negative_sampler = None
         if self._disc_group_negatives:
             self._disc_group_negative_sampler = GroupNegativeSampler(
@@ -43,19 +22,33 @@ class DAREAgent(add_agent.ADDAgent):
                 device=device, seed=torch.initial_seed())
 
     def _load_params(self, config):
+        if "disc_reward_scale" in config:
+            raise ValueError("DARE no longer accepts disc_reward_scale; use the unscaled ADD mapping")
         self._disc_group_negatives = config.get("disc_group_negatives", False)
         if not isinstance(self._disc_group_negatives, bool):
             raise ValueError("disc_group_negatives must be a boolean")
         super()._load_params(config)
+        # AMP/ADD retain their multiplier; DARE intentionally has no such field.
+        del self._disc_reward_scale
 
     def _get_checkpoint_extra_state(self):
         state = super()._get_checkpoint_extra_state()
+        state["dare_reward"] = {
+            "version": 2,
+            "logits": "raw_discriminator_output",
+            "mapping": "original_ADD_without_reward_multiplier",
+        }
         sampler = getattr(self, "_disc_group_negative_sampler", None)
         if sampler is not None:
             state["disc_group_negatives"] = sampler.state_dict()
         return state
 
     def _load_checkpoint_extra_state(self, state):
+        if state.get("dare_reward") != {
+                "version": 2,
+                "logits": "raw_discriminator_output",
+                "mapping": "original_ADD_without_reward_multiplier"}:
+            raise ValueError("Cannot resume a legacy scaled DARE reward checkpoint")
         super()._load_checkpoint_extra_state(state)
         sampler = getattr(self, "_disc_group_negative_sampler", None)
         saved = state.get("disc_group_negatives")
@@ -69,41 +62,12 @@ class DAREAgent(add_agent.ADDAgent):
     def _build_model(self, config):
         self._model = dare_model.DAREModel(config["model"], self._env)
 
-    def _compute_rewards(self):
-        if (not self._need_normalizer_update()
-                and not self._model.is_disc_logit_calibrated()):
-            self._calibrate_disc_logit_scale()
-        return super()._compute_rewards()
 
     @torch.no_grad()
-    def _calibrate_disc_logit_scale(self):
-        was_training = self._model.training
-        self._model.eval()
-        try:
-            current_diff = (
-                self._exp_buffer.get_data_flat("disc_obs_demo")
-                - self._exp_buffer.get_data_flat("disc_obs"))
-            replay_count = self._disc_buffer.get_sample_count()
-            replay_diff = (
-                self._disc_buffer.get_data_flat("disc_obs_demo")[:replay_count]
-                - self._disc_buffer.get_data_flat("disc_obs")[:replay_count])
-            gap = anchor_gap(
-                self._model, self._disc_obs_norm, self._pos_diff,
-                current_diff, replay_diff, self.CALIBRATION_BATCH)
-        finally:
-            self._model.train(was_training)
-
-        if not gap > 0.0:
-            raise RuntimeError(
-                "Anchor-gap calibration requires positive separation, got {}"
-                .format(gap))
-
-        scale = ANCHOR_GAP_TARGET / gap
-        self._model.set_disc_logit_scale(scale)
-        self._calibration_gap_raw = gap
-        Logger.print(
-            "DARE anchor calibration at iter {}: M_f={:.4f} kappa={:.4f}"
-            .format(self._iter, gap, scale))
+    def _calc_disc_rewards(self, norm_diff):
+        logits = torch_util.eval_minibatch(
+            self._model.eval_disc, {"disc_obs": norm_diff}, self._disc_eval_batch_size)
+        return add_agent.calc_unscaled_disc_reward(logits.squeeze(-1))
 
     def _compute_disc_loss(self, batch):
         # Keep a30's forward order. PyTorch spectral_norm updates its power
@@ -155,12 +119,6 @@ class DAREAgent(add_agent.ADDAgent):
             "disc_group_width": self._model.get_disc_group_width(),
             "disc_group_total_width": (
                 self._model.get_disc_group_total_width()),
-            "disc_logit_scale": self._model.get_disc_logit_scale(),
-            "disc_anchor_gap": (
-                pos_logit.mean() - neg_logit.mean()).detach(),
-            "disc_anchor_gap_raw": (
-                (pos_logit.mean() - neg_logit.mean())
-                / self._model.get_disc_logit_scale()).detach(),
         }
         if structured is not None:
             info.update(self._group_negative_info(

@@ -1,309 +1,0 @@
-WARNING: GPU 0 (NVIDIA GeForce RTX 5080) negotiated PCIe x1 but supports x16. Check the slot (prefer a CPU x16 slot), any riser/adapter and the BIOS bifurcation setting; effective bandwidth is reduced up to 16x.
-Setting seed: 0.0
-Building add env
-[INFO][AppLauncher]: Using device: cuda:0
-[INFO][AppLauncher]: Loading experience file: /home/y/IsaacLab/apps/isaaclab.python.headless.kit
-Loading user config located at: '/home/y/miniconda3/envs/env_isaaclab/lib/python3.11/site-packages/isaacsim/kit/data/Kit/Isaac-Sim/5.1/user.config.json'
-[Info] [carb] Logging to file: /home/y/miniconda3/envs/env_isaaclab/lib/python3.11/site-packages/isaacsim/kit/logs/Kit/Isaac-Sim/5.1/kit_20261107_182605.log
-2026-11-07T10:26:05Z [2ms] [Warning] [omni.ext.plugin] [ext: isaaclab_contrib] Extensions config 'extension.toml' doesn't exist '/home/y/IsaacLab/source/isaaclab_contrib' or '/home/y/IsaacLab/source/isaaclab_contrib/config'
-2026-11-07T10:26:06Z [72ms] [Warning] [omni.usd_config.extension] Enable omni.materialx.libs extension to use MaterialX
-2026-11-07T10:26:06Z [390ms] [Warning] [carb] Acquiring non optional plugin interface which is not listed as dependency: [omni::physx::IPhysxBenchmarks v1.0] (plugin: <default plugin>), by client: omni.physics.physx.plugin. Add it to CARB_PLUGIN_IMPL_DEPS() macro of a client.
-2026-11-07T10:26:06Z [529ms] [Warning] [omni.isaac.dynamic_control] omni.isaac.dynamic_control is deprecated as of Isaac Sim 4.5. No action is needed from end-users.
-2026-11-07T10:26:07Z [1,992ms] [Warning] [gpu.foundation.plugin] Skipping unsupported non-NVIDIA GPU: Intel(R) UHD Graphics 770 (ADL-S GT1)
-2026-11-07T10:26:07Z [1,992ms] [Warning] [gpu.foundation.plugin] Skipping unsupported non-NVIDIA GPU: Intel(R) UHD Graphics 770 (ADL-S GT1)
-
-|---------------------------------------------------------------------------------------------|
-| Driver Version: 580.173.02    | Graphics API: Vulkan
-|=============================================================================================|
-| GPU | Name                             | Active | LDA | GPU Memory | Vendor-ID | LUID       |
-|     |                                  |        |     |            | Device-ID | UUID       |
-|     |                                  |        |     |            | Bus-ID    |            |
-|---------------------------------------------------------------------------------------------|
-| 0   | NVIDIA GeForce RTX 5080          | Yes: 0 |     | 16303   MB | 10de      | 0          |
-|     |                                  |        |     |            | 2c02      | e16ebef7.. |
-|     |                                  |        |     |            | 1         |            |
-|---------------------------------------------------------------------------------------------|
-| 1   | Intel(R) UHD Graphics 770 (ADL.. |        |     | 48013   MB | 8086      | 0          |
-|     |                                  |        |     |            | 4680      | 86808046.. |
-|     |                                  |        |     |            | 0         |            |
-|=============================================================================================|
-| OS: 22.04.5 LTS (Jammy Jellyfish) ubuntu, Version: 22.04.5, Kernel: 6.8.0-138-generic
-| XServer Vendor: The X.Org Foundation, XServer Version: 12101004 (1.21.1.4)
-| Processor: 12th Gen Intel(R) Core(TM) i9-12900K
-| Bare Metal Cores: 16 | Bare Metal Logical Cores: 32
-| Available Cores:  24 
-|---------------------------------------------------------------------------------------------|
-| Total Memory (MB): 64017 | Free Memory: 53085
-| Total Page/Swap (MB): 2047 | Free Page/Swap: 1798
-|---------------------------------------------------------------------------------------------|
-2026-11-07T10:26:08Z [2,365ms] [Warning] [gpu.foundation.plugin] CPU performance profile is set to powersave. This profile sets the CPU to the lowest frequency reducing performance.
-2026-11-07T10:26:08Z [2,367ms] [Warning] [gpu.foundation.plugin] PCIe link width current (1) and maximum (16) for device 0 don't match.
-2026-11-07T10:26:08Z [2,367ms] [Warning] [gpu.foundation.plugin] IOMMU is enabled.
-2026-11-07T10:26:08Z [2,367ms] [Warning] [gpu.foundation.plugin] Detected IOMMU is enabled. Running CUDA peer-to-peer bandwidth and latency validation.
-Unidirectional P2P=Enabled Bandwidth (P2P Writes) Matrix (GB/s)
-   D\D     0 
-     0 817.21 
-P2P=Enabled Latency (P2P Writes) Matrix (us)
-   GPU     0 
-     0   2.32 
-
-   CPU     0 
-     0   1.47 
-[INFO] IsaacLab logging to file: /tmp/isaaclab_2026-11-07_18-26-08.log
-Building 1/64 envsBuilding 2/64 envsBuilding 3/64 envsBuilding 4/64 envsBuilding 5/64 envsBuilding 6/64 envsBuilding 7/64 envsBuilding 8/64 envsBuilding 9/64 envsBuilding 10/64 envsBuilding 11/64 envsBuilding 12/64 envsBuilding 13/64 envsBuilding 14/64 envsBuilding 15/64 envsBuilding 16/64 envsBuilding 17/64 envsBuilding 18/64 envsBuilding 19/64 envsBuilding 20/64 envsBuilding 21/64 envsBuilding 22/64 envsBuilding 23/64 envsBuilding 24/64 envsBuilding 25/64 envsBuilding 26/64 envsBuilding 27/64 envsBuilding 28/64 envsBuilding 29/64 envsBuilding 30/64 envsBuilding 31/64 envsBuilding 32/64 envsBuilding 33/64 envsBuilding 34/64 envsBuilding 35/64 envsBuilding 36/64 envsBuilding 37/64 envsBuilding 38/64 envsBuilding 39/64 envsBuilding 40/64 envsBuilding 41/64 envsBuilding 42/64 envsBuilding 43/64 envsBuilding 44/64 envsBuilding 45/64 envsBuilding 46/64 envsBuilding 47/64 envsBuilding 48/64 envsBuilding 49/64 envsBuilding 50/64 envsBuilding 51/64 envsBuilding 52/64 envsBuilding 53/64 envsBuilding 54/64 envsBuilding 55/64 envsBuilding 56/64 envsBuilding 57/64 envsBuilding 58/64 envsBuilding 59/64 envsBuilding 60/64 envsBuilding 61/64 envsBuilding 62/64 envsBuilding 63/64 envsBuilding 64/64 envs
-
-Loading 1/1 motion files: data/motions/humanoid/humanoid_crawl.pkl
-Loaded motion file: data/motions/humanoid/humanoid_crawl.pkl
-Loaded 1 motions with a total length of 2.567s.
-Building Obj:0 in 64/64 envs
-Initializing simulation...
-Char 0 properties
-	DoFs: 28
-	Mass: 50.050 kg
-
-Building DARE agent
-/home/y/miniconda3/envs/env_isaaclab/lib/python3.11/site-packages/requests/__init__.py:113: RequestsDependencyWarning: urllib3 (2.6.3) or chardet (7.4.3)/charset_normalizer (3.3.2) doesn't match a supported version!
-  warnings.warn(
-Total parameter count: 4529912
-Logging data to /home/y/my_project/MimicKit/output/paper_benchmark/dare_group_potential_crawl_300_8192_seed0_20261107/pressure/env64_3iters/log.txt
---------------------------------------------------------
-|                          Iteration |               0 |
-|                          Wall_Time |         0.00208 |
-|                            Samples |            2048 |
-|                        Test_Return |               0 |
-|                       Train_Return |               0 |
-|                        Critic_Loss |             109 |
-|                   Critic_Grad_Norm |             173 |
-|                         Actor_Loss |         0.00332 |
-|                          Clip_Frac |           0.503 |
-|                          Imp_Ratio |            1.06 |
-|                  Action_Bound_Loss |               0 |
-|                    Actor_Grad_Norm |              19 |
-|                          Policy_Kl |          0.0634 |
-|             Action_Mean_Update_Rms |         0.00336 |
-|             Action_Mean_Bound_Frac |               0 |
-|                   Policy_Kl_Phase0 |          0.0773 |
-|                   Policy_Kl_Phase1 |          0.0715 |
-|                   Policy_Kl_Phase2 |          0.0679 |
-|                   Policy_Kl_Phase3 |          0.0553 |
-|        Actor_First_Layer_Grad_Norm |            2.93 |
-|                          Disc_Loss |          0.0419 |
-|                      Disc_Cls_Loss |          0.0419 |
-|                       Disc_Pos_Acc |           0.875 |
-|                       Disc_Neg_Acc |           0.995 |
-|                     Disc_Pos_Logit |         0.00154 |
-|                     Disc_Neg_Logit |         -0.0496 |
-|                   Disc_Group_Width |             146 |
-|             Disc_Group_Total_Width |        1.02e+03 |
-|               Disc_Param_Grad_Norm |           0.428 |
-|                           Adv_Mean |            14.6 |
-|                            Adv_Std |            4.92 |
-|                  Phase_Weight_Mean |               1 |
-|                   Phase_Weight_Max |            7.01 |
-|         Phase_Motion_Control_Cells |              77 |
-|              Phase_Resolution_Bins |              73 |
-|          Phase_Actor_Control_Cells |              73 |
-|         Phase_Actor_Partition_Bins |              73 |
-|          Phase_Actor_Occupied_Bins |              73 |
-|             Phase_Actor_Empty_Bins |               0 |
-|  Phase_Actor_Covered_Time_Fraction |               1 |
-|  Phase_Actor_Missing_Control_Cells |               0 |
-|   Phase_Actor_Eligible_Transitions |        2.05e+03 |
-|         Phase_Critic_Control_Cells |              73 |
-|        Phase_Critic_Partition_Bins |              73 |
-|         Phase_Critic_Occupied_Bins |              73 |
-|            Phase_Critic_Empty_Bins |               0 |
-| Phase_Critic_Covered_Time_Fraction |               1 |
-| Phase_Critic_Missing_Control_Cells |               0 |
-|  Phase_Critic_Eligible_Transitions |        2.05e+03 |
-|               Td_Target_Null_Count |        2.05e+03 |
-|                Td_Target_Null_Mean |            13.1 |
-|                 Td_Target_Null_Std |             5.3 |
-|                 Td_Target_Null_P10 |            4.93 |
-|                 Td_Target_Null_P50 |            14.5 |
-|                 Td_Target_Null_P90 |            18.9 |
-|               Td_Target_Fail_Count |               0 |
-|                Td_Target_Fail_Mean |             nan |
-|                 Td_Target_Fail_Std |             nan |
-|                 Td_Target_Fail_P10 |             nan |
-|                 Td_Target_Fail_P50 |             nan |
-|                 Td_Target_Fail_P90 |             nan |
-|               Td_Target_Succ_Count |               0 |
-|                Td_Target_Succ_Mean |             nan |
-|                 Td_Target_Succ_Std |             nan |
-|                 Td_Target_Succ_P10 |             nan |
-|                 Td_Target_Succ_P50 |             nan |
-|                 Td_Target_Succ_P90 |             nan |
-|               Td_Target_Time_Count |               0 |
-|                Td_Target_Time_Mean |             nan |
-|                 Td_Target_Time_Std |             nan |
-|                 Td_Target_Time_P10 |             nan |
-|                 Td_Target_Time_P50 |             nan |
-|                 Td_Target_Time_P90 |             nan |
-|                   Disc_Reward_Mean |            1.35 |
-|                    Disc_Reward_Std |          0.0241 |
-|           Rollout_Start_Phase_Mean |           0.514 |
-|      Rollout_Start_Phase_Zero_Frac |               0 |
-|                           Exp_Prob |               1 |
---------------------------------------------------------
---------------------------------------------------------
-|                          Iteration |               1 |
-|                          Wall_Time |         0.00242 |
-|                            Samples |            4096 |
-|                        Test_Return |               0 |
-|                       Train_Return |               0 |
-|                        Critic_Loss |            43.3 |
-|                   Critic_Grad_Norm |             142 |
-|                         Actor_Loss |          0.0162 |
-|                          Clip_Frac |           0.732 |
-|                          Imp_Ratio |            1.17 |
-|                  Action_Bound_Loss |               0 |
-|                    Actor_Grad_Norm |              22 |
-|                          Policy_Kl |           0.346 |
-|             Action_Mean_Update_Rms |         0.00786 |
-|             Action_Mean_Bound_Frac |               0 |
-|                   Policy_Kl_Phase0 |           0.307 |
-|                   Policy_Kl_Phase1 |           0.491 |
-|                   Policy_Kl_Phase2 |           0.458 |
-|                   Policy_Kl_Phase3 |           0.212 |
-|        Actor_First_Layer_Grad_Norm |            2.45 |
-|                          Disc_Loss |            0.04 |
-|                      Disc_Cls_Loss |            0.04 |
-|                       Disc_Pos_Acc |               1 |
-|                       Disc_Neg_Acc |               1 |
-|                     Disc_Pos_Logit |         0.00751 |
-|                     Disc_Neg_Logit |          -0.173 |
-|                   Disc_Group_Width |             146 |
-|             Disc_Group_Total_Width |        1.02e+03 |
-|               Disc_Param_Grad_Norm |           0.633 |
-|                           Adv_Mean |            12.5 |
-|                            Adv_Std |            4.33 |
-|                  Phase_Weight_Mean |               1 |
-|                   Phase_Weight_Max |            7.76 |
-|         Phase_Motion_Control_Cells |              77 |
-|              Phase_Resolution_Bins |               8 |
-|          Phase_Actor_Control_Cells |               8 |
-|         Phase_Actor_Partition_Bins |               8 |
-|          Phase_Actor_Occupied_Bins |               8 |
-|             Phase_Actor_Empty_Bins |               0 |
-|  Phase_Actor_Covered_Time_Fraction |               1 |
-|  Phase_Actor_Missing_Control_Cells |               0 |
-|   Phase_Actor_Eligible_Transitions |        2.05e+03 |
-|         Phase_Critic_Control_Cells |               8 |
-|        Phase_Critic_Partition_Bins |               8 |
-|         Phase_Critic_Occupied_Bins |               8 |
-|            Phase_Critic_Empty_Bins |               0 |
-| Phase_Critic_Covered_Time_Fraction |               1 |
-| Phase_Critic_Missing_Control_Cells |               0 |
-|  Phase_Critic_Eligible_Transitions |        2.05e+03 |
-|               Td_Target_Null_Count |        2.05e+03 |
-|                Td_Target_Null_Mean |              16 |
-|                 Td_Target_Null_Std |            4.91 |
-|                 Td_Target_Null_P10 |            8.25 |
-|                 Td_Target_Null_P50 |            17.1 |
-|                 Td_Target_Null_P90 |            21.6 |
-|               Td_Target_Fail_Count |               0 |
-|                Td_Target_Fail_Mean |             nan |
-|                 Td_Target_Fail_Std |             nan |
-|                 Td_Target_Fail_P10 |             nan |
-|                 Td_Target_Fail_P50 |             nan |
-|                 Td_Target_Fail_P90 |             nan |
-|               Td_Target_Succ_Count |               0 |
-|                Td_Target_Succ_Mean |             nan |
-|                 Td_Target_Succ_Std |             nan |
-|                 Td_Target_Succ_P10 |             nan |
-|                 Td_Target_Succ_P50 |             nan |
-|                 Td_Target_Succ_P90 |             nan |
-|               Td_Target_Time_Count |               0 |
-|                Td_Target_Time_Mean |             nan |
-|                 Td_Target_Time_Std |             nan |
-|                 Td_Target_Time_P10 |             nan |
-|                 Td_Target_Time_P50 |             nan |
-|                 Td_Target_Time_P90 |             nan |
-|                   Disc_Reward_Mean |            1.27 |
-|                    Disc_Reward_Std |          0.0258 |
-|           Rollout_Start_Phase_Mean |           0.486 |
-|      Rollout_Start_Phase_Zero_Frac |               0 |
-|                           Exp_Prob |               1 |
---------------------------------------------------------
---------------------------------------------------------
-|                          Iteration |               2 |
-|                          Wall_Time |         0.00362 |
-|                            Samples |            6144 |
-|                        Test_Return |               0 |
-|                       Train_Return |               0 |
-|                        Critic_Loss |            35.9 |
-|                   Critic_Grad_Norm |             133 |
-|                         Actor_Loss |          0.0194 |
-|                          Clip_Frac |           0.702 |
-|                          Imp_Ratio |           0.987 |
-|                  Action_Bound_Loss |               0 |
-|                    Actor_Grad_Norm |            19.9 |
-|                          Policy_Kl |            0.18 |
-|             Action_Mean_Update_Rms |         0.00567 |
-|             Action_Mean_Bound_Frac |               0 |
-|                   Policy_Kl_Phase0 |           0.509 |
-|                   Policy_Kl_Phase1 |           0.192 |
-|                   Policy_Kl_Phase2 |           0.106 |
-|                   Policy_Kl_Phase3 |           0.191 |
-|        Actor_First_Layer_Grad_Norm |            2.92 |
-|                          Disc_Loss |          0.0379 |
-|                      Disc_Cls_Loss |          0.0379 |
-|                       Disc_Pos_Acc |               1 |
-|                       Disc_Neg_Acc |               1 |
-|                     Disc_Pos_Logit |          0.0152 |
-|                     Disc_Neg_Logit |          -0.316 |
-|                   Disc_Group_Width |             146 |
-|             Disc_Group_Total_Width |        1.02e+03 |
-|               Disc_Param_Grad_Norm |           0.649 |
-|                           Adv_Mean |            8.01 |
-|                            Adv_Std |            6.16 |
-|                  Phase_Weight_Mean |               1 |
-|                   Phase_Weight_Max |               1 |
-|         Phase_Motion_Control_Cells |              77 |
-|              Phase_Resolution_Bins |               1 |
-|          Phase_Actor_Control_Cells |               1 |
-|         Phase_Actor_Partition_Bins |               1 |
-|          Phase_Actor_Occupied_Bins |               1 |
-|             Phase_Actor_Empty_Bins |               0 |
-|  Phase_Actor_Covered_Time_Fraction |               1 |
-|  Phase_Actor_Missing_Control_Cells |               0 |
-|   Phase_Actor_Eligible_Transitions |        2.05e+03 |
-|         Phase_Critic_Control_Cells |               1 |
-|        Phase_Critic_Partition_Bins |               1 |
-|         Phase_Critic_Occupied_Bins |               1 |
-|            Phase_Critic_Empty_Bins |               0 |
-| Phase_Critic_Covered_Time_Fraction |               1 |
-| Phase_Critic_Missing_Control_Cells |               0 |
-|  Phase_Critic_Eligible_Transitions |        2.05e+03 |
-|               Td_Target_Null_Count |        2.03e+03 |
-|                Td_Target_Null_Mean |            22.8 |
-|                 Td_Target_Null_Std |            5.49 |
-|                 Td_Target_Null_P10 |            15.6 |
-|                 Td_Target_Null_P50 |            23.8 |
-|                 Td_Target_Null_P90 |            29.1 |
-|               Td_Target_Fail_Count |              15 |
-|                Td_Target_Fail_Mean |            1.12 |
-|                 Td_Target_Fail_Std |          0.0127 |
-|                 Td_Target_Fail_P10 |             1.1 |
-|                 Td_Target_Fail_P50 |            1.12 |
-|                 Td_Target_Fail_P90 |            1.14 |
-|               Td_Target_Succ_Count |               0 |
-|                Td_Target_Succ_Mean |             nan |
-|                 Td_Target_Succ_Std |             nan |
-|                 Td_Target_Succ_P10 |             nan |
-|                 Td_Target_Succ_P50 |             nan |
-|                 Td_Target_Succ_P90 |             nan |
-|               Td_Target_Time_Count |               0 |
-|                Td_Target_Time_Mean |             nan |
-|                 Td_Target_Time_Std |             nan |
-|                 Td_Target_Time_P10 |             nan |
-|                 Td_Target_Time_P50 |             nan |
-|                 Td_Target_Time_P90 |             nan |
-|                   Disc_Reward_Mean |            1.14 |
-|                    Disc_Reward_Std |          0.0225 |
-|           Rollout_Start_Phase_Mean |           0.811 |
-|      Rollout_Start_Phase_Zero_Frac |               0 |
-|                           Exp_Prob |               1 |
---------------------------------------------------------
-AUDITED_TRAINING_COMPLETE {"status": "complete", "next_iter": 3, "sample_count": 6144, "resume_count": 0, "finite_model_and_optimizer_tensors": 136, "optimizer_steps": {"_actor_optimizer": 120, "_critic_optimizer": 96, "_disc_optimizer": 96}}
