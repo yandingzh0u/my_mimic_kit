@@ -40,10 +40,36 @@ def parse_static_object_specs(env_config):
     return specs
 
 
+def compose_reference_pd_targets(kin_model, residual_dof, reference_joint_rot):
+    """Apply existing-scale residuals in the reference joint coordinates.
+
+    Spherical joints use left quaternion composition, as in ProtoMotions.
+    Hinges add angles directly so legal targets beyond pi do not wrap.
+    """
+    targets = torch.empty_like(residual_dof)
+    for j in range(1, kin_model.get_num_joints()):
+        joint = kin_model.get_joint(j)
+        dim = joint.get_dof_dim()
+        if dim == 0:
+            continue
+        residual = joint.get_joint_dof(residual_dof)
+        reference = reference_joint_rot[..., j - 1, :]
+        if dim == 1:
+            target = joint.rot_to_dof(reference) + residual
+        else:
+            target = joint.rot_to_dof(torch_util.quat_mul(
+                joint.dof_to_rot(residual), reference))
+        joint.set_joint_dof(target, targets)
+    return targets
+
+
 class DeepMimicEnv(char_env.CharEnv):
     def __init__(self, env_config, engine_config, num_envs, device, visualize, record_video=False):
         self._static_object_specs = parse_static_object_specs(env_config)
         self._object_motion = self._load_object_motion(env_config.get("object_motion_file"), device)
+        self._reference_centered_actions = env_config.get("reference_centered_actions", False)
+        if not isinstance(self._reference_centered_actions, bool):
+            raise ValueError("reference_centered_actions must be a boolean")
         self._enable_early_termination = env_config["enable_early_termination"]
         self._num_phase_encoding = env_config.get("num_phase_encoding", 0)
 
@@ -147,6 +173,25 @@ class DeepMimicEnv(char_env.CharEnv):
         self._update_object_motion()
         super()._pre_physics_step(actions)
         return
+
+    def _apply_action(self, actions):
+        if self._reference_centered_actions:
+            # PPO continues to store/evaluate the original action coordinates.
+            # Their midpoint and scale are unchanged; only the PD center moves.
+            bounded = torch.minimum(torch.maximum(actions, self._action_bound_low),
+                                    self._action_bound_high)
+            midpoint = 0.5 * (self._action_bound_low + self._action_bound_high)
+            residual = bounded - midpoint
+            # The command acts over the upcoming control interval, matching the
+            # first future target and post-step reward clock. Headless ref DOF
+            # caches are visualization-only and must not be used here.
+            times = self._get_motion_times() + self._engine.get_timestep()
+            reference_rot = self._motion_lib.calc_motion_frame(self._motion_ids, times)[4]
+            actions = compose_reference_pd_targets(
+                self._kin_char_model, residual, reference_rot)
+        # Retain the original absolute PD target limits as well.
+        super()._apply_action(actions)
+        return
     
     def get_reward_succ(self):
         # setting the success reward to 0 at the end of the motion avoids the
@@ -246,6 +291,9 @@ class DeepMimicEnv(char_env.CharEnv):
 
     def _build_sim_tensors(self, env_config):
         super()._build_sim_tensors(env_config)
+        if self._reference_centered_actions and self._engine.get_control_mode() not in (
+                engine.ControlMode.pos, engine.ControlMode.pd_explicit):
+            raise ValueError("reference_centered_actions requires position control")
         
         num_envs = self.get_num_envs()
         self._motion_ids = torch.zeros(num_envs, device=self._device, dtype=torch.int64)
