@@ -15,6 +15,7 @@ Instructions for each method are available here:
 - [ASE - Adversarial Skill Embeddings](docs/README_ASE.md)
 - [LCP - Lipschitz-Constrained Policies](docs/README_LCP.md)
 - [ADD - Adversarial Differential Discriminator](docs/README_ADD.md)
+- [DARE - Constrained Monotonic Neural Network discriminator](docs/README_DARE.md)
 - [SMP - Score-Matching Motion Priors](docs/README_SMP.md)
 
 ---

@@ -1,6 +1,5 @@
 import numpy as np
 import torch
-import os
 
 import anim.motion as motion
 import anim.motion_lib as motion_lib
@@ -40,36 +39,11 @@ def parse_static_object_specs(env_config):
     return specs
 
 
-def compose_reference_pd_targets(kin_model, residual_dof, reference_joint_rot):
-    """Apply existing-scale residuals in the reference joint coordinates.
-
-    Spherical joints use left quaternion composition, as in ProtoMotions.
-    Hinges add angles directly so legal targets beyond pi do not wrap.
-    """
-    targets = torch.empty_like(residual_dof)
-    for j in range(1, kin_model.get_num_joints()):
-        joint = kin_model.get_joint(j)
-        dim = joint.get_dof_dim()
-        if dim == 0:
-            continue
-        residual = joint.get_joint_dof(residual_dof)
-        reference = reference_joint_rot[..., j - 1, :]
-        if dim == 1:
-            target = joint.rot_to_dof(reference) + residual
-        else:
-            target = joint.rot_to_dof(torch_util.quat_mul(
-                joint.dof_to_rot(residual), reference))
-        joint.set_joint_dof(target, targets)
-    return targets
-
-
 class DeepMimicEnv(char_env.CharEnv):
     def __init__(self, env_config, engine_config, num_envs, device, visualize, record_video=False):
         self._static_object_specs = parse_static_object_specs(env_config)
-        self._object_motion = self._load_object_motion(env_config.get("object_motion_file"), device)
-        self._reference_centered_actions = env_config.get("reference_centered_actions", False)
-        if not isinstance(self._reference_centered_actions, bool):
-            raise ValueError("reference_centered_actions must be a boolean")
+        if env_config.get("reference_centered_actions", False):
+            raise ValueError("Reference-centered actions were removed; use absolute PD commands")
         self._enable_early_termination = env_config["enable_early_termination"]
         self._num_phase_encoding = env_config.get("num_phase_encoding", 0)
 
@@ -108,91 +82,6 @@ class DeepMimicEnv(char_env.CharEnv):
                          record_video=record_video)
         return
 
-    def _load_object_motion(self, filename, device):
-        """Load an optional kinematic object trajectory aligned to the motion."""
-        if not filename:
-            return None
-        if not os.path.isfile(filename):
-            raise FileNotFoundError("object_motion_file does not exist: {}".format(filename))
-        data = np.load(filename)
-        required = ("fps", "object_pos_w", "object_quat_w", "object_lin_vel_w", "object_ang_vel_w")
-        missing = [key for key in required if key not in data.files]
-        if missing:
-            raise ValueError("object motion is missing fields: {}".format(missing))
-        fps = float(np.asarray(data["fps"]).reshape(-1)[0])
-        pos = np.asarray(data["object_pos_w"], dtype=np.float32)
-        quat = np.asarray(data["object_quat_w"], dtype=np.float32)
-        lin = np.asarray(data["object_lin_vel_w"], dtype=np.float32)
-        ang = np.asarray(data["object_ang_vel_w"], dtype=np.float32)
-        n = pos.shape[0]
-        if pos.shape != (n, 3) or quat.shape != (n, 4) or lin.shape != (n, 3) or ang.shape != (n, 3):
-            raise ValueError("object trajectory fields have inconsistent shapes")
-        return {
-            "fps": fps,
-            "pos": torch.tensor(pos, device=device),
-            # Source NPZ stores Isaac wxyz; engine setters accept xyzw.
-            "quat": torch.tensor(quat[:, [1, 2, 3, 0]], device=device),
-            "lin": torch.tensor(lin, device=device),
-            "ang": torch.tensor(ang, device=device),
-        }
-
-    def _object_state_at(self, times):
-        motion = self._object_motion
-        frame = torch.clamp(times * motion["fps"], 0.0, motion["pos"].shape[0] - 1.0)
-        low = torch.floor(frame).long()
-        high = torch.minimum(low + 1, torch.tensor(motion["pos"].shape[0] - 1, device=self._device))
-        alpha = (frame - low).unsqueeze(-1)
-
-        def lerp(values):
-            return values[low] * (1.0 - alpha) + values[high] * alpha
-
-        quat = lerp(motion["quat"])
-        quat = quat / torch.linalg.vector_norm(quat, dim=-1, keepdim=True).clamp_min(1e-8)
-        return lerp(motion["pos"]), quat, lerp(motion["lin"]), lerp(motion["ang"])
-
-    def _update_object_motion(self, env_ids=None):
-        if self._object_motion is None or len(self._static_object_specs) == 0:
-            return
-        # The current interaction config contains one box after the character.
-        obj_id = 1
-        times = self._get_motion_times(env_ids)
-        pos, quat, lin, ang = self._object_state_at(times)
-        self._engine.set_root_pos(env_ids, obj_id, pos)
-        self._engine.set_root_rot(env_ids, obj_id, quat)
-        self._engine.set_root_vel(env_ids, obj_id, lin)
-        self._engine.set_root_ang_vel(env_ids, obj_id, ang)
-
-    def _reset_envs(self, env_ids):
-        super()._reset_envs(env_ids)
-        self._update_object_motion(env_ids)
-        return
-
-    def _pre_physics_step(self, actions):
-        # Keep the box on the reference trajectory while the policy controls
-        # the robot.  The object is kinematic in this first interaction task.
-        self._update_object_motion()
-        super()._pre_physics_step(actions)
-        return
-
-    def _apply_action(self, actions):
-        if self._reference_centered_actions:
-            # PPO continues to store/evaluate the original action coordinates.
-            # Their midpoint and scale are unchanged; only the PD center moves.
-            bounded = torch.minimum(torch.maximum(actions, self._action_bound_low),
-                                    self._action_bound_high)
-            midpoint = 0.5 * (self._action_bound_low + self._action_bound_high)
-            residual = bounded - midpoint
-            # The command acts over the upcoming control interval, matching the
-            # first future target and post-step reward clock. Headless ref DOF
-            # caches are visualization-only and must not be used here.
-            times = self._get_motion_times() + self._engine.get_timestep()
-            reference_rot = self._motion_lib.calc_motion_frame(self._motion_ids, times)[4]
-            actions = compose_reference_pd_targets(
-                self._kin_char_model, residual, reference_rot)
-        # Retain the original absolute PD target limits as well.
-        super()._apply_action(actions)
-        return
-    
     def get_reward_succ(self):
         # setting the success reward to 0 at the end of the motion avoids the
         # local minimal of a character just standing still until the end of the motion
@@ -219,23 +108,6 @@ class DeepMimicEnv(char_env.CharEnv):
         motion_len = self._motion_lib.get_motion_length(motion_ids)
         return torch.clamp(
             motion_times / torch.clamp_min(motion_len, 1e-6), 0.0, 1.0)
-
-    def get_motion_sampling_spec(self):
-        return ([self._motion_lib.get_motion_duration(i)
-                 for i in range(self._motion_lib.get_num_motions())],
-                self._engine.get_timestep())
-
-    def enable_phase_coverage_resets(self, cells):
-        from util.phase_coverage import PhaseCoverage
-        if not self._rand_reset or self._motion_lib.get_num_motions() != 1:
-            raise ValueError("Phase coverage requires random resets and one reference motion")
-        self._phase_coverage = PhaseCoverage(cells)
-
-    def get_phase_coverage_state(self):
-        return self._phase_coverage.state_dict()
-
-    def load_phase_coverage_state(self, state):
-        self._phase_coverage.load_state_dict(state)
 
     def record_diagnostics(self):
         if (self._log_tracking_error):
@@ -291,9 +163,6 @@ class DeepMimicEnv(char_env.CharEnv):
 
     def _build_sim_tensors(self, env_config):
         super()._build_sim_tensors(env_config)
-        if self._reference_centered_actions and self._engine.get_control_mode() not in (
-                engine.ControlMode.pos, engine.ControlMode.pd_explicit):
-            raise ValueError("reference_centered_actions requires position control")
         
         num_envs = self.get_num_envs()
         self._motion_ids = torch.zeros(num_envs, device=self._device, dtype=torch.int64)
@@ -510,11 +379,7 @@ class DeepMimicEnv(char_env.CharEnv):
                         or (self._mode == base_env.EnvMode.TEST
                             and getattr(self, "_test_random_start", False)))
         if (self._rand_reset and random_start):
-            coverage = getattr(self, "_phase_coverage", None)
-            if self._mode == base_env.EnvMode.TRAIN and coverage is not None:
-                motion_times = coverage.draw_times(self._motion_lib.get_motion_length(motion_ids))
-            else:
-                motion_times = self._motion_lib.sample_time(motion_ids)
+            motion_times = self._motion_lib.sample_time(motion_ids)
         else:
             motion_times = torch.zeros(n, dtype=torch.float, device=self._device)
 

@@ -58,7 +58,7 @@ from tools.paper_eval.input_geometry import InputGeometryAccumulator  # noqa: E4
 
 
 SCHEMA_VERSION = 1
-CONDITIONS = ("nominal", "zero_e", "zero_m", "shuffle_m", "reverse_e")
+CONDITIONS = ("nominal",)
 START_MODES = ("phase0", "random", "grid")
 
 
@@ -143,10 +143,8 @@ def infer_method(
         return "AMP"
     if agent_name == "ADD":
         return "ADD"
-    if agent_name == "DARE":
+    if agent_name in ("DARE", "DAREMONOTONE"):
         return "DARE"
-    if agent_name in ("RCCI_ADD", "ALIGNED_ADD"):
-        return "RCCI" if agent_name == "RCCI_ADD" else "AlignedADD"
     return agent_name or env_name or "unknown"
 
 
@@ -409,50 +407,6 @@ def _reset_with_protocol(env, start_mode: str):
     return env._obs_buf, env._info
 
 
-def _command_layout(env) -> tuple[str, int, int]:
-    if hasattr(env, "get_rcci_phi_dim"):
-        representation = env.get_rcci_representation()
-        if representation != "residual":
-            return "rcci_absolute", env.get_rcci_self_obs_dim(), env.get_rcci_phi_dim()
-        return "rcci_residual", env.get_rcci_self_obs_dim(), env.get_rcci_phi_dim()
-    if hasattr(env, "get_aligned_command_dim"):
-        return "aligned", env.get_aligned_self_obs_dim(), env.get_aligned_command_dim()
-    return "none", 0, 0
-
-
-def _input_geometry_blocks(
-    layout: str, self_dim: int, phi_dim: int, obs_dim: int
-) -> tuple[dict[str, slice], tuple[tuple[str, str], ...]]:
-    if layout == "aligned":
-        return (
-            {
-                "self": slice(0, self_dim),
-                "feedback_error": slice(self_dim, self_dim + phi_dim),
-                "feedforward_motion": slice(
-                    self_dim + phi_dim, self_dim + 2 * phi_dim
-                ),
-            },
-            (("feedback_error", "feedforward_motion"),),
-        )
-    if layout in ("rcci_residual", "rcci_absolute"):
-        names = (
-            ("state_feature", "feedback_error", "feedforward_motion")
-            if layout == "rcci_residual"
-            else ("state_feature", "reference_current", "reference_next")
-        )
-        blocks = {"self": slice(0, self_dim)}
-        for index, name in enumerate(names):
-            start = self_dim + index * phi_dim
-            blocks[name] = slice(start, start + phi_dim)
-        paired = (
-            ((names[1], names[2]),)
-            if names[1] != "feedback_error"
-            else (("feedback_error", "feedforward_motion"),)
-        )
-        return blocks, paired
-    return {"actor_input": slice(0, obs_dim)}, ()
-
-
 def _slice_info_batch(info: Mapping[str, Any], size: int) -> dict[str, Any]:
     sliced: dict[str, Any] = {}
     for key, value in info.items():
@@ -480,51 +434,6 @@ def _measure_batch1_policy_latency(
         if torch.cuda.is_available() and torch.device(device).type == "cuda":
             torch.cuda.synchronize(device)
     return 1e6 * (time.perf_counter() - start) / repeats
-
-
-def intervene_observation(
-    obs: torch.Tensor,
-    condition: str,
-    layout: str,
-    self_dim: int,
-    phi_dim: int,
-    shuffle_index: torch.Tensor | None = None,
-) -> torch.Tensor:
-    """Apply an inference-only command intervention to a raw observation."""
-
-    if condition == "nominal":
-        return obs
-    if layout not in ("aligned", "rcci_residual"):
-        raise ValueError(
-            f"{condition} requires a residual [e,m] policy interface, got {layout}"
-        )
-
-    if layout == "aligned":
-        e_start = self_dim
-    else:
-        # RCCI raw observation is [self, x_t, e_t, m_t].
-        e_start = self_dim + phi_dim
-    m_start = e_start + phi_dim
-    if obs.shape[-1] < m_start + phi_dim:
-        raise ValueError("observation is too short for the declared command layout")
-
-    result = obs.clone()
-    e_slice = slice(e_start, e_start + phi_dim)
-    m_slice = slice(m_start, m_start + phi_dim)
-    if condition == "zero_e":
-        result[..., e_slice] = 0.0
-    elif condition == "zero_m":
-        result[..., m_slice] = 0.0
-    elif condition == "reverse_e":
-        result[..., e_slice] = -result[..., e_slice]
-    elif condition == "shuffle_m":
-        if shuffle_index is None:
-            raise ValueError("shuffle_m requires a shuffle index")
-        motion = result[..., m_slice].clone()
-        result[..., m_slice] = motion[shuffle_index]
-    else:
-        raise ValueError(f"unsupported intervention: {condition}")
-    return result
 
 
 def _policy_reward(agent, info, env_reward: torch.Tensor) -> torch.Tensor:
@@ -579,12 +488,8 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
         raise ValueError("num_envs must be positive")
     if args.steps < 0:
         raise ValueError("steps must be nonnegative")
-    if args.condition == "shuffle_m" and args.num_envs < 2:
-        raise ValueError("shuffle_m requires at least two environments")
-    if args.condition == "shuffle_m" and args.start_mode == "phase0":
-        raise ValueError(
-            "shuffle_m is identical at a shared phase0; use random or grid starts"
-        )
+    if args.condition != "nominal":
+        raise ValueError("Only nominal policy evaluation is supported")
 
     model_file = resolve_repo_path(args.model_file)
     env_file = resolve_repo_path(args.env_config)
@@ -639,20 +544,8 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
         agent.set_mode(base_agent.AgentMode.TEST)
 
         obs, info = _reset_with_protocol(env, args.start_mode)
-        layout, self_dim, phi_dim = _command_layout(env)
-        if args.condition != "nominal" and layout not in (
-            "aligned",
-            "rcci_residual",
-        ):
-            raise ValueError(
-                f"condition {args.condition} is unsupported for {layout} observations"
-            )
-
-        geometry_blocks, geometry_pairs = _input_geometry_blocks(
-            layout, self_dim, phi_dim, int(obs.shape[-1])
-        )
         input_geometry = InputGeometryAccumulator(
-            geometry_blocks, args.device, geometry_pairs
+            {"actor_input": slice(0, int(obs.shape[-1]))}, args.device
         )
 
         num_envs = env.get_num_envs()
@@ -682,9 +575,6 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
             # protocol even if their training YAML used a shorter episode.
             env._episode_length = max(original_episode_length, steps * dt)
 
-        shuffle_index = torch.roll(
-            torch.arange(num_envs, device=args.device, dtype=torch.long), shifts=1
-        )
         alive = torch.ones(num_envs, device=args.device, dtype=torch.bool)
         first_done_step = torch.full(
             (num_envs,), steps, device=args.device, dtype=torch.long
@@ -743,36 +633,17 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
         with torch.no_grad():
             for step in range(steps):
                 active_before = alive.clone()
-                nominal_obs = obs
-                normalized_nominal_obs = agent._obs_norm.normalize(nominal_obs)
-                input_geometry.update(normalized_nominal_obs, active_before)
-                actor_obs = intervene_observation(
-                    nominal_obs,
-                    args.condition,
-                    layout,
-                    self_dim,
-                    phi_dim,
-                    shuffle_index,
-                )
+                normalized_obs = agent._obs_norm.normalize(obs)
+                input_geometry.update(normalized_obs, active_before)
 
                 if torch.cuda.is_available() and torch.device(args.device).type == "cuda":
                     torch.cuda.synchronize(args.device)
                 decision_start = time.perf_counter()
-                nominal_action, _ = agent._decide_action(nominal_obs, info)
-                if args.condition == "nominal":
-                    action = nominal_action
-                else:
-                    action, _ = agent._decide_action(actor_obs, info)
+                action, _ = agent._decide_action(obs, info)
                 if torch.cuda.is_available() and torch.device(args.device).type == "cuda":
                     torch.cuda.synchronize(args.device)
                 decision_seconds += time.perf_counter() - decision_start
 
-                action_delta = torch.linalg.vector_norm(
-                    action - nominal_action, dim=-1
-                )
-                action_delta_sum += torch.where(
-                    active_before, action_delta, torch.zeros_like(action_delta)
-                )
                 action = torch.where(active_before.unsqueeze(-1), action, torch.zeros_like(action))
                 obs, env_reward, done, info = env.step(action)
                 if args.save_disc_diffs:
@@ -1002,11 +873,6 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
             "agent_sha256": sha256_file(agent_file),
             "engine_sha256": sha256_file(engine_file),
         }
-        representation = (
-            env.get_rcci_representation()
-            if hasattr(env, "get_rcci_representation")
-            else None
-        )
         executed_steps = len(ts_alive)
         evaluated_samples = int(torch.sum(step_count).detach().cpu().item())
         peak_gpu_memory_mb = 0.0
@@ -1022,7 +888,7 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
             "metadata": {
                 "method": method,
                 "motion": motion_name,
-                "representation": representation,
+                "representation": None,
                 "condition": args.condition,
                 **({"reward_diagnostic": reward_diagnostic_name}
                    if reward_diagnostic_name == "base_learned_unweighted"

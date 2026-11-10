@@ -1,76 +1,0 @@
-/home/y/miniconda3/envs/env_isaaclab/lib/python3.11/site-packages/requests/__init__.py:113: RequestsDependencyWarning: urllib3 (2.6.3) or chardet (7.4.3)/charset_normalizer (3.3.2) doesn't match a supported version!
-  warnings.warn(
-BUILD_CPU_ENV
-Building add env
-[INFO][AppLauncher]: Using device: cpu
-[INFO][AppLauncher]: Loading experience file: /home/y/IsaacLab/apps/isaaclab.python.headless.kit
-Loading user config located at: '/home/y/miniconda3/envs/env_isaaclab/lib/python3.11/site-packages/isaacsim/kit/data/Kit/Isaac-Sim/5.1/user.config.json'
-[Info] [carb] Logging to file: /home/y/miniconda3/envs/env_isaaclab/lib/python3.11/site-packages/isaacsim/kit/logs/Kit/Isaac-Sim/5.1/kit_20261109_212731.log
-2026-11-09T13:27:31Z [2ms] [Warning] [omni.ext.plugin] [ext: isaaclab_contrib] Extensions config 'extension.toml' doesn't exist '/home/y/IsaacLab/source/isaaclab_contrib' or '/home/y/IsaacLab/source/isaaclab_contrib/config'
-2026-11-09T13:27:31Z [64ms] [Warning] [omni.usd_config.extension] Enable omni.materialx.libs extension to use MaterialX
-2026-11-09T13:27:32Z [409ms] [Warning] [carb] Acquiring non optional plugin interface which is not listed as dependency: [omni::physx::IPhysxBenchmarks v1.0] (plugin: <default plugin>), by client: omni.physics.physx.plugin. Add it to CARB_PLUGIN_IMPL_DEPS() macro of a client.
-2026-11-09T13:27:32Z [542ms] [Warning] [omni.isaac.dynamic_control] omni.isaac.dynamic_control is deprecated as of Isaac Sim 4.5. No action is needed from end-users.
-2026-11-09T13:27:33Z [2,162ms] [Warning] [gpu.foundation.plugin] Skipping unsupported non-NVIDIA GPU: Intel(R) UHD Graphics 770 (ADL-S GT1)
-2026-11-09T13:27:33Z [2,162ms] [Warning] [gpu.foundation.plugin] Skipping unsupported non-NVIDIA GPU: Intel(R) UHD Graphics 770 (ADL-S GT1)
-
-|---------------------------------------------------------------------------------------------|
-| Driver Version: 580.173.02    | Graphics API: Vulkan
-|=============================================================================================|
-| GPU | Name                             | Active | LDA | GPU Memory | Vendor-ID | LUID       |
-|     |                                  |        |     |            | Device-ID | UUID       |
-|     |                                  |        |     |            | Bus-ID    |            |
-|---------------------------------------------------------------------------------------------|
-| 0   | NVIDIA GeForce RTX 5080          | Yes: 0 |     | 16303   MB | 10de      | 0          |
-|     |                                  |        |     |            | 2c02      | e16ebef7.. |
-|     |                                  |        |     |            | 1         |            |
-|---------------------------------------------------------------------------------------------|
-| 1   | Intel(R) UHD Graphics 770 (ADL.. |        |     | 48013   MB | 8086      | 0          |
-|     |                                  |        |     |            | 4680      | 86808046.. |
-|     |                                  |        |     |            | 0         |            |
-|=============================================================================================|
-| OS: 22.04.5 LTS (Jammy Jellyfish) ubuntu, Version: 22.04.5, Kernel: 6.8.0-138-generic
-| XServer Vendor: The X.Org Foundation, XServer Version: 12101004 (1.21.1.4)
-| Processor: 12th Gen Intel(R) Core(TM) i9-12900K
-| Bare Metal Cores: 16 | Bare Metal Logical Cores: 32
-| Available Cores:  24 
-|---------------------------------------------------------------------------------------------|
-| Total Memory (MB): 64017 | Free Memory: 48119
-| Total Page/Swap (MB): 2047 | Free Page/Swap: 2047
-|---------------------------------------------------------------------------------------------|
-2026-11-09T13:27:34Z [2,519ms] [Warning] [gpu.foundation.plugin] CPU performance profile is set to powersave. This profile sets the CPU to the lowest frequency reducing performance.
-2026-11-09T13:27:34Z [2,528ms] [Warning] [gpu.foundation.plugin] PCIe link width current (1) and maximum (16) for device 0 don't match.
-2026-11-09T13:27:34Z [2,528ms] [Warning] [gpu.foundation.plugin] IOMMU is enabled.
-2026-11-09T13:27:34Z [2,528ms] [Warning] [gpu.foundation.plugin] Detected IOMMU is enabled. Running CUDA peer-to-peer bandwidth and latency validation.
-Unidirectional P2P=Enabled Bandwidth (P2P Writes) Matrix (GB/s)
-   D\D     0 
-     0 824.97 
-P2P=Enabled Latency (P2P Writes) Matrix (us)
-   GPU     0 
-     0   2.05 
-
-   CPU     0 
-     0   1.49 
-2026-11-09T13:27:34Z [2,573ms] [Warning] [omni.kvdb.plugin] Disabling key-value database because another kit process is locking it
-[INFO] IsaacLab logging to file: /tmp/isaaclab_2026-11-09_21-27-34.log
-Building 1/32 envsBuilding 2/32 envsBuilding 3/32 envsBuilding 4/32 envsBuilding 5/32 envsBuilding 6/32 envsBuilding 7/32 envsBuilding 8/32 envsBuilding 9/32 envsBuilding 10/32 envsBuilding 11/32 envsBuilding 12/32 envsBuilding 13/32 envsBuilding 14/32 envsBuilding 15/32 envsBuilding 16/32 envsBuilding 17/32 envsBuilding 18/32 envsBuilding 19/32 envsBuilding 20/32 envsBuilding 21/32 envsBuilding 22/32 envsBuilding 23/32 envsBuilding 24/32 envsBuilding 25/32 envsBuilding 26/32 envsBuilding 27/32 envsBuilding 28/32 envsBuilding 29/32 envsBuilding 30/32 envsBuilding 31/32 envsBuilding 32/32 envs
-
-Loading 1/1 motion files: data/motions/humanoid/humanoid_backflip.pkl
-Loaded motion file: data/motions/humanoid/humanoid_backflip.pkl
-Loaded 1 motions with a total length of 1.750s.
-Building Obj:0 in 32/32 envs
-Initializing simulation...
-Char 0 properties
-	DoFs: 28
-	Mass: 50.050 kg
-
-CPU_ENV_BUILT
-Building DAREMulti agent
-Total parameter count: 2603323
-Loaded model parameters from /home/y/my_project/MimicKit/output/paper_benchmark/dare_multi3_backflip_2000_8192_seed0_20261109/model.pt
-STEP 1 Bodypos [0.11132495105266571, 0.11132490634918213, 0.11018311232328415, 0.11215128004550934]
-STEP 2 Bodypos [0.12714645266532898, 0.12714602053165436, 0.1244986429810524, 0.12900292873382568]
-STEP 3 Bodypos [0.15257993340492249, 0.15257960557937622, 0.1499405801296234, 0.154417484998703]
-STEP 4 Bodypos [0.1676042675971985, 0.16760437190532684, 0.16596826910972595, 0.16883142292499542]
-STEP 5 Bodypos [0.18026503920555115, 0.18026494979858398, 0.17954358458518982, 0.1807955652475357]
-STEP 6 Bodypos [0.18899674713611603, 0.18899740278720856, 0.1891927868127823, 0.1887189745903015]
-COMPLETE

@@ -11,7 +11,7 @@ import torch.nn.functional as F
 from torch.nn.utils import parametrize
 from torch.nn.utils.parametrizations import spectral_norm
 
-from learning.dare_model import DAREModel
+from learning.add_model import ADDModel
 import util.torch_util as torch_util
 
 
@@ -117,8 +117,14 @@ class ADDPairErrorMetrics(nn.Module):
                                      strict, missing_keys, unexpected_keys, error_msgs)
 
 
-class DAREMonotoneModel(DAREModel):
+class DAREMonotoneModel(ADDModel):
     """Same baseline actor/critic; one learned monotone seven-ERR discriminator."""
+    def __init__(self, config, env):
+        super().__init__(config, env)
+        # Retain this saved-format marker so completed CMNN checkpoints remain
+        # loadable byte-for-byte; it does not select a different architecture.
+        self.register_buffer("_dare_schema_version", torch.tensor(2, dtype=torch.int64))
+
     def _build_disc(self, config, env):
         self._pair_metrics = ADDPairErrorMetrics(env)
         self._disc_energy = nn.Sequential(
@@ -141,17 +147,14 @@ class DAREMonotoneModel(DAREModel):
         energy = self._disc_energy(torch.cat((disc_obs, anchor), dim=0))
         return self._anchor_logit - (energy[:-1] - energy[-1:])
 
+    def eval_disc(self, disc_obs):
+        return self.eval_disc_raw(disc_obs)
+
     def get_disc_params(self):
         return list(self._disc_energy.parameters()) + [self._anchor_logit]
 
     def get_disc_logit_weights(self):
         return self._disc_energy[-1].weight.flatten()
-
-    def get_disc_group_width(self):
-        return self._anchor_logit.new_tensor(float(HIDDEN_WIDTHS[0]))
-
-    def get_disc_group_total_width(self):
-        return self.get_disc_group_width()
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata,
                               strict, missing_keys, unexpected_keys, error_msgs):

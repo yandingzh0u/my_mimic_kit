@@ -2,19 +2,26 @@
 
 import torch
 
-from learning.amp_agent import AMPAgent
-from learning.dare_agent import DAREAgent
+from learning.add_agent import ADDAgent, calc_unscaled_disc_reward
+from learning.ppo_agent import PPOAgent
 from learning.dare_monotone_model import (
     DAREMonotoneModel, HIDDEN_WIDTHS, METRIC_NAMES, MONOTONE_SCHEMA_VERSION)
 from learning.diff_normalizer import DiffNormalizer
 import util.torch_util as torch_util
 
 
-class DAREMonotoneAgent(DAREAgent):
+class DAREMonotoneAgent(ADDAgent):
+    """One CMNN scorer, zero-error BCE, original ADD reward and uniform PPO."""
+
     def _load_params(self, config):
         if config.get("disc_group_negatives", False):
             raise ValueError("DAREMonotone uses only real paired observations, not structured negatives")
+        if "disc_reward_scale" in config:
+            raise ValueError("DAREMonotone uses the original ADD reward without a multiplier")
+        if config.get("disc_grad_penalty", 0) != 0:
+            raise ValueError("DAREMonotone requires disc_grad_penalty=0")
         super()._load_params(config)
+        del self._disc_reward_scale
 
     def _build_model(self, config):
         self._model = DAREMonotoneModel(config["model"], self._env)
@@ -25,7 +32,7 @@ class DAREMonotoneAgent(DAREAgent):
     def _build_normalizers(self):
         # Keep baseline actor/action normalizers. The discriminator now scales
         # seven nonnegative physical magnitudes, never the raw signed172 input.
-        super(AMPAgent, self)._build_normalizers()
+        PPOAgent._build_normalizers(self)
         dtype = torch_util.numpy_dtype_to_torch(self._env.get_disc_obs_space().dtype)
         self._disc_obs_norm = DiffNormalizer((7,), device=self._device, dtype=dtype)
 
@@ -48,6 +55,12 @@ class DAREMonotoneAgent(DAREAgent):
         if metrics.shape[0] == 0:
             return metrics.new_zeros((0,))
         return self._calc_disc_rewards(self._disc_obs_norm.normalize(metrics))
+
+    @torch.no_grad()
+    def _calc_disc_rewards(self, normalized_errors):
+        logits = torch_util.eval_minibatch(
+            self._model.eval_disc, {"disc_obs": normalized_errors}, self._disc_eval_batch_size)
+        return calc_unscaled_disc_reward(logits.squeeze(-1))
 
     @torch.no_grad()
     def _compute_rewards(self):
@@ -89,8 +102,6 @@ class DAREMonotoneAgent(DAREAgent):
             "disc_pos_acc": pos_acc.detach(), "disc_neg_acc": neg_acc.detach(),
             "disc_pos_logit": positive.mean().detach(),
             "disc_neg_logit": negative.mean().detach(),
-            "disc_group_width": self._model.get_disc_group_width(),
-            "disc_group_total_width": self._model.get_disc_group_total_width(),
         }
         info.update({"disc_metric_" + name: metrics[:, index].mean().detach()
                      for index, name in enumerate(METRIC_NAMES)})
@@ -98,6 +109,11 @@ class DAREMonotoneAgent(DAREAgent):
 
     def _get_checkpoint_extra_state(self):
         state = super()._get_checkpoint_extra_state()
+        state["dare_reward"] = {
+            "version": 2,
+            "logits": "raw_discriminator_output",
+            "mapping": "original_ADD_without_reward_multiplier",
+        }
         state["monotone_disc"] = {
             "version": MONOTONE_SCHEMA_VERSION,
             "metrics": METRIC_NAMES, "hidden_widths": HIDDEN_WIDTHS,
@@ -115,4 +131,8 @@ class DAREMonotoneAgent(DAREAgent):
                 saved[name] = tuple(saved[name])
         if saved != expected:
             raise ValueError("Cannot resume with different monotone physical-error semantics")
+        if state.get("dare_reward") != {
+                "version": 2, "logits": "raw_discriminator_output",
+                "mapping": "original_ADD_without_reward_multiplier"}:
+            raise ValueError("Cannot resume a legacy scaled DARE reward checkpoint")
         super()._load_checkpoint_extra_state(state)

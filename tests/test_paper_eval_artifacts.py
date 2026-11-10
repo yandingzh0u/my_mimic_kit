@@ -12,15 +12,18 @@ from tools.paper_eval.aggregate_results import (
 )
 from tools.paper_eval.evaluate_checkpoint import (
     _policy_reward,
-    _input_geometry_blocks,
     infer_checkpoint_metadata,
-    intervene_observation,
+    infer_method,
     parse_training_log,
     reward_diagnostic_episode_key,
     reward_diagnostic_label,
     summarize_reward_diagnostics,
 )
 from tools.paper_eval.input_geometry import InputGeometryAccumulator
+
+
+def test_monotone_agent_is_evaluated_under_dare_method_label():
+    assert infer_method({"agent_name": "DAREMonotone"}, {"env_name": "add"}) == "DARE"
 
 
 def test_paired_reward_adapter_avoids_signed_input_normalization():
@@ -83,44 +86,9 @@ def test_reward_diagnostic_retains_optimized_policy_label():
     assert set(metrics) == {"environment", "optimized_policy"}
 
 
-@pytest.mark.parametrize("layout", ["aligned", "rcci_residual"])
-@pytest.mark.parametrize("condition", ["zero_e", "zero_m", "reverse_e", "shuffle_m"])
-def test_residual_command_interventions_modify_only_declared_block(layout, condition):
-    self_dim, phi_dim = 2, 3
-    total_dim = self_dim + (2 if layout == "aligned" else 3) * phi_dim
-    obs = torch.arange(2 * total_dim, dtype=torch.float32).reshape(2, total_dim) + 1
-    shuffle = torch.tensor([1, 0])
-    changed = intervene_observation(
-        obs, condition, layout, self_dim, phi_dim, shuffle
-    )
-    e_start = self_dim if layout == "aligned" else self_dim + phi_dim
-    m_start = e_start + phi_dim
-
-    assert torch.equal(changed[:, :e_start], obs[:, :e_start])
-    if condition == "zero_e":
-        assert torch.count_nonzero(changed[:, e_start:m_start]) == 0
-        assert torch.equal(changed[:, m_start:m_start + phi_dim], obs[:, m_start:m_start + phi_dim])
-    elif condition == "zero_m":
-        assert torch.equal(changed[:, e_start:m_start], obs[:, e_start:m_start])
-        assert torch.count_nonzero(changed[:, m_start:m_start + phi_dim]) == 0
-    elif condition == "reverse_e":
-        assert torch.equal(changed[:, e_start:m_start], -obs[:, e_start:m_start])
-        assert torch.equal(changed[:, m_start:m_start + phi_dim], obs[:, m_start:m_start + phi_dim])
-    else:
-        assert torch.equal(changed[:, e_start:m_start], obs[:, e_start:m_start])
-        assert torch.equal(
-            changed[:, m_start:m_start + phi_dim],
-            obs[shuffle, m_start:m_start + phi_dim],
-        )
-
-
-def test_nonresidual_method_rejects_interventions():
-    with pytest.raises(ValueError, match="requires a residual"):
-        intervene_observation(torch.zeros(2, 4), "zero_e", "none", 0, 0)
-
-
 def test_input_geometry_reports_rank_condition_and_paired_correlation():
-    blocks, pairs = _input_geometry_blocks("aligned", 1, 2, 5)
+    blocks = {"first": slice(1, 3), "second": slice(3, 5)}
+    pairs = (("first", "second"),)
     accumulator = InputGeometryAccumulator(blocks, "cpu", pairs)
     observations = torch.tensor(
         [
@@ -133,8 +101,8 @@ def test_input_geometry_reports_rank_condition_and_paired_correlation():
     accumulator.update(observations[2:])
     result = accumulator.finalize()
     assert result["sample_count"] == 3
-    assert result["blocks"]["feedback_error"]["rank"] == 1
-    pair = result["paired_correlation"]["feedback_error__feedforward_motion"]
+    assert result["blocks"]["first"]["rank"] == 1
+    pair = result["paired_correlation"]["first__second"]
     assert pair["mean"] == pytest.approx(1.0)
     assert pair["mean_abs"] == pytest.approx(1.0)
 
@@ -143,9 +111,9 @@ def _summary(seed, value, source):
     return {
         "_source_file": source,
         "metadata": {
-            "method": "RCCI",
+            "method": "DARE",
             "motion": "roll",
-            "representation": "residual",
+            "representation": None,
             "condition": "nominal",
             "seed": seed,
             "checkpoint": {"iteration": 1999, "samples": 524288000},

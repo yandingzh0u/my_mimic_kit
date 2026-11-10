@@ -15,7 +15,7 @@ from learning.add_agent import calc_unscaled_disc_reward
 from learning.dare_monotone_agent import DAREMonotoneAgent
 from learning.dare_monotone_model import (
     ADDPairErrorMetrics, DAREMonotoneModel, HIDDEN_WIDTHS, MixedELU)
-from learning.dare_body_split_sn_model import DAREBodySplitSNModel
+from learning.add_model import ADDModel
 import util.torch_util as torch_util
 
 
@@ -109,13 +109,9 @@ def test_unsupported_physical_layouts_fail_explicitly(incompatible):
 
 def test_same_actor_critic_and_no_new_loss_weights_or_reward_multipliers():
     env = Env()
-    original = yaml.safe_load((ROOT / "data/agents/dare_body_split_sn_humanoid_agent.yaml").read_text())
-    candidate = config()
-    candidate.pop("agent_name")
-    original.pop("agent_name")
-    assert candidate == original
     torch.manual_seed(3)
-    baseline = DAREBodySplitSNModel(config()["model"], env)
+    baseline_config = config()["model"] | {"disc_net": "fc_2layers_1024units"}
+    baseline = ADDModel(baseline_config, env)
     torch.manual_seed(3)
     monotone = DAREMonotoneModel(config()["model"], env)
     for a, b in zip(baseline.get_actor_params() + baseline.get_critic_params(),

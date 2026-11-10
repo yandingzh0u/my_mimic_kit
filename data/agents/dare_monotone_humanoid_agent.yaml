@@ -6,7 +6,6 @@ model:
   actor_std_type: "FIXED"
   action_std: 0.05
   critic_net: "fc_2layers_1024units"
-  disc_net: "fc_2layers_1024units"
 
 actor_optimizer: {type: "SGD", learning_rate: 1e-4}
 critic_optimizer: {type: "SGD", learning_rate: 1e-4}
@@ -36,6 +35,3 @@ disc_grad_penalty: 0
 disc_eval_batch_size: 0
 task_reward_weight: 0.0
 disc_reward_weight: 1.0
-phase_sampler: "none"
-phase_coverage_reset: false
-disc_group_negatives: false

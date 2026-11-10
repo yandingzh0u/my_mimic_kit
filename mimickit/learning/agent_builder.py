@@ -32,29 +32,9 @@ def build_agent(agent_file, env, device):
     elif (agent_name == "ADD"):
         import learning.add_agent as add_agent
         agent = add_agent.ADDAgent(config=agent_config, env=env, device=device)
-    elif (agent_name == "DARE"):
-        import learning.dare_agent as dare_agent
-        agent = dare_agent.DAREAgent(
-            config=agent_config, env=env, device=device)
-    elif (agent_name == "DAREMulti"):
-        import learning.dare_multi_agent as dare_multi_agent
-        agent = dare_multi_agent.DAREMultiAgent(
-            config=agent_config, env=env, device=device)
-    elif (agent_name == "DAREBodySplitSN"):
-        import learning.dare_body_split_sn_agent as dare_body_split_sn_agent
-        agent = dare_body_split_sn_agent.DAREBodySplitSNAgent(
-            config=agent_config, env=env, device=device)
-    elif (agent_name == "DAREBodySplitCPL"):
-        import learning.dare_body_split_cpl_agent as dare_body_split_cpl_agent
-        agent = dare_body_split_cpl_agent.DAREBodySplitCPLAgent(
-            config=agent_config, env=env, device=device)
     elif (agent_name == "DAREMonotone"):
         import learning.dare_monotone_agent as dare_monotone_agent
         agent = dare_monotone_agent.DAREMonotoneAgent(
-            config=agent_config, env=env, device=device)
-    elif (agent_name == "DAREMulti4NS"):
-        import learning.dare_multi4_ns_agent as dare_multi4_ns_agent
-        agent = dare_multi4_ns_agent.DAREMulti4NSAgent(
             config=agent_config, env=env, device=device)
     elif (agent_name == "LCP"):
         import learning.lcp_agent as lcp_agent

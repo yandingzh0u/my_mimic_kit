@@ -6,23 +6,11 @@ import learning.base_agent as base_agent
 import learning.distribution_gaussian_diag as distribution_gaussian_diag
 import learning.mp_optimizer as mp_optimizer
 import learning.ppo_model as ppo_model
-from learning.phase_sampler import PhaseSampler, control_cells
-from learning.phase_resolution import supported_resolution
 import learning.rl_util as rl_util
 import util.mp_util as mp_util
 import util.torch_util as torch_util
 
 class PPOAgent(base_agent.BaseAgent):
-    _phase_balance_bins = 8
-
-    def __init__(self, config, env, device):
-        super().__init__(config, env, device)
-        # Initialize reset randomization after network/buffer construction so
-        # enabling coverage does not change the seeded initial network.
-        if self._phase_coverage_reset:
-            self._env.enable_phase_coverage_resets(self._phase_control_cells)
-        return
-
     def _load_params(self, config):
         super()._load_params(config)
         
@@ -31,17 +19,8 @@ class PPOAgent(base_agent.BaseAgent):
         self._critic_epochs = config["critic_epochs"]
         self._critic_batch_size = config["critic_batch_size"]
 
-        self._phase_sampler_mode = config.get("phase_sampler", "uniform")
-        if self._phase_sampler_mode not in ("none", "uniform", "adaptive_twostage", "adaptive_supported"):
-            raise ValueError("Unsupported PPO phase_sampler: " + self._phase_sampler_mode)
-        self._phase_coverage_reset = config.get("phase_coverage_reset", False)
-        if self._phase_sampler_mode in ("adaptive_twostage", "adaptive_supported"):
-            durations, timestep = self._env.get_motion_sampling_spec()
-            if len(durations) != 1 or mp_util.get_num_procs() != 1:
-                raise ValueError("Adaptive phase sampling currently supports one motion and one process")
-            self._phase_control_cells = control_cells(durations[0], timestep)
-        elif self._phase_coverage_reset:
-            raise ValueError("Phase coverage resets require an adaptive phase sampler")
+        if config.get("phase_sampler", "none") != "none" or config.get("phase_coverage_reset", False):
+            raise ValueError("PPO uses uniform transition sampling; experimental phase samplers were removed")
 
         self._td_lambda = config["td_lambda"]
         self._ppo_clip_ratio = config["ppo_clip_ratio"]
@@ -157,10 +136,6 @@ class PPOAgent(base_agent.BaseAgent):
         vals = vals.squeeze(-1).detach()
         adv = new_vals - vals
 
-        # Build the rollout target once. Minibatches replace its population
-        # weights with mass / actual quota, rather than multiplying weights.
-        phase_weight, phase_info = self._build_phase_weights()
-
         # Termination-conditioned TD-target statistics are diagnostics only.
         # They make it possible to distinguish a critic-scale jump caused by
         # FAIL/TIME sampling from a genuine value-network update problem.
@@ -197,94 +172,36 @@ class PPOAgent(base_agent.BaseAgent):
         
         rand_action_mask = (rand_action_mask == 1.0).flatten()
         adv_flat = adv.flatten()
-        phase_weight_flat = phase_weight.flatten()
         rand_action_adv = adv_flat[rand_action_mask]
-        rand_action_weight = phase_weight_flat[rand_action_mask]
-        if self._phase_sampler_mode in ("adaptive_twostage", "adaptive_supported"):
-            rand_action_weight = self._actor_phase_sampler.full_weights()[rand_action_mask]
-        adv_mean, adv_std = self._weighted_mean_std(
-            rand_action_adv, rand_action_weight)
+        adv_mean, adv_std = self._mean_std(rand_action_adv)
         norm_adv = (adv - adv_mean) / torch.clamp_min(adv_std, 1e-5)
         norm_adv = torch.clamp(norm_adv, -self._norm_adv_clip, self._norm_adv_clip)
         
         self._exp_buffer.set_data("tar_val", new_vals)
         self._exp_buffer.set_data("adv", norm_adv)
-        self._exp_buffer.set_data("phase_weight", phase_weight)
         
         info = {
             "adv_mean": adv_mean,
             "adv_std": adv_std,
-            **phase_info,
             **td_info,
         }
         return info
 
-    def _build_phase_weights(self):
-        if self._phase_sampler_mode in ("adaptive_twostage", "adaptive_supported"):
-            phase = self._exp_buffer.get_data("diag_phase")
-            actor_budget = int(np.ceil(self._actor_batch_size * self.get_num_envs()))
-            critic_budget = int(np.ceil(self._critic_batch_size * self.get_num_envs()))
-            budget = min(actor_budget, critic_budget)
-            eligible = self._exp_buffer.get_data_flat("rand_action_mask") == 1
-            resolution = self._phase_control_cells
-            if self._phase_sampler_mode == "adaptive_supported":
-                resolution = supported_resolution(phase, resolution,
-                    [actor_budget, critic_budget], [eligible, None])
-            self._critic_phase_sampler = PhaseSampler(phase, resolution, budget)
-            self._actor_phase_sampler = PhaseSampler(phase, resolution, budget, eligible)
-            weights = (self._critic_phase_sampler.full_weights() * phase.numel()).float().reshape(phase.shape)
-            info = {"phase_weight_mean": weights.mean(), "phase_weight_max": weights.max(),
-                    "phase_motion_control_cells": torch.tensor(float(self._phase_control_cells), device=phase.device),
-                    "phase_resolution_bins": torch.tensor(float(resolution), device=phase.device)}
-            for name, sampler in (("actor", self._actor_phase_sampler), ("critic", self._critic_phase_sampler)):
-                for key, value in sampler.coverage.items():
-                    info["phase_" + name + "_" + key] = torch.tensor(float(value), device=phase.device)
-            return weights, info
-        if (self._phase_sampler_mode == "none" or not self._exp_buffer.has_buffer("diag_phase")):
-            weights = torch.ones(
-                [self._steps_per_iter, self.get_num_envs()],
-                device=self._device, dtype=torch.float32)
-            return weights, {
-                "phase_weight_mean": weights.mean(),
-                "phase_weight_max": weights.max(),
-                "phase_bins_present": torch.tensor(
-                    1.0, device=self._device)
-            }
-
-        phase = self._exp_buffer.get_data("diag_phase").to(torch.float32)
-        phase = torch.nan_to_num(phase, nan=0.0, posinf=1.0, neginf=0.0)
-        phase = torch.clamp(phase, 0.0, 1.0 - torch.finfo(phase.dtype).eps)
-        phase_bin = (phase * self._phase_balance_bins).to(torch.long)
-        flat_bin = phase_bin.flatten()
-        counts = torch.bincount(
-            flat_bin, minlength=self._phase_balance_bins).to(torch.float32)
-        present = counts > 0.0
-        num_present = present.sum().to(torch.float32)
-        total = torch.tensor(
-            float(flat_bin.numel()), device=phase.device, dtype=torch.float32)
-        weights_by_bin = torch.zeros_like(counts)
-        weights_by_bin[present] = total / (num_present * counts[present])
-        weights = weights_by_bin[flat_bin].reshape(phase.shape)
-        return weights, {
-            "phase_weight_mean": weights.mean(),
-            "phase_weight_max": weights.max(),
-            "phase_bins_present": num_present,
-        }
-
-    def _weighted_mean_std(self, values, weights):
-        weights = weights.to(dtype=values.dtype)
-        sum_w = mp_util.reduce_sum(weights.sum())
-        sum_wx = mp_util.reduce_sum(torch.sum(weights * values))
-        sum_wx2 = mp_util.reduce_sum(torch.sum(weights * values.square()))
-        mean = sum_wx / torch.clamp_min(sum_w, 1e-8)
-        var = sum_wx2 / torch.clamp_min(sum_w, 1e-8) - mean.square()
+    def _mean_std(self, values):
+        # Sum/count preserves the existing population-variance calculation and
+        # its floating-point reduction order for uniform transition sampling.
+        count = mp_util.reduce_sum(values.new_tensor(float(values.numel())))
+        total = mp_util.reduce_sum(values.sum())
+        total_square = mp_util.reduce_sum(values.square().sum())
+        count = torch.clamp_min(count, 1e-8)
+        mean = total / count
+        var = total_square / count - mean.square()
         return mean, torch.sqrt(torch.clamp_min(var, 0.0))
 
     @staticmethod
-    def _weighted_mean(values, weights):
-        return torch.sum(values * weights) / torch.clamp_min(
-            torch.sum(weights), 1e-8)
-    
+    def _mean(values):
+        return values.sum() / values.new_tensor(float(values.numel())).clamp_min(1e-8)
+
     def _get_exp_prob(self):
         if (np.isfinite(self._exp_anneal_samples)):
             samples = self._sample_count
@@ -319,7 +236,7 @@ class PPOAgent(base_agent.BaseAgent):
         device_type = torch.device(self._device).type
 
         for i in range(steps):
-            batch = self._sample_ppo_batch(batch_size, actor=False)
+            batch = self._exp_buffer.sample(batch_size)
 
             with torch.amp.autocast(device_type=device_type, enabled=self._use_mixed_precision, dtype=torch.bfloat16):
                 loss_info = self._compute_critic_loss(batch)
@@ -350,7 +267,7 @@ class PPOAgent(base_agent.BaseAgent):
         audit_obs, audit_old_dist, audit_phase = self._build_policy_audit_batch()
 
         for i in range(num_steps):
-            batch = self._sample_ppo_batch(batch_size, actor=True)
+            batch = self._exp_buffer.sample(batch_size)
 
             with torch.amp.autocast(device_type=device_type, enabled=self._use_mixed_precision, dtype=torch.bfloat16):
                 loss_info = self._compute_actor_loss(batch)
@@ -370,26 +287,6 @@ class PPOAgent(base_agent.BaseAgent):
             audit_obs, audit_old_dist, audit_phase))
         info.update(self._compute_first_layer_grad_info())
         return info
-
-    def _sample_ppo_batch(self, batch_size, actor):
-        if self._phase_sampler_mode in ("none", "uniform"):
-            return self._exp_buffer.sample(batch_size)
-        sampler = self._actor_phase_sampler if actor else self._critic_phase_sampler
-        indices, weights, _ = sampler.sample(batch_size)
-        batch = self._exp_buffer.sample_indices(indices)
-        batch["phase_weight"] = weights.float()
-        return batch
-
-    def _get_checkpoint_extra_state(self):
-        state = super()._get_checkpoint_extra_state()
-        if self._phase_coverage_reset:
-            state["phase_coverage"] = self._env.get_phase_coverage_state()
-        return state
-
-    def _load_checkpoint_extra_state(self, state):
-        super()._load_checkpoint_extra_state(state)
-        if self._phase_coverage_reset:
-            self._env.load_phase_coverage_state(state["phase_coverage"])
 
     def _build_policy_audit_batch(self, max_samples=4096):
         obs = self._exp_buffer.get_data_flat("obs")
@@ -448,24 +345,6 @@ class PPOAgent(base_agent.BaseAgent):
         grad = first_linear.weight.grad.detach()
         info = {"actor_first_layer_grad_norm": torch.linalg.vector_norm(grad)}
 
-        # RCCI's paired interfaces have a known [self, x, command1, command2]
-        # layout.  Per-block norms test whether learning actually uses each
-        # coordinate block; no corresponding loss or gradient is introduced.
-        if (hasattr(self._env, "get_rcci_self_obs_dim")
-                and hasattr(self._env, "get_rcci_phi_dim")):
-            self_dim = self._env.get_rcci_self_obs_dim()
-            phi_dim = self._env.get_rcci_phi_dim()
-            slices = {
-                "actor_grad_self_block": slice(0, self_dim),
-                "actor_grad_x_block": slice(self_dim, self_dim + phi_dim),
-                "actor_grad_command1_block": slice(
-                    self_dim + phi_dim, self_dim + 2 * phi_dim),
-                "actor_grad_command2_block": slice(
-                    self_dim + 2 * phi_dim, self_dim + 3 * phi_dim),
-            }
-            for key, block_slice in slices.items():
-                info[key] = torch.linalg.vector_norm(grad[:, block_slice])
-
         return info
     
     def _compute_critic_loss(self, batch):
@@ -475,8 +354,7 @@ class PPOAgent(base_agent.BaseAgent):
         pred = pred.squeeze(-1)
 
         diff = tar_val - pred
-        phase_weight = batch["phase_weight"]
-        loss = self._weighted_mean(torch.square(diff), phase_weight)
+        loss = self._mean(torch.square(diff))
 
         info = {
             "critic_loss": loss
@@ -489,7 +367,6 @@ class PPOAgent(base_agent.BaseAgent):
         old_a_logp = batch["a_logp"]
         adv = batch["adv"]
         rand_action_mask = batch["rand_action_mask"]
-        phase_weight = batch["phase_weight"]
 
         # loss should only be computed using samples with random actions
         rand_action_mask = (rand_action_mask == 1.0)
@@ -497,7 +374,6 @@ class PPOAgent(base_agent.BaseAgent):
         norm_a = norm_a[rand_action_mask]
         old_a_logp = old_a_logp[rand_action_mask]
         adv = adv[rand_action_mask]
-        phase_weight = phase_weight[rand_action_mask]
 
         a_dist = self._model.eval_actor(norm_obs)
         a_logp = a_dist.log_prob(norm_a)
@@ -506,11 +382,11 @@ class PPOAgent(base_agent.BaseAgent):
         actor_loss0 = adv * a_ratio
         actor_loss1 = adv * torch.clamp(a_ratio, 1.0 - self._ppo_clip_ratio, 1.0 + self._ppo_clip_ratio)
         actor_objective = torch.minimum(actor_loss0, actor_loss1)
-        actor_loss = -self._weighted_mean(actor_objective, phase_weight)
+        actor_loss = -self._mean(actor_objective)
         
         clip_frac = (torch.abs(a_ratio - 1.0) > self._ppo_clip_ratio).type(torch.float)
-        clip_frac = self._weighted_mean(clip_frac, phase_weight)
-        imp_ratio = self._weighted_mean(a_ratio, phase_weight)
+        clip_frac = self._mean(clip_frac)
+        imp_ratio = self._mean(a_ratio)
         
         info = {
             "actor_loss": actor_loss,
@@ -521,20 +397,19 @@ class PPOAgent(base_agent.BaseAgent):
         if (self._action_bound_weight != 0):
             action_bound_loss = self._compute_action_bound_loss(a_dist)
             if (action_bound_loss is not None):
-                action_bound_loss = self._weighted_mean(
-                    action_bound_loss, phase_weight)
+                action_bound_loss = self._mean(action_bound_loss)
                 actor_loss += self._action_bound_weight * action_bound_loss
                 info["action_bound_loss"] = action_bound_loss.detach()
 
         if (self._action_entropy_weight != 0):
             action_entropy = a_dist.entropy()
-            action_entropy = self._weighted_mean(action_entropy, phase_weight)
+            action_entropy = self._mean(action_entropy)
             actor_loss += -self._action_entropy_weight * action_entropy
             info["action_entropy"] = action_entropy.detach()
         
         if (self._action_reg_weight != 0):
             action_reg_loss = a_dist.param_reg()
-            action_reg_loss = self._weighted_mean(action_reg_loss, phase_weight)
+            action_reg_loss = self._mean(action_reg_loss)
             actor_loss += self._action_reg_weight * action_reg_loss
             info["action_reg_loss"] = action_reg_loss.detach()
         
