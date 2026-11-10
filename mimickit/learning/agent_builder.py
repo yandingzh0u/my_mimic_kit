@@ -44,6 +44,14 @@ def build_agent(agent_file, env, device):
         import learning.dare_body_split_sn_agent as dare_body_split_sn_agent
         agent = dare_body_split_sn_agent.DAREBodySplitSNAgent(
             config=agent_config, env=env, device=device)
+    elif (agent_name == "DAREBodySplitCPL"):
+        import learning.dare_body_split_cpl_agent as dare_body_split_cpl_agent
+        agent = dare_body_split_cpl_agent.DAREBodySplitCPLAgent(
+            config=agent_config, env=env, device=device)
+    elif (agent_name == "DAREMonotone"):
+        import learning.dare_monotone_agent as dare_monotone_agent
+        agent = dare_monotone_agent.DAREMonotoneAgent(
+            config=agent_config, env=env, device=device)
     elif (agent_name == "DAREMulti4NS"):
         import learning.dare_multi4_ns_agent as dare_multi4_ns_agent
         agent = dare_multi4_ns_agent.DAREMulti4NSAgent(

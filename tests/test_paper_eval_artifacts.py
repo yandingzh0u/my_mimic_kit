@@ -11,6 +11,7 @@ from tools.paper_eval.aggregate_results import (
     write_aggregate_tables,
 )
 from tools.paper_eval.evaluate_checkpoint import (
+    _policy_reward,
     _input_geometry_blocks,
     infer_checkpoint_metadata,
     intervene_observation,
@@ -20,6 +21,22 @@ from tools.paper_eval.evaluate_checkpoint import (
     summarize_reward_diagnostics,
 )
 from tools.paper_eval.input_geometry import InputGeometryAccumulator
+
+
+def test_paired_reward_adapter_avoids_signed_input_normalization():
+    class Agent:
+        _task_reward_weight = 0.0
+        _disc_reward_weight = 1.0
+
+        def _calc_disc_rewards(self, value):
+            raise AssertionError("Seven-ERR agent must use its paired-state adapter")
+
+        def calc_disc_reward_from_obs(self, policy, reference):
+            assert policy.shape[-1] == reference.shape[-1] == 172
+            return torch.tensor([.25, .75])
+
+    info = {"disc_obs": torch.zeros(2, 172), "disc_obs_demo": torch.ones(2, 172)}
+    torch.testing.assert_close(_policy_reward(Agent(), info, torch.ones(2)), torch.tensor([.25, .75]))
 
 
 def test_training_log_parser_handles_carriage_returns_and_resumed_headers(tmp_path):

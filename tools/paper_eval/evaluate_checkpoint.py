@@ -533,6 +533,12 @@ def _policy_reward(agent, info, env_reward: torch.Tensor) -> torch.Tensor:
     if not hasattr(agent, "_calc_disc_rewards") or "disc_obs" not in info:
         return env_reward
 
+    if hasattr(agent, "calc_disc_reward_from_obs") and "disc_obs_demo" in info:
+        disc_reward = agent.calc_disc_reward_from_obs(
+            info["disc_obs"], info["disc_obs_demo"])
+        task_weight = float(getattr(agent, "_task_reward_weight", 0.0))
+        disc_weight = float(getattr(agent, "_disc_reward_weight", 1.0))
+        return task_weight * env_reward + disc_weight * disc_reward
     if "disc_obs_demo" in info:
         disc_input = info["disc_obs_demo"] - info["disc_obs"]
     else:
