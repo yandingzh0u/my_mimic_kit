@@ -83,7 +83,7 @@ class DAREMonotoneAgent(ADDAgent):
         reference = torch.cat((batch["disc_obs_demo"], replay["disc_obs_demo"]), 0)
         metrics = self._pair_error_metrics(policy, reference)
         normalized = self._disc_obs_norm.normalize(metrics)
-        # The zero positive and all negatives share one effective SN forward.
+        # The zero positive and all negatives share one effective forward.
         scores = self._model.eval_disc(torch.cat((self._pos_diff[None], normalized), 0)).squeeze(-1)
         positive, negative = scores[:1], scores[1:]
         cls_loss = 0.5 * (self._disc_loss_pos(positive) + self._disc_loss_neg(negative))
@@ -118,7 +118,12 @@ class DAREMonotoneAgent(ADDAgent):
             "version": MONOTONE_SCHEMA_VERSION,
             "metrics": METRIC_NAMES, "hidden_widths": HIDDEN_WIDTHS,
             "input": "same_frame_physical_ERR_mean_absolute_scale_no_centering",
-            "score": "learned_bias_minus_anchored_positive_SN_CMNN_energy",
+            "score": "learned_bias_minus_anchored_positive_diagonal_CMNN_energy",
+            "normalization": "SLL_nonresidual_positive_diagonal_logdomain_Perron_init",
+            "learned_diagonal_parameters": sum(
+                layer.parametrizations.weight[1].log_q.numel()
+                for layer in self._model._disc_energy
+                if isinstance(layer, torch.nn.Linear)),
             "reward": "original_ADD_clipped_mapping_no_multiplier",
         }
         return state

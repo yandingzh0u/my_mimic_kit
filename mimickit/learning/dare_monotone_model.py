@@ -1,7 +1,8 @@
 """Seven physical ERRs -> one anchored, componentwise monotone score.
 
 CMNN activations follow Runje & Shankaranarayana (ICML 2023), equations 4-6.
-This is an ADD adaptation, retaining the existing approximate SN constraint.
+All three linear layers use the non-residual diagonal construction from
+Araujo et al. (ICLR 2023), Theorem 1 and Appendix C.3, instead of SN.
 It adds a physical-error ordering prior, not a prior-free imitation reward.
 """
 
@@ -9,13 +10,13 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from torch.nn.utils import parametrize
-from torch.nn.utils.parametrizations import spectral_norm
 
 from learning.add_model import ADDModel
+from learning.diagonal_normalization import PositiveDiagonalRescaling
 import util.torch_util as torch_util
 
 
-MONOTONE_SCHEMA_VERSION = 1
+MONOTONE_SCHEMA_VERSION = 2
 HIDDEN_WIDTHS = (341, 512)
 METRIC_NAMES = ("root_pos", "root_rot", "body_pos", "body_rot",
                 "dof_vel", "root_vel", "root_ang_vel")
@@ -35,11 +36,14 @@ class PositiveWeight(nn.Module):
         return weight.abs()
 
 
-def positive_sn_linear(in_features, out_features, bias=True):
+def positive_diagonal_linear(in_features, out_features, bias=True):
     layer = nn.Linear(in_features, out_features, bias=bias)
-    # Applying abs AFTER signed-matrix SN would invalidate its spectral bound.
     parametrize.register_parametrization(layer, "weight", PositiveWeight())
-    return spectral_norm(layer, n_power_iterations=1)
+    normalization = PositiveDiagonalRescaling(
+        in_features, device=layer.weight.device, dtype=layer.weight.dtype)
+    normalization.initialize_from_weight(layer.weight)
+    parametrize.register_parametrization(layer, "weight", normalization)
+    return layer
 
 
 class MixedELU(nn.Module):
@@ -121,16 +125,16 @@ class DAREMonotoneModel(ADDModel):
     """Same baseline actor/critic; one learned monotone seven-ERR discriminator."""
     def __init__(self, config, env):
         super().__init__(config, env)
-        # Retain this saved-format marker so completed CMNN checkpoints remain
-        # loadable byte-for-byte; it does not select a different architecture.
+        # Historical format marker; the separate monotone schema below now
+        # rejects old SN weights instead of silently loading another model.
         self.register_buffer("_dare_schema_version", torch.tensor(2, dtype=torch.int64))
 
     def _build_disc(self, config, env):
         self._pair_metrics = ADDPairErrorMetrics(env)
         self._disc_energy = nn.Sequential(
-            positive_sn_linear(7, HIDDEN_WIDTHS[0]), MixedELU(),
-            positive_sn_linear(HIDDEN_WIDTHS[0], HIDDEN_WIDTHS[1]), MixedELU(),
-            positive_sn_linear(HIDDEN_WIDTHS[1], 1, bias=False))
+            positive_diagonal_linear(7, HIDDEN_WIDTHS[0]), MixedELU(),
+            positive_diagonal_linear(HIDDEN_WIDTHS[0], HIDDEN_WIDTHS[1]), MixedELU(),
+            positive_diagonal_linear(HIDDEN_WIDTHS[1], 1, bias=False))
         self._anchor_logit = nn.Parameter(torch.zeros(()))
         self.register_buffer("_monotone_schema_version", torch.tensor(
             MONOTONE_SCHEMA_VERSION, dtype=torch.int64))
@@ -142,8 +146,7 @@ class DAREMonotoneModel(ADDModel):
         if disc_obs.ndim != 2 or disc_obs.shape[-1] != 7:
             raise ValueError("DAREMonotone discriminator expects normalized seven nonnegative ERRs, not signed172 differences")
         anchor = disc_obs.new_zeros((1, 7))
-        # One forward uses identical effective SN weights for sample and zero
-        # even in train mode, where power-iteration buffers change per call.
+        # Sample and anchor share the same deterministic effective weights.
         energy = self._disc_energy(torch.cat((disc_obs, anchor), dim=0))
         return self._anchor_logit - (energy[:-1] - energy[-1:])
 
