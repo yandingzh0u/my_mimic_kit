@@ -13,7 +13,7 @@ from learning.diagonal_normalization import PositiveDiagonalRescaling
 from learning.dare_monotone_model import positive_diagonal_linear
 
 
-SHAPES = ((341, 7), (512, 341), (1, 512))
+SHAPES = ((341, 64), (512, 341), (1, 512))
 
 
 @pytest.fixture(autouse=True)

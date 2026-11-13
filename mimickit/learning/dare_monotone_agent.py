@@ -5,8 +5,9 @@ import torch
 from learning.add_agent import ADDAgent, calc_unscaled_disc_reward
 from learning.ppo_agent import PPOAgent
 from learning.dare_monotone_model import (
-    DAREMonotoneModel, HIDDEN_WIDTHS, METRIC_NAMES, MONOTONE_SCHEMA_VERSION)
-from learning.diff_normalizer import DiffNormalizer
+    DAREMonotoneModel, FEATURE_DIM, FEATURE_SLICES, HIDDEN_WIDTHS, METRIC_NAMES,
+    MONOTONE_SCHEMA_VERSION, aggregate_error_metrics)
+from learning.physical_error_normalizer import PhysicalErrorNormalizer
 import util.torch_util as torch_util
 
 
@@ -27,14 +28,14 @@ class DAREMonotoneAgent(ADDAgent):
         self._model = DAREMonotoneModel(config["model"], self._env)
 
     def _build_pos_diff(self):
-        return torch.zeros(7, device=self._device)
+        return torch.zeros(FEATURE_DIM, device=self._device)
 
     def _build_normalizers(self):
         # Keep baseline actor/action normalizers. The discriminator now scales
-        # seven nonnegative physical magnitudes, never the raw signed172 input.
+        # unpooled physical components using the same seven historical scales.
         PPOAgent._build_normalizers(self)
         dtype = torch_util.numpy_dtype_to_torch(self._env.get_disc_obs_space().dtype)
-        self._disc_obs_norm = DiffNormalizer((7,), device=self._device, dtype=dtype)
+        self._disc_obs_norm = PhysicalErrorNormalizer(device=self._device, dtype=dtype)
 
     @torch.no_grad()
     def _pair_error_metrics(self, policy, reference):
@@ -44,7 +45,7 @@ class DAREMonotoneAgent(ADDAgent):
             raise ValueError("Physical ERR conversion requires matching [N,172] policy/reference observations")
         chunk = max(1, self._disc_demo_batch_size)
         if policy.shape[0] == 0:
-            return policy.new_zeros((0, 7))
+            return policy.new_zeros((0, FEATURE_DIM))
         return torch.cat([self._model.pair_to_error_metrics(p, r)
                           for p, r in zip(policy.split(chunk), reference.split(chunk))], 0)
 
@@ -68,11 +69,20 @@ class DAREMonotoneAgent(ADDAgent):
         policy = self._exp_buffer.get_data_flat("disc_obs")
         reference = self._exp_buffer.get_data_flat("disc_obs_demo")
         metrics = self._pair_error_metrics(policy, reference)
+        # Initialize the first rollout's physical scales before scoring it.
+        # Otherwise the 64-D RMS geometry would be evaluated with seven unit
+        # scales, creating an artificial first-iteration reward collapse.
+        initialized_normalizer = (
+            self._need_normalizer_update()
+            and int(self._disc_obs_norm.get_count()) == 0)
+        if initialized_normalizer:
+            self._disc_obs_norm.record(metrics)
+            self._disc_obs_norm.update()
         normalized = self._disc_obs_norm.normalize(metrics)
         disc_reward = self._calc_disc_rewards(normalized)
         reward = self._task_reward_weight * task_reward + self._disc_reward_weight * disc_reward
         self._exp_buffer.set_data_flat("reward", reward)
-        if self._need_normalizer_update():
+        if self._need_normalizer_update() and not initialized_normalizer:
             self._disc_obs_norm.record(metrics)
         std, mean = torch.std_mean(disc_reward)
         return {"disc_reward_mean": mean, "disc_reward_std": std}
@@ -103,7 +113,8 @@ class DAREMonotoneAgent(ADDAgent):
             "disc_pos_logit": positive.mean().detach(),
             "disc_neg_logit": negative.mean().detach(),
         }
-        info.update({"disc_metric_" + name: metrics[:, index].mean().detach()
+        tracking_metrics = aggregate_error_metrics(metrics)
+        info.update({"disc_metric_" + name: tracking_metrics[:, index].mean().detach()
                      for index, name in enumerate(METRIC_NAMES)})
         return info
 
@@ -117,7 +128,13 @@ class DAREMonotoneAgent(ADDAgent):
         state["monotone_disc"] = {
             "version": MONOTONE_SCHEMA_VERSION,
             "metrics": METRIC_NAMES, "hidden_widths": HIDDEN_WIDTHS,
-            "input": "same_frame_physical_ERR_mean_absolute_scale_no_centering",
+            "input": "same_frame_unpooled_64_physical_errors",
+            "features": {name: (part.start, part.stop)
+                         for name, part in FEATURE_SLICES.items()},
+            "body_positions": "nonroot_root_relative_world_axes_L2",
+            "body_rotations": "nonroot_world_geodesic",
+            "input_scaling": "seven_metric_history_broadcast_with_fixed_group_rms",
+            "first_layer": "free_positive_dense_no_group_budget",
             "score": "learned_bias_minus_anchored_positive_diagonal_CMNN_energy",
             "normalization": "SLL_nonresidual_positive_diagonal_logdomain_Perron_init",
             "learned_diagonal_parameters": sum(
@@ -134,6 +151,8 @@ class DAREMonotoneAgent(ADDAgent):
         for name in ("metrics", "hidden_widths"):
             if name in saved:
                 saved[name] = tuple(saved[name])
+        if "features" in saved:
+            saved["features"] = {name: tuple(part) for name, part in saved["features"].items()}
         if saved != expected:
             raise ValueError("Cannot resume with different monotone physical-error semantics")
         if state.get("dare_reward") != {
