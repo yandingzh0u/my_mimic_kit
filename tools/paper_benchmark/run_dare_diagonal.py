@@ -4,7 +4,10 @@
 Examples (use the Isaac Lab Python environment):
   python tools/paper_benchmark/run_dare_diagonal.py --updates 30 --out-dir output/diagnostics/diagonal_smoke
   python tools/paper_benchmark/run_dare_diagonal.py --updates 2000 --out-dir output/paper_benchmark/diagonal_formal
+  python tools/paper_benchmark/run_dare_diagonal.py --motion climb --updates 2000 --out-dir output/paper_benchmark/diagonal_climb
+  python tools/paper_benchmark/run_dare_diagonal.py --motion crawl --updates 2000 --out-dir output/paper_benchmark/diagonal_crawl
   python tools/paper_benchmark/run_dare_diagonal.py --updates 2000 --out-dir output/paper_benchmark/diagonal_formal --resume
+  python tools/paper_benchmark/run_dare_diagonal.py --updates 2500 --out-dir output/paper_benchmark/diagonal_formal --resume
 
 Resume uses the experiment's frozen training sources and configuration. Its
 hooks only observe training; no model methods or objectives are replaced.
@@ -50,7 +53,7 @@ def append(path, value):
         stream.write(json.dumps(value, sort_keys=True, allow_nan=False) + "\n")
 
 
-def preflight():
+def preflight(motion="backflip"):
     """Read configuration and assets without importing torch or Isaac Lab."""
     import yaml
     configs = {kind: yaml.safe_load((ROOT / rel).read_text()) for kind, rel in CONFIGS.items()}
@@ -67,22 +70,26 @@ def preflight():
         assert optimizer["type"] == "SGD"
         assert float(optimizer["learning_rate"]) == 1e-4
     assert configs["engine"]["engine_name"] == "isaac_lab"
-    assert configs["env"]["motion_name"] == "backflip"
+    assert configs["env"]["motion_name"] == motion
     assets = {}
-    for key in ("char_file", "motion_file"):
-        path = Path(configs["env"][key])
+    asset_files = {key: configs["env"][key] for key in ("char_file", "motion_file")}
+    asset_files.update({f"object_{index}": item["file"]
+                        for index, item in enumerate(configs["env"].get("objects", []))})
+    for key, filename in asset_files.items():
+        path = Path(filename)
         if not path.is_absolute():
             path = ROOT / path
         assert path.is_file(), str(path)
         assets[key] = {"path": str(path.resolve()), "sha256": sha(path)}
     assert (ROOT / "mimickit/learning/diagonal_normalization.py").is_file()
-    return {"configs": {kind: {"path": str(ROOT / rel), "sha256": sha(ROOT / rel)}
+    return {"motion": motion,
+            "configs": {kind: {"path": str(ROOT / rel), "sha256": sha(ROOT / rel)}
                         for kind, rel in CONFIGS.items()}, "runtime_assets": assets}
 
 
 def freeze(args):
     out = args.out_dir.resolve()
-    inputs = preflight()
+    inputs = preflight(args.motion)
     if args.preflight:
         print(json.dumps({"status": "passed_static_preflight", **inputs}, indent=2))
         return
@@ -118,7 +125,8 @@ def freeze(args):
     files = {str(path.relative_to(target)): sha(path)
              for path in sorted(target.rglob("*")) if path.is_file()}
     manifest = {"original_repository": str(ROOT), "frozen_code_root": str(target), "files": files,
-                "inputs": inputs, "from_zero": True, "resumed": False, "seed": SEED,
+                "inputs": inputs, "motion": args.motion,
+                "from_zero": True, "resumed": False, "seed": SEED,
                 "updates": args.updates, "num_envs": NUM_ENVS, "steps_per_update": STEPS,
                 "max_samples": args.updates * NUM_ENVS * STEPS}
     save(out / "source_manifest.json", manifest)
@@ -127,6 +135,7 @@ def freeze(args):
     env.setdefault("OMP_NUM_THREADS", "4")
     env.setdefault("MKL_NUM_THREADS", "4")
     os.execve(sys.executable, [sys.executable, "-u", str(target / RUNNER_REL), "--frozen-worker",
+                             "--motion", args.motion,
                              "--updates", str(args.updates), "--out-dir", str(out)], env)
 
 
@@ -138,7 +147,11 @@ def train(args):
     fcntl.flock(run_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     manifest = json.loads((out / "source_manifest.json").read_text())
     assert ROOT == Path(manifest["frozen_code_root"])
-    assert args.updates == manifest["updates"]
+    if args.resume:
+        assert args.updates >= manifest["updates"], "Resume target cannot shorten the original run"
+    else:
+        assert args.updates == manifest["updates"]
+    assert args.motion == manifest.get("motion", "backflip")
     for relative, expected in manifest["files"].items():
         assert sha(ROOT / relative) == expected, relative
     for item in manifest["inputs"]["runtime_assets"].values():
@@ -615,6 +628,7 @@ def train(args):
     if args.resume:
         argv.extend(["--resume_file", str(out / "checkpoint.pt")])
     protocol = {"experiment": "CMNN64_physical_errors_positive_learned_diagonal_group_rms", "from_zero": True,
+                "motion": args.motion,
                 "resumed": False, "initialization_checkpoint": None,
                 "schema": MONOTONE_SCHEMA_VERSION, "discriminator_input_dim": FEATURE_DIM,
                 "shared_physical_normalizer_groups": len(METRICS), "GP": 0,
@@ -666,15 +680,27 @@ def main():
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out-dir", type=Path, required=True)
-    parser.add_argument("--updates", type=int, default=3)
+    parser.add_argument("--updates", type=int, default=3,
+                        help="Total PPO updates, including those already completed when resuming")
+    parser.add_argument("--motion", choices=("backflip", "climb", "crawl"),
+                        help="Motion to train (default: backflip, or the saved motion when resuming)")
     parser.add_argument("--preflight", action="store_true", help="Check files/configuration without torch or GPU")
     parser.add_argument("--frozen-worker", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--resume", action="store_true", help="Resume the full checkpoint using the original frozen sources")
     args = parser.parse_args()
-    if not 3 <= args.updates <= 2000:
-        parser.error("--updates must be between 3 and 2000")
+    if args.updates < 3 or (not args.resume and args.updates > 2000):
+        parser.error("--updates must be between 3 and 2000 for a new run; --resume may extend the total")
     if args.resume:
+        manifest = json.loads((args.out_dir.resolve() / "source_manifest.json").read_text())
+        saved_motion = manifest.get("motion", "backflip")
+        if args.motion is not None and args.motion != saved_motion:
+            parser.error("--motion must match the original experiment when resuming")
+        args.motion = saved_motion
         ROOT = (args.out_dir.resolve() / "source_snapshot").resolve()
+    else:
+        args.motion = args.motion or "backflip"
+    CONFIGS["env"] = Path(f"data/envs/paper_benchmark/dare_{args.motion}_env.yaml")
+    if args.resume:
         train(args)
     elif args.frozen_worker:
         train(args)
