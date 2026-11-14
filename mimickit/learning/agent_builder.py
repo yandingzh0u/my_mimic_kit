@@ -36,6 +36,10 @@ def build_agent(agent_file, env, device):
         import learning.dare_monotone_agent as dare_monotone_agent
         agent = dare_monotone_agent.DAREMonotoneAgent(
             config=agent_config, env=env, device=device)
+    elif (agent_name == "DAREAblation"):
+        import learning.dare_ablation_agent as dare_ablation_agent
+        agent = dare_ablation_agent.DAREAblationAgent(
+            config=agent_config, env=env, device=device)
     elif (agent_name == "LCP"):
         import learning.lcp_agent as lcp_agent
         agent = lcp_agent.LCPAgent(config=agent_config, env=env, device=device)
