@@ -1,0 +1,155 @@
+import json
+from pathlib import Path
+
+import numpy as np
+import pytest
+import torch
+
+from PAPER.tools.evaluation.aggregate_results import (
+    aggregate_summaries,
+    extract_paper_metrics,
+    write_aggregate_tables,
+)
+from PAPER.tools.evaluation.evaluate_checkpoint import (
+    _policy_reward,
+    infer_checkpoint_metadata,
+    infer_method,
+    parse_training_log,
+    reward_diagnostic_episode_key,
+    reward_diagnostic_label,
+    summarize_reward_diagnostics,
+)
+from PAPER.tools.evaluation.input_geometry import InputGeometryAccumulator
+
+
+def test_monotone_agent_is_evaluated_under_dare_method_label():
+    assert infer_method({"agent_name": "DAREMonotone"}, {"env_name": "add"}) == "DARE"
+
+
+def test_paired_reward_adapter_avoids_signed_input_normalization():
+    class Agent:
+        _task_reward_weight = 0.0
+        _disc_reward_weight = 1.0
+
+        def _calc_disc_rewards(self, value):
+            raise AssertionError("Seven-ERR agent must use its paired-state adapter")
+
+        def calc_disc_reward_from_obs(self, policy, reference):
+            assert policy.shape[-1] == reference.shape[-1] == 172
+            return torch.tensor([.25, .75])
+
+    info = {"disc_obs": torch.zeros(2, 172), "disc_obs_demo": torch.ones(2, 172)}
+    torch.testing.assert_close(_policy_reward(Agent(), info, torch.ones(2)), torch.tensor([.25, .75]))
+
+
+def test_training_log_parser_handles_carriage_returns_and_resumed_headers(tmp_path):
+    log_file = tmp_path / "log.txt"
+    log_file.write_text(
+        "Iteration Samples Wall_Time Samples_Per_Second\r"
+        "0 262144 0.1 10\r"
+        "100 26476544 1.0 20\r"
+        "Iteration Samples Wall_Time Samples_Per_Second\n"
+        "200 52690944 2.0 30\n",
+        encoding="utf-8",
+    )
+    assert parse_training_log(log_file) == {
+        "iteration": 200,
+        "samples": 52690944,
+        "wall_time_hours": 2.0,
+        "samples_per_second": 30.0,
+        "source": "log",
+        "log_file": str(log_file.resolve()),
+    }
+    assert parse_training_log(log_file, 100)["samples"] == 26476544
+
+
+def test_checkpoint_metadata_matches_intermediate_model_iteration(tmp_path):
+    output = tmp_path / "run"
+    models = output / "int_models"
+    models.mkdir(parents=True)
+    model = models / "model_100.pt"
+    model.touch()
+    (output / "log.txt").write_text(
+        "Iteration Samples Wall_Time\n100 1234 0.5\n200 5678 1.0\n",
+        encoding="utf-8",
+    )
+    metadata = infer_checkpoint_metadata(model)
+    assert metadata["iteration"] == 100
+    assert metadata["samples"] == 1234
+
+
+def test_reward_diagnostic_retains_optimized_policy_label():
+    assert reward_diagnostic_label("ADD") == "optimized_policy"
+    assert reward_diagnostic_episode_key("ADD") == "policy_reward_mean"
+    metrics = summarize_reward_diagnostics(
+        "ADD", np.asarray([1.0]), np.asarray([0.5]))
+    assert set(metrics) == {"environment", "optimized_policy"}
+
+
+def test_input_geometry_reports_rank_condition_and_paired_correlation():
+    blocks = {"first": slice(1, 3), "second": slice(3, 5)}
+    pairs = (("first", "second"),)
+    accumulator = InputGeometryAccumulator(blocks, "cpu", pairs)
+    observations = torch.tensor(
+        [
+            [0.0, 1.0, 2.0, 2.0, 4.0],
+            [1.0, 2.0, 1.0, 4.0, 2.0],
+            [2.0, 3.0, 0.0, 6.0, 0.0],
+        ]
+    )
+    accumulator.update(observations[:2])
+    accumulator.update(observations[2:])
+    result = accumulator.finalize()
+    assert result["sample_count"] == 3
+    assert result["blocks"]["first"]["rank"] == 1
+    pair = result["paired_correlation"]["first__second"]
+    assert pair["mean"] == pytest.approx(1.0)
+    assert pair["mean_abs"] == pytest.approx(1.0)
+
+
+def _summary(seed, value, source):
+    return {
+        "_source_file": source,
+        "metadata": {
+            "method": "DARE",
+            "motion": "roll",
+            "representation": None,
+            "condition": "nominal",
+            "seed": seed,
+            "checkpoint": {"iteration": 1999, "samples": 524288000},
+        },
+        "completion": {
+            "available": True,
+            "rate": value,
+            "components": {"winding": value},
+        },
+        "metrics": {
+            "tracking": {"paper_pos_err": {"mean": 1.0 - value}},
+            "behavior": {"winding_ratio": {"mean": value}},
+            "reward": {},
+            "intervention": {},
+        },
+        "efficiency": {"batch1_policy_latency_us": 12.0},
+    }
+
+
+def test_aggregator_uses_seed_level_means_and_writes_json_and_csv(tmp_path):
+    summaries = [_summary(0, 0.8, "a"), _summary(1, 1.0, "b")]
+    assert extract_paper_metrics(summaries[0])["completion.rate"] == 0.8
+    groups = aggregate_summaries(summaries)
+    assert len(groups) == 1
+    stats = groups[0]["metrics"]["completion.rate"]
+    assert stats["n_seeds"] == 2
+    assert stats["mean"] == pytest.approx(0.9)
+    assert stats["std"] == pytest.approx(np.std([0.8, 1.0], ddof=1))
+
+    write_aggregate_tables(groups, tmp_path)
+    aggregate = json.loads((tmp_path / "aggregate.json").read_text())
+    assert aggregate["groups"][0]["seeds"] == [0, 1]
+    assert (tmp_path / "aggregate.csv").is_file()
+    assert (tmp_path / "aggregate_long.csv").is_file()
+
+
+def test_aggregator_rejects_duplicate_seed_in_matched_group():
+    with pytest.raises(ValueError, match="duplicate seed"):
+        aggregate_summaries([_summary(0, 0.8, "a"), _summary(0, 0.9, "b")])

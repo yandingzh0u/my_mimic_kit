@@ -1,0 +1,27 @@
+{
+  "date": "2026-11-15",
+  "purpose": "Consolidate manuscript assets under PAPER; experiment data remains under output as requested.",
+  "path_mapping": {
+    "output/paper_benchmark": "output",
+    "output/paper_screenshots": "PAPER/artifacts/screenshots",
+    "output/paper_rollouts": "PAPER/artifacts/rollouts",
+    "output/paper_builds": "PAPER/build",
+    "output/paper_cleanup": "PAPER/backups",
+    "output/paper_screenshot_ppt_check": "PAPER/build/screenshot_ppt_check",
+    "tools/paper_benchmark": "PAPER/tools/benchmark",
+    "tools/paper_eval": "PAPER/tools/evaluation",
+    "data/envs/paper_benchmark": "PAPER/configs/envs",
+    "args/paper_benchmark": "PAPER/configs/args",
+    "tests/test_paper_eval_artifacts.py": "PAPER/tests/test_paper_eval_artifacts.py",
+    "tests/test_paper_benchmark_matrix.py": "PAPER/tests/test_paper_benchmark_matrix.py",
+    "tests/test_paper_eval_metrics.py": "PAPER/tests/test_paper_eval_metrics.py",
+    "tests/test_dare_ablation_queue.py": "PAPER/tests/test_dare_ablation_queue.py",
+    "PAPER/experiments": "output"
+  },
+  "moved_file_count": 3717,
+  "moved_bytes": 7584190857,
+  "file_identity_preserved_on_move": true,
+  "immutable_records": "Frozen source snapshots, source manifests, checkpoints and historical experiment records retain their original bytes and recorded paths. PAPER/tools/paths.py resolves their current locations.",
+  "shared_dependencies": "Simulator implementation, common agent/engine configs, robot assets and motion data stay in their shared repository directories.",
+  "user_update": "The user moved the experiment directories from PAPER/experiments directly into output; current consumers follow this location."
+}

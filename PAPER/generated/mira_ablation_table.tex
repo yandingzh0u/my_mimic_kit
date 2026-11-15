@@ -1,9 +1,7 @@
-\begin{table*}[t]
+\begin{table*}[!t]
 \caption{Backflip component analysis at 2000 updates. Completion is
 reported as a check or cross from the measured seed-0 reference-start test.
 Errors of incomplete motions cover only the executed portion.
-\textcolor{orange!70!black}{$\dagger$: Synthetic layout deviations;
-additional seed repetitions remain pending.}
 }
 \label{tab:ablation}
 \centering\scriptsize
@@ -11,9 +9,9 @@ additional seed repetitions remain pending.}
 \resizebox{\textwidth}{!}{\begin{tabular}{lcccccccc}\toprule
 Configuration & Root pos. & Root rot. & Body pos. & Body rot. & DoF vel. & Root vel. & Root ang. vel. & Complete \\
 \midrule
-\textbf{MIRA} & $0.0544\!\pm\!\textcolor{orange!70!black}{0.0033}^{\dagger}$ & $0.0303\!\pm\!\textcolor{orange!70!black}{0.0026}^{\dagger}$ & $0.0373\!\pm\!\textcolor{orange!70!black}{0.0023}^{\dagger}$ & $0.1701\!\pm\!\textcolor{orange!70!black}{0.0073}^{\dagger}$ & $0.9793\!\pm\!\textcolor{orange!70!black}{0.0425}^{\dagger}$ & $0.2760\!\pm\!\textcolor{orange!70!black}{0.0133}^{\dagger}$ & $0.2316\!\pm\!\textcolor{orange!70!black}{0.0098}^{\dagger}$ & $\checkmark$ \\
-w/o Monotone Modeling & $0.1226\!\pm\!\textcolor{orange!70!black}{0.0057}^{\dagger}$ & $0.1270\!\pm\!\textcolor{orange!70!black}{0.0076}^{\dagger}$ & $0.0693\!\pm\!\textcolor{orange!70!black}{0.0034}^{\dagger}$ & $0.3061\!\pm\!\textcolor{orange!70!black}{0.0030}^{\dagger}$ & $1.7812\!\pm\!\textcolor{orange!70!black}{0.1119}^{\dagger}$ & $0.3729\!\pm\!\textcolor{orange!70!black}{0.0206}^{\dagger}$ & $0.9161\!\pm\!\textcolor{orange!70!black}{0.0338}^{\dagger}$ & $\checkmark$ \\
-w/o Diagonal Norm. & $0.0609\!\pm\!\textcolor{orange!70!black}{0.0039}^{\dagger}$ & $0.1031\!\pm\!\textcolor{orange!70!black}{0.0020}^{\dagger}$ & $0.0596\!\pm\!\textcolor{orange!70!black}{0.0029}^{\dagger}$ & $0.2449\!\pm\!\textcolor{orange!70!black}{0.0132}^{\dagger}$ & $1.4464\!\pm\!\textcolor{orange!70!black}{0.0011}^{\dagger}$ & $0.2650\!\pm\!\textcolor{orange!70!black}{0.0102}^{\dagger}$ & $0.7879\!\pm\!\textcolor{orange!70!black}{0.0199}^{\dagger}$ & $\times$ \\
-w/o Both Components & $0.0776\!\pm\!\textcolor{orange!70!black}{0.0021}^{\dagger}$ & $0.1158\!\pm\!\textcolor{orange!70!black}{0.0071}^{\dagger}$ & $0.0651\!\pm\!\textcolor{orange!70!black}{0.0020}^{\dagger}$ & $0.2767\!\pm\!\textcolor{orange!70!black}{0.0113}^{\dagger}$ & $1.4357\!\pm\!\textcolor{orange!70!black}{0.1134}^{\dagger}$ & $0.2815\!\pm\!\textcolor{orange!70!black}{0.0148}^{\dagger}$ & $0.6750\!\pm\!\textcolor{orange!70!black}{0.0283}^{\dagger}$ & $\times$ \\
+\textbf{MIRA} & $\mathbf{0.0544}$ & $\mathbf{0.0303}$ & $\mathbf{0.0373}$ & $\mathbf{0.1701}$ & $\mathbf{0.9793}$ & $0.2760$ & $\mathbf{0.2316}$ & $\checkmark$ \\
+w/o Monotone Modeling & $0.1226$ & $0.1270$ & $0.0693$ & $0.3061$ & $1.7812$ & $0.3729$ & $0.9161$ & $\checkmark$ \\
+w/o Diagonal Norm. & $0.0609$ & $0.1031$ & $0.0596$ & $0.2449$ & $1.4464$ & $\mathbf{0.2650}$ & $0.7879$ & $\times$ \\
+w/o Both Components & $0.0776$ & $0.1158$ & $0.0651$ & $0.2767$ & $1.4357$ & $0.2815$ & $0.6750$ & $\times$ \\
 \bottomrule\end{tabular}}
 \end{table*}

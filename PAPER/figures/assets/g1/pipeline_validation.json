@@ -1,0 +1,20 @@
+{
+  "slides": 1,
+  "page_inches": [
+    17.6,
+    5.15
+  ],
+  "paper_inches_at_7in_width": [
+    7,
+    2.0482954545454546
+  ],
+  "g1_robot_images": 2,
+  "editable_native_elements": 96,
+  "reference_composition_followed": true,
+  "robot_provenance": "/home/y/my_project/MimicKit/PAPER/figures/assets/g1/provenance.json",
+  "files": [
+    "/home/y/my_project/MimicKit/PAPER/figures/mira_pipeline.pptx",
+    "/home/y/my_project/MimicKit/PAPER/figures/mira_pipeline.pdf",
+    "/home/y/my_project/MimicKit/PAPER/figures/mira_pipeline.png"
+  ]
+}

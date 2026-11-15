@@ -1,24 +1,4 @@
-\section{Experiments}
-
-\subsection{Experimental Setup}
-\label{sec:setup}
-We evaluate MIRA on a $28$-DoF, $15$-body humanoid in Isaac Lab
-\cite{mittal2023isaaclab,makoviychuk2021isaacgym}. The benchmark comprises
-six skills: Roll, Climb, Backflip, Crawl, Get-Up, and Spin Kick. The main
-comparison uses $2000$ policy updates with $8192$ parallel environments and
-$32$ steps per update, corresponding to $5.24\times10^8$ environment samples.
-The simulator runs at $120\,\mathrm{Hz}$ and PD joint-position actions are
-applied at $30\,\mathrm{Hz}$. MIRA uses the same configuration across motions
-(Table~\ref{tab:config}), without a gradient penalty or an additional
-handcrafted tracking reward.
-
-Three independent training seeds are planned for each configuration.
-\textcolor{orange!70!black}{\textbf{Draft data status:} available measurements
-are from seed~0. Dagger-marked deviations and shaded bands are reproducible
-random layout placeholders for two pending seed repetitions of already
-measured runs, not empirical uncertainty estimates. Unrun motion--method
-combinations remain \textbf{TODO}.}
-
+% Queue wide assets early so they can appear beside the experimental discussion.
 \begin{table}[t]
 \caption{MIRA configuration shared across motions.}
 \label{tab:config}
@@ -45,6 +25,52 @@ Gradient penalty & $0$ \\
 \end{tabular}
 \end{table}
 
+\input{generated/mira_main_table.tex}
+
+\begin{figure*}[!t]
+\centering
+\includegraphics[width=0.97\textwidth]{figures/mira_rollout_screenshots.pdf}
+\caption{Isaac Lab renderings of the six learned skills. Frames are
+sampled from actual policy executions in the simulated environments.
+Get-Up and Crawl use six keyframes each; Backflip, Climb, Roll, and
+Spin Kick use twelve each.}
+\label{fig:snapshots}
+\end{figure*}
+
+\begin{figure*}[!t]
+\centering
+\includegraphics[width=0.97\textwidth]{figures/mira_tracking_curves.pdf}
+\caption{Six-motion mean tracking curves from measured seed-0
+reference-start tests. Progress is the fraction of each run's training
+budget, as listed in Table~\ref{tab:main}.
+Errors cover executed trajectory portions; lower is better.}
+\label{fig:learning}
+\end{figure*}
+
+\input{generated/mira_ablation_table.tex}
+
+
+
+\section{Experiments}
+
+\subsection{Experimental Setup}
+\label{sec:setup}
+We evaluate MIRA on a $28$-DoF, $15$-body humanoid in Isaac Lab
+\cite{mittal2023isaaclab,makoviychuk2021isaacgym}. The benchmark comprises
+six skills: Roll, Climb, Backflip, Crawl, Get-Up, and Spin Kick. The main
+base training budget is $2000$ policy updates with $8192$ parallel
+environments and $32$ steps per update, corresponding to
+$5.24\times10^8$ environment samples. The Climb extension is specified
+in Table~\ref{tab:main}.
+The simulator runs at $120\,\mathrm{Hz}$ and PD joint-position actions are
+applied at $30\,\mathrm{Hz}$. MIRA uses the same configuration across motions
+(Table~\ref{tab:config}), without a gradient penalty or an additional
+handcrafted tracking reward.
+
+Results use one training seed (seed~0) per configuration and deterministic
+reference-start tests recorded during training. Additional training seeds
+and a unified independent checkpoint evaluation remain \textbf{TODO}.
+
 We report seven tracking errors: root position, root rotation, body position,
 body rotation, joint velocity, root linear velocity, and root angular
 velocity. Position errors use Euclidean distances; body positions are
@@ -55,50 +81,26 @@ metrics average over its $15$ rigid bodies, while MIRA's input omits
 duplicated root entries from the body groups. All errors are computed on
 reference-aligned executed timesteps. Early-terminated trajectories are not
 padded, so their errors must be interpreted together with completion.
+The ablation table additionally marks whether each run reaches the full
+motion horizon.
 
 \subsection{Quantitative Comparison}
 We compare MIRA with AMP, DeepMimic, and ADD. Table~\ref{tab:main} summarizes
-the seven tracking errors under the common training budget. Its aggregate
-entries weight the six motions equally; an aggregate remains TODO until
-all six constituent motion results are available. Available MIRA results
-and missing motions are retained in the same table. Climb extensions beyond
-$2000$ updates are excluded from the main comparison. Qualitative rollout
-panels are reserved in Fig.~\ref{fig:snapshots}.
-
-\input{generated/mira_main_table.tex}
-
-\begin{figure*}[t]
-\centering
-\includegraphics[width=0.90\textwidth]{figures/mira_motion_frames_todo.pdf}
-\caption{Motion imitation across the six benchmark skills.
-\textcolor{red}{TODO: replace the marked panels with synchronized keyframes
-rendered from the current MIRA checkpoints. These panels contain no rollout
-observations.}}
-\label{fig:snapshots}
-\end{figure*}
+the seven tracking errors, with all six motions weighted equally. The
+table reports all four methods together and lists MIRA's per-motion
+results. The learned skills are illustrated in Fig.~\ref{fig:snapshots}.
+These measurements characterize the available seed-0 runs, rather than
+establishing uniform superiority across motions or training seeds.
 
 \subsection{Learning Dynamics}
 \label{sec:learning}
 Figure~\ref{fig:learning} reports body-position, body-rotation, and joint-velocity
-errors against environment samples. In the current draft, all methods are
-averaged equally over Backflip, Climb, and Crawl, the three motions with
-available MIRA measurements. This provides a matched preliminary comparison
-without motion-specific panels. The remaining three motions will be added
-to every method's curve together. The shaded regions currently serve only
-as marked three-seed layout placeholders.
-
-\begin{figure*}[t]
-\centering
-\includegraphics[width=0.97\textwidth]{figures/mira_learning_macro_draft.pdf}
-\caption{Preliminary three-motion macro-average learning curves over
-Backflip, Climb, and Crawl at the common sample budget. Every method uses
-the same three motions. Lower is better; vertical axes are logarithmic. Lines use measured
-seed-0 evaluation records. \textcolor{orange!70!black}{Shaded bands are random
-seed placeholders, not measured standard deviations.} The six-motion
-extension remains pending. Errors cover
-executed trajectory portions, including early-terminated evaluations.}
-\label{fig:learning}
-\end{figure*}
+errors during training. Every method is averaged equally over the same six
+motions at equal fractions of each run's training budget. The four
+algorithms use the same evaluation and aggregation protocol, exposing
+differences in learning progress and final tracking accuracy. The curves
+do not establish an improvement
+on every motion or statistical significance across training seeds.
 
 \subsection{Ablation Study}
 \label{sec:ablation}
@@ -117,11 +119,10 @@ hidden widths, PPO settings, and training budget are shared. Configurations
 without diagonal normalization start from the corresponding normalized
 model's effective initial weights. This avoids introducing an arbitrary
 initial output-scale change. All variants retain the existing output-weight
-regularizer; removing normalization also changes its action on the effective
-head weights. Monotone Error Modeling is evaluated as a joint representation
+regularizer. This penalty is constant for the unit-norm normalized scalar
+head and becomes active when normalization is removed. Monotone Error
+Modeling is evaluated as a joint representation
 and constraint component, rather than an isolated dimensionality change.
-
-\input{generated/mira_ablation_table.tex}
 
 Table~\ref{tab:ablation} reports tracking errors and whether the
 reference-start evaluation reaches the full motion duration. Removing
@@ -138,18 +139,20 @@ constraint to the reward's operating behavior, without attributing the
 entire control gap to a single mechanism. The diagnostics use the measured
 Backflip run and do not stand in for a six-motion result.
 
-\begin{figure*}[t]
-\centering
-\includegraphics[width=0.97\textwidth]{figures/mira_ablation_diagnostics.pdf}
-\caption{Measured seed-0 Backflip discriminator diagnostics for the four
-ablation configurations. Left: sampled maximum score-gradient norm in each
-model's normalized input space; the dashed line marks one. Middle: mean
-negative-sample logit. Right: fraction of sampled rewards that are
-numerically zero. Samples come from each configuration's own rollout, so
-the gradient curves are operating diagnostics rather than a common-state
-causal comparison or a certificate of a global bound. No random seed
-placeholders are used in this figure.}
-\label{fig:diagnostics}
-\end{figure*}
-
 \FloatBarrier
+
+% The final diagnostic shares the page with the conclusion and references.
+\twocolumn[{
+\begin{minipage}{\textwidth}
+\MiraFigureType
+\centering
+\includegraphics[width=0.97\textwidth]{figures/mira_discriminator_diagnostics.pdf}
+\caption{Backflip discriminator diagnostics for the four ablations:
+sampled maximum score-gradient norm (left), mean negative logit (middle),
+and numerically zero rewards (right). Gradients use each model's normalized
+coordinates and its own rollouts; they are local operating diagnostics,
+not global bounds or common-state causal comparisons.}
+\label{fig:diagnostics}
+\vspace{12pt}
+\end{minipage}
+}]

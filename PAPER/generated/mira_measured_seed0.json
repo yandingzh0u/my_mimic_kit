@@ -1,5 +1,5 @@
 {
-  "common_updates": 2000,
+  "default_training_updates": 2000,
   "motion_names": [
     "Roll",
     "Climb",
@@ -8,27 +8,68 @@
     "Get-Up",
     "Spin Kick"
   ],
+  "default_training_samples": 524288000,
+  "motion_ids": [
+    "roll",
+    "climb",
+    "backflip",
+    "crawl",
+    "getup_facedown",
+    "spinkick"
+  ],
+  "terminal_budget_exceptions": {
+    "MIRA/climb": {
+      "updates": 3000,
+      "samples": 786432000
+    }
+  },
+  "budget_note": "MIRA Climb uses 3000 updates; other results use 2000.",
+  "metric_names": [
+    "Root_Pos_Err",
+    "Root_Rot_Err",
+    "Body_Pos_Err",
+    "Body_Rot_Err",
+    "Dof_Vel_Err",
+    "Root_Vel_Err",
+    "Root_Ang_Vel_Err"
+  ],
+  "nominal_horizon_steps": {
+    "roll": 60,
+    "climb": 299,
+    "backflip": 60,
+    "crawl": 77,
+    "getup_facedown": 91,
+    "spinkick": 60
+  },
   "actual_seed_ids": [
     0
   ],
-  "target_seed_ids": [
-    0,
-    1,
-    2
-  ],
-  "aggregation": "Tables require six motions. Preliminary learning curves use the common measured motion cohort for every method.",
+  "synthetic_data_used": false,
+  "evaluation_source": "in-training reference-start evaluation",
+  "independent_evaluation_used": false,
+  "aggregation": "Equal-weight arithmetic mean of the same six motions; one measured seed per configuration.",
+  "learning_curve_alignment": "Fraction of each run's actual terminal training budget.",
   "learning_curve_motions": [
+    "roll",
     "climb",
     "backflip",
-    "crawl"
+    "crawl",
+    "getup_facedown",
+    "spinkick"
   ],
   "runs": {
     "AMP": {
       "roll": {
-        "path": "output/paper_benchmark/amp_roll_2k_8192_seed0/train_metrics.jsonl",
+        "path": "output/amp_roll_2k_8192_seed0/train_metrics.jsonl",
         "sha256": "42c57845f5866098f3faf360721c85aeede949dc7f87faaf918022e328d9f71f",
         "seed": 0,
         "completed_updates_used": 2000,
+        "samples_used": 524288000,
+        "logged_iteration": 1999,
+        "logged_resume_segment": 0,
+        "evaluation_source": "in-training reference-start evaluation",
+        "independent_evaluation_used": false,
+        "test_episodes": 8192,
         "final": {
           "Root_Pos_Err": 0.5644740462303162,
           "Root_Rot_Err": 1.6697959899902344,
@@ -38,13 +79,23 @@
           "Root_Vel_Err": 0.7330958247184753,
           "Root_Ang_Vel_Err": 2.1443114280700684
         },
-        "test_episode_length": 60.0
+        "test_episode_length": 60.0,
+        "nominal_horizon_steps": 60,
+        "complete": true,
+        "independent_summary_available": true,
+        "independent_summary_path": "output/amp_roll_2k_8192_seed0/eval/final/summary.json"
       },
       "climb": {
-        "path": "output/paper_benchmark/amp_climb_2k_8192_seed0/train_metrics.jsonl",
+        "path": "output/amp_climb_2k_8192_seed0/train_metrics.jsonl",
         "sha256": "f2acd42b39064d15475a57f74970890316a242603795c1dc2e7282175183cba6",
         "seed": 0,
         "completed_updates_used": 2000,
+        "samples_used": 524288000,
+        "logged_iteration": 1999,
+        "logged_resume_segment": 1,
+        "evaluation_source": "in-training reference-start evaluation",
+        "independent_evaluation_used": false,
+        "test_episodes": 8204,
         "final": {
           "Root_Pos_Err": 1.327211856842041,
           "Root_Rot_Err": 1.4300779104232788,
@@ -54,13 +105,23 @@
           "Root_Vel_Err": 0.5859046578407288,
           "Root_Ang_Vel_Err": 1.0412428379058838
         },
-        "test_episode_length": 289.8566589355469
+        "test_episode_length": 289.8566589355469,
+        "nominal_horizon_steps": 299,
+        "complete": false,
+        "independent_summary_available": true,
+        "independent_summary_path": "output/amp_climb_2k_8192_seed0/eval/final/summary.json"
       },
       "backflip": {
-        "path": "output/paper_benchmark/amp_backflip_2k_8192_seed0/train_metrics.jsonl",
+        "path": "output/amp_backflip_2k_8192_seed0/train_metrics.jsonl",
         "sha256": "cabd372ed7de491e9afcad8ace538d1b87c46ca804cf221f2bafd69601aea19a",
         "seed": 0,
         "completed_updates_used": 2000,
+        "samples_used": 524288000,
+        "logged_iteration": 1999,
+        "logged_resume_segment": 1,
+        "evaluation_source": "in-training reference-start evaluation",
+        "independent_evaluation_used": false,
+        "test_episodes": 8242,
         "final": {
           "Root_Pos_Err": 0.40317001938819885,
           "Root_Rot_Err": 0.7263559699058533,
@@ -70,13 +131,23 @@
           "Root_Vel_Err": 0.6798665523529053,
           "Root_Ang_Vel_Err": 1.551676869392395
         },
-        "test_episode_length": 56.78173065185547
+        "test_episode_length": 56.78173065185547,
+        "nominal_horizon_steps": 60,
+        "complete": false,
+        "independent_summary_available": true,
+        "independent_summary_path": "output/amp_backflip_2k_8192_seed0/eval/final/summary.json"
       },
       "crawl": {
-        "path": "output/paper_benchmark/amp_crawl_2k_8192_seed0/train_metrics.jsonl",
+        "path": "output/amp_crawl_2k_8192_seed0/train_metrics.jsonl",
         "sha256": "f9bf38f1794bb9a1ef7f01a61898b3bdf4115b9f7fb9db62ae0746ae4105660f",
         "seed": 0,
         "completed_updates_used": 2000,
+        "samples_used": 524288000,
+        "logged_iteration": 1999,
+        "logged_resume_segment": 1,
+        "evaluation_source": "in-training reference-start evaluation",
+        "independent_evaluation_used": false,
+        "test_episodes": 8192,
         "final": {
           "Root_Pos_Err": 0.038983166217803955,
           "Root_Rot_Err": 0.060481391847133636,
@@ -86,13 +157,23 @@
           "Root_Vel_Err": 0.07657880336046219,
           "Root_Ang_Vel_Err": 0.2011844515800476
         },
-        "test_episode_length": 77.0
+        "test_episode_length": 77.0,
+        "nominal_horizon_steps": 77,
+        "complete": true,
+        "independent_summary_available": true,
+        "independent_summary_path": "output/amp_crawl_2k_8192_seed0/eval/final/summary.json"
       },
       "getup_facedown": {
-        "path": "output/paper_benchmark/amp_getup_facedown_2k_8192_seed0/train_metrics.jsonl",
+        "path": "output/amp_getup_facedown_2k_8192_seed0/train_metrics.jsonl",
         "sha256": "efff821203146257768e10c4360a0d30a5d41f9e27fe727dc91af2d63d24b404",
         "seed": 0,
         "completed_updates_used": 2000,
+        "samples_used": 524288000,
+        "logged_iteration": 1999,
+        "logged_resume_segment": 0,
+        "evaluation_source": "in-training reference-start evaluation",
+        "independent_evaluation_used": false,
+        "test_episodes": 8192,
         "final": {
           "Root_Pos_Err": 0.35980111360549927,
           "Root_Rot_Err": 0.6302220821380615,
@@ -102,13 +183,23 @@
           "Root_Vel_Err": 0.2364378273487091,
           "Root_Ang_Vel_Err": 0.5205889940261841
         },
-        "test_episode_length": 91.0
+        "test_episode_length": 91.0,
+        "nominal_horizon_steps": 91,
+        "complete": true,
+        "independent_summary_available": true,
+        "independent_summary_path": "output/amp_getup_facedown_2k_8192_seed0/eval/final/summary.json"
       },
       "spinkick": {
-        "path": "output/paper_benchmark/amp_spinkick_2k_8192_seed0/train_metrics.jsonl",
+        "path": "output/amp_spinkick_2k_8192_seed0/train_metrics.jsonl",
         "sha256": "f013958967665ec0ffff40c7a4ac9b132e6cbbfbe44de31bad7bdf26b23fd2d2",
         "seed": 0,
         "completed_updates_used": 2000,
+        "samples_used": 524288000,
+        "logged_iteration": 1999,
+        "logged_resume_segment": 0,
+        "evaluation_source": "in-training reference-start evaluation",
+        "independent_evaluation_used": false,
+        "test_episodes": 8192,
         "final": {
           "Root_Pos_Err": 0.12848876416683197,
           "Root_Rot_Err": 0.10104089230298996,
@@ -118,15 +209,25 @@
           "Root_Vel_Err": 0.1950230449438095,
           "Root_Ang_Vel_Err": 0.5948472619056702
         },
-        "test_episode_length": 59.986328125
+        "test_episode_length": 59.986328125,
+        "nominal_horizon_steps": 60,
+        "complete": false,
+        "independent_summary_available": true,
+        "independent_summary_path": "output/amp_spinkick_2k_8192_seed0/eval/final/summary.json"
       }
     },
     "DeepMimic": {
       "roll": {
-        "path": "output/paper_benchmark/deepmimic_roll_2k_8192_seed0/train_metrics.jsonl",
+        "path": "output/deepmimic_roll_2k_8192_seed0/train_metrics.jsonl",
         "sha256": "f1b2f467641e9caf257983c040435bcf228b25665b63fa13514d2d7a607f48e7",
         "seed": 0,
         "completed_updates_used": 2000,
+        "samples_used": 524288000,
+        "logged_iteration": 1999,
+        "logged_resume_segment": 0,
+        "evaluation_source": "in-training reference-start evaluation",
+        "independent_evaluation_used": false,
+        "test_episodes": 8192,
         "final": {
           "Root_Pos_Err": 0.17523826658725739,
           "Root_Rot_Err": 0.404291033744812,
@@ -136,13 +237,23 @@
           "Root_Vel_Err": 0.341779887676239,
           "Root_Ang_Vel_Err": 0.7329327464103699
         },
-        "test_episode_length": 60.0
+        "test_episode_length": 60.0,
+        "nominal_horizon_steps": 60,
+        "complete": true,
+        "independent_summary_available": true,
+        "independent_summary_path": "output/deepmimic_roll_2k_8192_seed0/eval/final/summary.json"
       },
       "climb": {
-        "path": "output/paper_benchmark/deepmimic_climb_2k_8192_seed0/train_metrics.jsonl",
+        "path": "output/deepmimic_climb_2k_8192_seed0/train_metrics.jsonl",
         "sha256": "bccc2a54057f4eabd3df97f01904ddecf88ef10e79505647613168078dab30ab",
         "seed": 0,
         "completed_updates_used": 2000,
+        "samples_used": 524288000,
+        "logged_iteration": 1999,
+        "logged_resume_segment": 1,
+        "evaluation_source": "in-training reference-start evaluation",
+        "independent_evaluation_used": false,
+        "test_episodes": 8280,
         "final": {
           "Root_Pos_Err": 0.08828675746917725,
           "Root_Rot_Err": 0.15239734947681427,
@@ -152,13 +263,23 @@
           "Root_Vel_Err": 0.18371513485908508,
           "Root_Ang_Vel_Err": 0.4739466905593872
         },
-        "test_episode_length": 295.467529296875
+        "test_episode_length": 295.467529296875,
+        "nominal_horizon_steps": 299,
+        "complete": false,
+        "independent_summary_available": true,
+        "independent_summary_path": "output/deepmimic_climb_2k_8192_seed0/eval/final/summary.json"
       },
       "backflip": {
-        "path": "output/paper_benchmark/deepmimic_backflip_2k_8192_seed0/train_metrics.jsonl",
+        "path": "output/deepmimic_backflip_2k_8192_seed0/train_metrics.jsonl",
         "sha256": "efeda9eee5a04f8a2696cae5598366bd841dd953f34840b7d5ba977b4f498a9b",
         "seed": 0,
         "completed_updates_used": 2000,
+        "samples_used": 524288000,
+        "logged_iteration": 1999,
+        "logged_resume_segment": 0,
+        "evaluation_source": "in-training reference-start evaluation",
+        "independent_evaluation_used": false,
+        "test_episodes": 8192,
         "final": {
           "Root_Pos_Err": 0.05372215062379837,
           "Root_Rot_Err": 0.0987393707036972,
@@ -168,13 +289,23 @@
           "Root_Vel_Err": 0.2698861062526703,
           "Root_Ang_Vel_Err": 0.7662243843078613
         },
-        "test_episode_length": 60.0
+        "test_episode_length": 60.0,
+        "nominal_horizon_steps": 60,
+        "complete": true,
+        "independent_summary_available": true,
+        "independent_summary_path": "output/deepmimic_backflip_2k_8192_seed0/eval/final/summary.json"
       },
       "crawl": {
-        "path": "output/paper_benchmark/deepmimic_crawl_2k_8192_seed0/train_metrics.jsonl",
+        "path": "output/deepmimic_crawl_2k_8192_seed0/train_metrics.jsonl",
         "sha256": "5e943e6f7a051a811ce12a97c14805c9bc5f1df5a1e9fcee1c4968daa2a3b512",
         "seed": 0,
         "completed_updates_used": 2000,
+        "samples_used": 524288000,
+        "logged_iteration": 1999,
+        "logged_resume_segment": 0,
+        "evaluation_source": "in-training reference-start evaluation",
+        "independent_evaluation_used": false,
+        "test_episodes": 8192,
         "final": {
           "Root_Pos_Err": 0.00999670010060072,
           "Root_Rot_Err": 0.013678016141057014,
@@ -184,13 +315,23 @@
           "Root_Vel_Err": 0.0329645499587059,
           "Root_Ang_Vel_Err": 0.07803302258253098
         },
-        "test_episode_length": 77.0
+        "test_episode_length": 77.0,
+        "nominal_horizon_steps": 77,
+        "complete": true,
+        "independent_summary_available": true,
+        "independent_summary_path": "output/deepmimic_crawl_2k_8192_seed0/eval/final/summary.json"
       },
       "getup_facedown": {
-        "path": "output/paper_benchmark/deepmimic_getup_facedown_2k_8192_seed0/train_metrics.jsonl",
+        "path": "output/deepmimic_getup_facedown_2k_8192_seed0/train_metrics.jsonl",
         "sha256": "363d8570c533c5436794e204dbd2a34a76db079a2d88a9f4162ff7968dfab0b8",
         "seed": 0,
         "completed_updates_used": 2000,
+        "samples_used": 524288000,
+        "logged_iteration": 1999,
+        "logged_resume_segment": 0,
+        "evaluation_source": "in-training reference-start evaluation",
+        "independent_evaluation_used": false,
+        "test_episodes": 8192,
         "final": {
           "Root_Pos_Err": 0.027913765981793404,
           "Root_Rot_Err": 0.05428406223654747,
@@ -200,13 +341,23 @@
           "Root_Vel_Err": 0.06349687278270721,
           "Root_Ang_Vel_Err": 0.13531307876110077
         },
-        "test_episode_length": 91.0
+        "test_episode_length": 91.0,
+        "nominal_horizon_steps": 91,
+        "complete": true,
+        "independent_summary_available": true,
+        "independent_summary_path": "output/deepmimic_getup_facedown_2k_8192_seed0/eval/final/summary.json"
       },
       "spinkick": {
-        "path": "output/paper_benchmark/deepmimic_spinkick_2k_8192_seed0/train_metrics.jsonl",
+        "path": "output/deepmimic_spinkick_2k_8192_seed0/train_metrics.jsonl",
         "sha256": "fbf1361ff0e0421c2967c12f85b72af86ab0d44bc64db02ee1aa7a8a53c772cd",
         "seed": 0,
         "completed_updates_used": 2000,
+        "samples_used": 524288000,
+        "logged_iteration": 1999,
+        "logged_resume_segment": 0,
+        "evaluation_source": "in-training reference-start evaluation",
+        "independent_evaluation_used": false,
+        "test_episodes": 8192,
         "final": {
           "Root_Pos_Err": 0.044119689613580704,
           "Root_Rot_Err": 0.054626088589429855,
@@ -216,15 +367,25 @@
           "Root_Vel_Err": 0.13554847240447998,
           "Root_Ang_Vel_Err": 0.310653954744339
         },
-        "test_episode_length": 59.806396484375
+        "test_episode_length": 59.806396484375,
+        "nominal_horizon_steps": 60,
+        "complete": false,
+        "independent_summary_available": true,
+        "independent_summary_path": "output/deepmimic_spinkick_2k_8192_seed0/eval/final/summary.json"
       }
     },
     "ADD": {
       "roll": {
-        "path": "output/paper_benchmark/add_roll_2k_8192_seed0/train_metrics.jsonl",
+        "path": "output/add_roll_2k_8192_seed0/train_metrics.jsonl",
         "sha256": "2c0768445855d558ed01992760672906ff500e7580a44f3b9fa07e1098d4935a",
         "seed": 0,
         "completed_updates_used": 2000,
+        "samples_used": 524288000,
+        "logged_iteration": 1999,
+        "logged_resume_segment": 0,
+        "evaluation_source": "in-training reference-start evaluation",
+        "independent_evaluation_used": false,
+        "test_episodes": 8192,
         "final": {
           "Root_Pos_Err": 0.0778704509139061,
           "Root_Rot_Err": 0.09265600144863129,
@@ -234,13 +395,23 @@
           "Root_Vel_Err": 0.3278418183326721,
           "Root_Ang_Vel_Err": 0.5531971454620361
         },
-        "test_episode_length": 60.0
+        "test_episode_length": 60.0,
+        "nominal_horizon_steps": 60,
+        "complete": true,
+        "independent_summary_available": true,
+        "independent_summary_path": "output/add_roll_2k_8192_seed0/eval/final/summary.json"
       },
       "climb": {
-        "path": "output/paper_benchmark/add_climb_2k_8192_seed0/train_metrics.jsonl",
+        "path": "output/add_climb_2k_8192_seed0/train_metrics.jsonl",
         "sha256": "9bb26d53f79517c357386c6032ad5cfd7a79533bd6404a34212a41fe8f21b87c",
         "seed": 0,
         "completed_updates_used": 2000,
+        "samples_used": 524288000,
+        "logged_iteration": 1999,
+        "logged_resume_segment": 0,
+        "evaluation_source": "in-training reference-start evaluation",
+        "independent_evaluation_used": false,
+        "test_episodes": 8192,
         "final": {
           "Root_Pos_Err": 0.16208109259605408,
           "Root_Rot_Err": 0.12952186167240143,
@@ -250,13 +421,23 @@
           "Root_Vel_Err": 0.2318911999464035,
           "Root_Ang_Vel_Err": 0.5156362056732178
         },
-        "test_episode_length": 75.002197265625
+        "test_episode_length": 75.002197265625,
+        "nominal_horizon_steps": 299,
+        "complete": false,
+        "independent_summary_available": true,
+        "independent_summary_path": "output/add_climb_2k_8192_seed0/eval/final/summary.json"
       },
       "backflip": {
-        "path": "output/paper_benchmark/add_backflip_2k_8192_seed0/train_metrics.jsonl",
+        "path": "output/add_backflip_2k_8192_seed0/train_metrics.jsonl",
         "sha256": "df207e950daf7a1a1833de6ee60cbccebbd0875563ab2373a656e2487a58e576",
         "seed": 0,
         "completed_updates_used": 2000,
+        "samples_used": 524288000,
+        "logged_iteration": 1999,
+        "logged_resume_segment": 0,
+        "evaluation_source": "in-training reference-start evaluation",
+        "independent_evaluation_used": false,
+        "test_episodes": 8192,
         "final": {
           "Root_Pos_Err": 0.0904974415898323,
           "Root_Rot_Err": 0.08917836844921112,
@@ -266,13 +447,23 @@
           "Root_Vel_Err": 0.3528596758842468,
           "Root_Ang_Vel_Err": 0.6060552000999451
         },
-        "test_episode_length": 60.0
+        "test_episode_length": 60.0,
+        "nominal_horizon_steps": 60,
+        "complete": true,
+        "independent_summary_available": true,
+        "independent_summary_path": "output/add_backflip_2k_8192_seed0/eval/final/summary.json"
       },
       "crawl": {
-        "path": "output/paper_benchmark/add_crawl_2k_8192_seed0/train_metrics.jsonl",
+        "path": "output/add_crawl_2k_8192_seed0/train_metrics.jsonl",
         "sha256": "10f935758a33552a38c9d1443cdae87db12ddcdf60b0ddb87e4097f2e72ec61a",
         "seed": 0,
         "completed_updates_used": 2000,
+        "samples_used": 524288000,
+        "logged_iteration": 1999,
+        "logged_resume_segment": 0,
+        "evaluation_source": "in-training reference-start evaluation",
+        "independent_evaluation_used": false,
+        "test_episodes": 8192,
         "final": {
           "Root_Pos_Err": 0.007574602495878935,
           "Root_Rot_Err": 0.007384659256786108,
@@ -282,13 +473,23 @@
           "Root_Vel_Err": 0.030476674437522888,
           "Root_Ang_Vel_Err": 0.07782776653766632
         },
-        "test_episode_length": 77.0
+        "test_episode_length": 77.0,
+        "nominal_horizon_steps": 77,
+        "complete": true,
+        "independent_summary_available": true,
+        "independent_summary_path": "output/add_crawl_2k_8192_seed0/eval/final/summary.json"
       },
       "getup_facedown": {
-        "path": "output/paper_benchmark/add_getup_facedown_2k_8192_seed0/train_metrics.jsonl",
+        "path": "output/add_getup_facedown_2k_8192_seed0/train_metrics.jsonl",
         "sha256": "16c39b5a03b24b5becd25c5cab63173cae6369d94b4950bfdd329329e37badf3",
         "seed": 0,
         "completed_updates_used": 2000,
+        "samples_used": 524288000,
+        "logged_iteration": 1999,
+        "logged_resume_segment": 0,
+        "evaluation_source": "in-training reference-start evaluation",
+        "independent_evaluation_used": false,
+        "test_episodes": 8192,
         "final": {
           "Root_Pos_Err": 0.03696151450276375,
           "Root_Rot_Err": 0.024350011721253395,
@@ -298,13 +499,23 @@
           "Root_Vel_Err": 0.08066526055335999,
           "Root_Ang_Vel_Err": 0.11700188368558884
         },
-        "test_episode_length": 91.0
+        "test_episode_length": 91.0,
+        "nominal_horizon_steps": 91,
+        "complete": true,
+        "independent_summary_available": true,
+        "independent_summary_path": "output/add_getup_facedown_2k_8192_seed0/eval/final/summary.json"
       },
       "spinkick": {
-        "path": "output/paper_benchmark/add_spinkick_2k_8192_seed0/train_metrics.jsonl",
+        "path": "output/add_spinkick_2k_8192_seed0/train_metrics.jsonl",
         "sha256": "7d4d98e3dbdf2d25134192c93f24cacef5e0b60c1dd009a7a4a6bd2f1c7d50f2",
         "seed": 0,
         "completed_updates_used": 2000,
+        "samples_used": 524288000,
+        "logged_iteration": 1999,
+        "logged_resume_segment": 0,
+        "evaluation_source": "in-training reference-start evaluation",
+        "independent_evaluation_used": false,
+        "test_episodes": 8192,
         "final": {
           "Root_Pos_Err": 0.034747764468193054,
           "Root_Rot_Err": 0.04097015783190727,
@@ -314,34 +525,87 @@
           "Root_Vel_Err": 0.150785431265831,
           "Root_Ang_Vel_Err": 0.4232516884803772
         },
-        "test_episode_length": 60.0
+        "test_episode_length": 60.0,
+        "nominal_horizon_steps": 60,
+        "complete": true,
+        "independent_summary_available": true,
+        "independent_summary_path": "output/add_spinkick_2k_8192_seed0/eval/final/summary.json"
       }
     },
     "MIRA": {
-      "roll": "TODO",
-      "climb": {
-        "path": "output/paper_benchmark/dare_cmnn64_group_rms_climb_2000_8192_seed0_20261113/train_metrics.jsonl",
-        "sha256": "8a2b7d6e9556b83e07a3a3063047a88ec443e3c8c5b075c5e8d3905b93af51ab",
+      "roll": {
+        "path": "output/dare_cmnn64_group_rms_roll_2000_8192_seed0_20261115/train_metrics.jsonl",
+        "sha256": "4a3b6eb4b2e61b6a2fa3f7bc8ab951912e416ac93c83eb4baaea9214a5302d1c",
         "seed": 0,
         "completed_updates_used": 2000,
+        "samples_used": 524288000,
+        "logged_iteration": 1999,
+        "logged_resume_segment": 0,
+        "evaluation_source": "in-training reference-start evaluation",
+        "independent_evaluation_used": false,
+        "test_episodes": 8192,
         "final": {
-          "Root_Pos_Err": 0.1606757789850235,
-          "Root_Rot_Err": 0.0711594969034195,
-          "Body_Pos_Err": 0.041207775473594666,
-          "Body_Rot_Err": 0.16147132217884064,
-          "Dof_Vel_Err": 0.8521378636360168,
-          "Root_Vel_Err": 0.31319695711135864,
-          "Root_Ang_Vel_Err": 0.4651719629764557
+          "Root_Pos_Err": 0.07446355372667313,
+          "Root_Rot_Err": 0.062108468264341354,
+          "Body_Pos_Err": 0.04671403765678406,
+          "Body_Rot_Err": 0.171269953250885,
+          "Dof_Vel_Err": 0.9509138464927673,
+          "Root_Vel_Err": 0.3007301986217499,
+          "Root_Ang_Vel_Err": 0.45582085847854614
         },
-        "test_episode_length": 64.01902770996094,
-        "pressure_source": "output/paper_benchmark/dare_cmnn64_group_rms_climb_2000_8192_seed0_20261113/constraint_rounds.jsonl",
+        "test_episode_length": 60.0,
+        "nominal_horizon_steps": 60,
+        "terminal_policy_checkpoint": "output/dare_cmnn64_group_rms_roll_2000_8192_seed0_20261115/int_models/model_0000001999.pt",
+        "terminal_policy_checkpoint_sha256": "43ae5427c91e00f524b04f3c9abf6926b9bc2f458bc52fc24192dcf514722fd3",
+        "complete": true,
+        "independent_summary_available": false,
+        "run_status": "completed",
+        "total_run_updates": 2000,
+        "pressure_source": "output/dare_cmnn64_group_rms_roll_2000_8192_seed0_20261115/constraint_rounds.jsonl",
+        "pressure_sha256": "bb561d4c1ba4d5d5a56d0d66e7da11966edd1a1f65f545805773bec88435b6d6"
+      },
+      "climb": {
+        "path": "output/dare_cmnn64_group_rms_climb_2000_8192_seed0_20261113/train_metrics.jsonl",
+        "sha256": "8a2b7d6e9556b83e07a3a3063047a88ec443e3c8c5b075c5e8d3905b93af51ab",
+        "seed": 0,
+        "completed_updates_used": 3000,
+        "samples_used": 786432000,
+        "logged_iteration": 2999,
+        "logged_resume_segment": 2,
+        "evaluation_source": "in-training reference-start evaluation",
+        "independent_evaluation_used": false,
+        "test_episodes": 8192,
+        "final": {
+          "Root_Pos_Err": 0.051897887140512466,
+          "Root_Rot_Err": 0.03655035421252251,
+          "Body_Pos_Err": 0.02499404177069664,
+          "Body_Rot_Err": 0.0955568477511406,
+          "Dof_Vel_Err": 0.547290027141571,
+          "Root_Vel_Err": 0.09801299124956131,
+          "Root_Ang_Vel_Err": 0.23403510451316833
+        },
+        "test_episode_length": 299.0,
+        "nominal_horizon_steps": 299,
+        "terminal_policy_checkpoint": "output/dare_cmnn64_group_rms_climb_2000_8192_seed0_20261113/int_models/model_0000002999.pt",
+        "terminal_policy_checkpoint_sha256": "ba339063157a23d62dbb6eecba03dd7aebbb46adb13dd4f9190b50af14fe0a6f",
+        "complete": true,
+        "independent_summary_available": false,
+        "run_status": "completed",
+        "total_run_updates": 3000,
+        "pressure_source": "output/dare_cmnn64_group_rms_climb_2000_8192_seed0_20261113/constraint_rounds.jsonl",
         "pressure_sha256": "36f12346256a272caad5882c20b57a78581f774ccf07ec1dea2cdd340da76afa"
       },
       "backflip": {
-        "path": "output/paper_benchmark/dare_cmnn64_group_rms_backflip_2000_8192_seed0_20261113/train_metrics.jsonl",
+        "path": "output/dare_cmnn64_group_rms_backflip_2000_8192_seed0_20261113/train_metrics.jsonl",
         "sha256": "548f47c0c1f42357140978f4fa0f35925532c14130a6ef6b20374a194b91abf5",
         "seed": 0,
         "completed_updates_used": 2000,
+        "samples_used": 524288000,
+        "logged_iteration": 1999,
+        "logged_resume_segment": 1,
+        "evaluation_source": "in-training reference-start evaluation",
+        "independent_evaluation_used": false,
+        "test_episodes": 8192,
         "final": {
           "Root_Pos_Err": 0.054400209337472916,
           "Root_Rot_Err": 0.030333857983350754,
@@ -352,14 +616,27 @@
           "Root_Ang_Vel_Err": 0.23156985640525818
         },
         "test_episode_length": 60.0,
-        "pressure_source": "output/paper_benchmark/dare_cmnn64_group_rms_backflip_2000_8192_seed0_20261113/constraint_rounds.jsonl",
+        "nominal_horizon_steps": 60,
+        "terminal_policy_checkpoint": "output/dare_cmnn64_group_rms_backflip_2000_8192_seed0_20261113/int_models/model_0000001999.pt",
+        "terminal_policy_checkpoint_sha256": "ba365917d0567c68d0a337de3cf8e0c0b86fa0c98c3f5fef3f9ddd46fc4cb339",
+        "complete": true,
+        "independent_summary_available": false,
+        "run_status": "completed",
+        "total_run_updates": 2000,
+        "pressure_source": "output/dare_cmnn64_group_rms_backflip_2000_8192_seed0_20261113/constraint_rounds.jsonl",
         "pressure_sha256": "b298cb5d614432235b3d60302466fa3e0fcb028b64ac1e3bc48581e2e5409f52"
       },
       "crawl": {
-        "path": "output/paper_benchmark/dare_cmnn64_group_rms_crawl_2000_8192_seed0_20261113/train_metrics.jsonl",
+        "path": "output/dare_cmnn64_group_rms_crawl_2000_8192_seed0_20261113/train_metrics.jsonl",
         "sha256": "df407afc481f1f60c86d691d05368b952c586b954eedb737bb4ca883b6c5c616",
         "seed": 0,
         "completed_updates_used": 2000,
+        "samples_used": 524288000,
+        "logged_iteration": 1999,
+        "logged_resume_segment": 0,
+        "evaluation_source": "in-training reference-start evaluation",
+        "independent_evaluation_used": false,
+        "test_episodes": 8192,
         "final": {
           "Root_Pos_Err": 0.007437010295689106,
           "Root_Rot_Err": 0.007499915547668934,
@@ -370,19 +647,92 @@
           "Root_Ang_Vel_Err": 0.06715679168701172
         },
         "test_episode_length": 77.0,
-        "pressure_source": "output/paper_benchmark/dare_cmnn64_group_rms_crawl_2000_8192_seed0_20261113/constraint_rounds.jsonl",
+        "nominal_horizon_steps": 77,
+        "terminal_policy_checkpoint": "output/dare_cmnn64_group_rms_crawl_2000_8192_seed0_20261113/int_models/model_0000001999.pt",
+        "terminal_policy_checkpoint_sha256": "197e4ff3e588636e95470f9e824d257edfb5a702b70cac62767790fb118d8203",
+        "complete": true,
+        "independent_summary_available": false,
+        "run_status": "completed",
+        "total_run_updates": 2000,
+        "pressure_source": "output/dare_cmnn64_group_rms_crawl_2000_8192_seed0_20261113/constraint_rounds.jsonl",
         "pressure_sha256": "6d5ba059d82d31dd160190cabb996c4dc369104b7468e60c0718bf12baef7cd4"
       },
-      "getup_facedown": "TODO",
-      "spinkick": "TODO"
+      "getup_facedown": {
+        "path": "output/dare_cmnn64_group_rms_getup_facedown_2000_8192_seed0_20261115/train_metrics.jsonl",
+        "sha256": "b8985ae620cea9358cb00cd16f1a0a7196e1cba28d91f1cf66d77a312e582c39",
+        "seed": 0,
+        "completed_updates_used": 2000,
+        "samples_used": 524288000,
+        "logged_iteration": 1999,
+        "logged_resume_segment": 0,
+        "evaluation_source": "in-training reference-start evaluation",
+        "independent_evaluation_used": false,
+        "test_episodes": 8192,
+        "final": {
+          "Root_Pos_Err": 0.02545870468020439,
+          "Root_Rot_Err": 0.019518448039889336,
+          "Body_Pos_Err": 0.02421017736196518,
+          "Body_Rot_Err": 0.09413547068834305,
+          "Dof_Vel_Err": 0.3217204213142395,
+          "Root_Vel_Err": 0.052877362817525864,
+          "Root_Ang_Vel_Err": 0.09578290581703186
+        },
+        "test_episode_length": 91.0,
+        "nominal_horizon_steps": 91,
+        "terminal_policy_checkpoint": "output/dare_cmnn64_group_rms_getup_facedown_2000_8192_seed0_20261115/int_models/model_0000001999.pt",
+        "terminal_policy_checkpoint_sha256": "ecb392828b0160a028621623fa9a0e78ceb057ae700ddfddd7eb60dbc6de3d2c",
+        "complete": true,
+        "independent_summary_available": false,
+        "run_status": "completed",
+        "total_run_updates": 2000,
+        "pressure_source": "output/dare_cmnn64_group_rms_getup_facedown_2000_8192_seed0_20261115/constraint_rounds.jsonl",
+        "pressure_sha256": "7a1f3f24c4266d05abb5c0a5ace281e7d13777bfa6f7fdbf1d0650cbcdf7f00d"
+      },
+      "spinkick": {
+        "path": "output/dare_cmnn64_group_rms_spinkick_2000_8192_seed0_20261115/train_metrics.jsonl",
+        "sha256": "dd65d34f102d51fa7bbc589ff233bcb1d7d30c1b1e9194285d40f4b5d992d27f",
+        "seed": 0,
+        "completed_updates_used": 2000,
+        "samples_used": 524288000,
+        "logged_iteration": 1999,
+        "logged_resume_segment": 0,
+        "evaluation_source": "in-training reference-start evaluation",
+        "independent_evaluation_used": false,
+        "test_episodes": 8192,
+        "final": {
+          "Root_Pos_Err": 0.03322754427790642,
+          "Root_Rot_Err": 0.03324070945382118,
+          "Body_Pos_Err": 0.023524926975369453,
+          "Body_Rot_Err": 0.10771381109952927,
+          "Dof_Vel_Err": 0.9977728128433228,
+          "Root_Vel_Err": 0.12422841787338257,
+          "Root_Ang_Vel_Err": 0.29129499197006226
+        },
+        "test_episode_length": 60.0,
+        "nominal_horizon_steps": 60,
+        "terminal_policy_checkpoint": "output/dare_cmnn64_group_rms_spinkick_2000_8192_seed0_20261115/int_models/model_0000001999.pt",
+        "terminal_policy_checkpoint_sha256": "dcff55a41d2201adc7e0f7614ac0e0049f7090a4c800baf67c09ef6f78983482",
+        "complete": true,
+        "independent_summary_available": false,
+        "run_status": "completed",
+        "total_run_updates": 2000,
+        "pressure_source": "output/dare_cmnn64_group_rms_spinkick_2000_8192_seed0_20261115/constraint_rounds.jsonl",
+        "pressure_sha256": "0ecac25d45acc792efe8dd8261e3d3629d2b45f5571ae0e52acffb1e0529f3bf"
+      }
     }
   },
   "ablations": {
     "MIRA": {
-      "path": "output/paper_benchmark/dare_cmnn64_group_rms_backflip_2000_8192_seed0_20261113/train_metrics.jsonl",
+      "path": "output/dare_cmnn64_group_rms_backflip_2000_8192_seed0_20261113/train_metrics.jsonl",
       "sha256": "548f47c0c1f42357140978f4fa0f35925532c14130a6ef6b20374a194b91abf5",
       "seed": 0,
       "completed_updates_used": 2000,
+      "samples_used": 524288000,
+      "logged_iteration": 1999,
+      "logged_resume_segment": 1,
+      "evaluation_source": "in-training reference-start evaluation",
+      "independent_evaluation_used": false,
+      "test_episodes": 8192,
       "final": {
         "Root_Pos_Err": 0.054400209337472916,
         "Root_Rot_Err": 0.030333857983350754,
@@ -393,14 +743,27 @@
         "Root_Ang_Vel_Err": 0.23156985640525818
       },
       "test_episode_length": 60.0,
-      "pressure_source": "output/paper_benchmark/dare_cmnn64_group_rms_backflip_2000_8192_seed0_20261113/constraint_rounds.jsonl",
+      "nominal_horizon_steps": 60,
+      "terminal_policy_checkpoint": "output/dare_cmnn64_group_rms_backflip_2000_8192_seed0_20261113/int_models/model_0000001999.pt",
+      "terminal_policy_checkpoint_sha256": "ba365917d0567c68d0a337de3cf8e0c0b86fa0c98c3f5fef3f9ddd46fc4cb339",
+      "complete": true,
+      "independent_summary_available": false,
+      "run_status": "completed",
+      "total_run_updates": 2000,
+      "pressure_source": "output/dare_cmnn64_group_rms_backflip_2000_8192_seed0_20261113/constraint_rounds.jsonl",
       "pressure_sha256": "b298cb5d614432235b3d60302466fa3e0fcb028b64ac1e3bc48581e2e5409f52"
     },
     "w/o Monotone Modeling": {
-      "path": "output/paper_benchmark/dare_ablation_backflip_matched_init_2000_8192_seed0_20261114/formal/no_a/train_metrics.jsonl",
+      "path": "output/dare_ablation_backflip_matched_init_2000_8192_seed0_20261114/formal/no_a/train_metrics.jsonl",
       "sha256": "555b7d31e79c3800ee5cb4f6902cb8f1b556f297a05fddf58dd86fce6086531a",
       "seed": 0,
       "completed_updates_used": 2000,
+      "samples_used": 524288000,
+      "logged_iteration": 1999,
+      "logged_resume_segment": 0,
+      "evaluation_source": "in-training reference-start evaluation",
+      "independent_evaluation_used": false,
+      "test_episodes": 8192,
       "final": {
         "Root_Pos_Err": 0.12256079167127609,
         "Root_Rot_Err": 0.12702982127666473,
@@ -411,14 +774,27 @@
         "Root_Ang_Vel_Err": 0.9160760641098022
       },
       "test_episode_length": 60.0,
-      "pressure_source": "output/paper_benchmark/dare_ablation_backflip_matched_init_2000_8192_seed0_20261114/formal/no_a/constraint_rounds.jsonl",
+      "nominal_horizon_steps": 60,
+      "terminal_policy_checkpoint": "output/dare_ablation_backflip_matched_init_2000_8192_seed0_20261114/formal/no_a/int_models/model_0000001999.pt",
+      "terminal_policy_checkpoint_sha256": "2b708a8c6ff69f5f628206aa7ee3fd0e6f3eb8cda0e605169ddd25745d6e51be",
+      "complete": true,
+      "independent_summary_available": false,
+      "run_status": "completed",
+      "total_run_updates": 2000,
+      "pressure_source": "output/dare_ablation_backflip_matched_init_2000_8192_seed0_20261114/formal/no_a/constraint_rounds.jsonl",
       "pressure_sha256": "875ebd9280623fed73a511aae3c72c3e67731b482f7ee0f5a2b1095eb2091255"
     },
     "w/o Diagonal Norm.": {
-      "path": "output/paper_benchmark/dare_ablation_backflip_matched_init_2000_8192_seed0_20261114/formal/no_b/train_metrics.jsonl",
+      "path": "output/dare_ablation_backflip_matched_init_2000_8192_seed0_20261114/formal/no_b/train_metrics.jsonl",
       "sha256": "b3197bae98bb96961606fe6e506c9f97e54272d161b87e1012d85cbd3b6922c7",
       "seed": 0,
       "completed_updates_used": 2000,
+      "samples_used": 524288000,
+      "logged_iteration": 1999,
+      "logged_resume_segment": 0,
+      "evaluation_source": "in-training reference-start evaluation",
+      "independent_evaluation_used": false,
+      "test_episodes": 8192,
       "final": {
         "Root_Pos_Err": 0.06093813106417656,
         "Root_Rot_Err": 0.10307202488183975,
@@ -429,14 +805,27 @@
         "Root_Ang_Vel_Err": 0.7879474759101868
       },
       "test_episode_length": 26.0006103515625,
-      "pressure_source": "output/paper_benchmark/dare_ablation_backflip_matched_init_2000_8192_seed0_20261114/formal/no_b/constraint_rounds.jsonl",
+      "nominal_horizon_steps": 60,
+      "terminal_policy_checkpoint": "output/dare_ablation_backflip_matched_init_2000_8192_seed0_20261114/formal/no_b/int_models/model_0000001999.pt",
+      "terminal_policy_checkpoint_sha256": "165a94085954d49e3b3597a919363cccf11c99954826823e2f83651cb8428bb2",
+      "complete": false,
+      "independent_summary_available": false,
+      "run_status": "completed",
+      "total_run_updates": 2000,
+      "pressure_source": "output/dare_ablation_backflip_matched_init_2000_8192_seed0_20261114/formal/no_b/constraint_rounds.jsonl",
       "pressure_sha256": "df597c569070a217d21c39b18dbbf8a9331bb2ce0c3a91734c7eb0625c162da1"
     },
     "w/o Both Components": {
-      "path": "output/paper_benchmark/dare_ablation_backflip_matched_init_2000_8192_seed0_20261114/formal/no_ab/train_metrics.jsonl",
+      "path": "output/dare_ablation_backflip_matched_init_2000_8192_seed0_20261114/formal/no_ab/train_metrics.jsonl",
       "sha256": "b5177cf62b41ab4c2cdba550e3fdff3a86d0ea2d15639f4dba62fe8cc392cc5b",
       "seed": 0,
       "completed_updates_used": 2000,
+      "samples_used": 524288000,
+      "logged_iteration": 1999,
+      "logged_resume_segment": 0,
+      "evaluation_source": "in-training reference-start evaluation",
+      "independent_evaluation_used": false,
+      "test_episodes": 8192,
       "final": {
         "Root_Pos_Err": 0.07763372361660004,
         "Root_Rot_Err": 0.11579368263483047,
@@ -447,7 +836,14 @@
         "Root_Ang_Vel_Err": 0.6750327348709106
       },
       "test_episode_length": 28.0,
-      "pressure_source": "output/paper_benchmark/dare_ablation_backflip_matched_init_2000_8192_seed0_20261114/formal/no_ab/constraint_rounds.jsonl",
+      "nominal_horizon_steps": 60,
+      "terminal_policy_checkpoint": "output/dare_ablation_backflip_matched_init_2000_8192_seed0_20261114/formal/no_ab/int_models/model_0000001999.pt",
+      "terminal_policy_checkpoint_sha256": "75307ccec22aa3b082ef4208c7d6e4368bf0845091430cb114aa336799d34ba9",
+      "complete": false,
+      "independent_summary_available": false,
+      "run_status": "completed",
+      "total_run_updates": 2000,
+      "pressure_source": "output/dare_ablation_backflip_matched_init_2000_8192_seed0_20261114/formal/no_ab/constraint_rounds.jsonl",
       "pressure_sha256": "284d4dc86131af2fcbc455943b14e3957e1b93fbac88927fb3fbc091e263ef65"
     }
   }

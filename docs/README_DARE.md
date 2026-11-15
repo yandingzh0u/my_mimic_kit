@@ -50,8 +50,8 @@ Train backflip for 2000 updates with 8192 environments and seed 0:
 
 ```bash
 python mimickit/run.py \
-  --arg_file args/paper_benchmark/dare_2k_8192_args.txt \
-  --env_config data/envs/paper_benchmark/dare_backflip_env.yaml \
+  --arg_file PAPER/configs/args/dare_2k_8192_args.txt \
+  --env_config PAPER/configs/envs/dare_backflip_env.yaml \
   --out_dir output/dare_cmnn_backflip
 ```
 

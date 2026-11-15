@@ -18,6 +18,16 @@
 \renewcommand{\textfraction}{0.05}
 \renewcommand{\floatpagefraction}{0.85}
 \renewcommand{\dblfloatpagefraction}{0.85}
+\setlength{\dblfloatsep}{9pt plus 1pt minus 1pt}
+\makeatletter
+\setlength{\@fptop}{0pt}
+\setlength{\@fpsep}{12pt}
+\setlength{\@fpbot}{0pt plus 1fil}
+\setlength{\@dblfptop}{0pt}
+\setlength{\@dblfpsep}{12pt}
+\setlength{\@dblfpbot}{0pt plus 1fil}
+\newcommand{\MiraFigureType}{\def\@captype{figure}}
+\makeatother
 
 \title{\LARGE \bf MIRA: Monotonic Imitation Rewards via Adversarial Learning}
 \author{Anonymous Authors}
@@ -28,7 +38,18 @@
 \pagestyle{empty}
 
 \begin{abstract}
-Physics-based humanoid motion imitation requires simultaneously tracking multiple objectives, including root motion, body pose, and velocities. Existing methods often rely on handcrafted reward terms with manually tuned weights and scales, which can require substantial adjustment across different motions. We propose DARE (Differential Adversarial Reward Equalization), an adversarially learned reward method based on the differential between the reference motion and the policy state. DARE represents perfect tracking as a zero differential and learns a unified tracking reward from policy-generated residuals, while controlling discriminator sensitivity and automatically calibrating its output scale to support a consistent reward configuration across motions. We evaluate DARE on multiple humanoid skills with diverse dynamics and contact patterns. The results show that DARE achieves stable and accurate motion tracking without motion-specific reward tuning.
+Humanoid motion imitation requires jointly considering multiple tracking
+objectives, including position, orientation, and velocity. Conventional
+reward functions rely on manually designed weights and scales, often
+requiring repeated tuning for different motions. This paper presents MIRA,
+a monotonic imitation reward method based on adversarial learning. MIRA
+represents deviations between the current state and a synchronized reference
+state as nonnegative physical errors. It constructs a monotone discriminator
+using nonnegative weights and learnable diagonal normalization to adaptively
+learn trade-offs among different errors while ensuring that reducing errors
+cannot decrease the reward. Experimental results show that MIRA achieves
+accurate and stable motion tracking across different motions with a unified
+reward configuration.
 \end{abstract}
 
 \section{Introduction}
@@ -65,55 +86,42 @@ The aggregation among tracking objectives can then be learned by the
 discriminator instead of specifying component-wise weights and scales by
 hand.
 
-Differential adversarial rewards, however, still face an important issue.
-Their ideal sample is always a single point, the zero differential.
-Without a suitable constraint, the discriminator easily becomes too
-sharp: it assigns a high score to the origin and compresses the many
-nonzero residuals produced by the policy into a nearby low-score region.
-Even if classification succeeds, the discriminator may not provide an
-effective continuous learning signal for the policy. Existing methods
-constrain the discriminator through regularization, but one regularizer
-simultaneously affects two distinct properties. On the one hand, it
-controls the discriminator's local sensitivity, that is, how fast the
-score changes with the input residual. On the other hand, it also affects
-the numerical range in which the final scores live, and this range in turn
-determines whether the policy reward operates in an effective interval.
-As the residual distribution changes across motions, the same
-regularization setting can correspond to different sensitivities and
-different score scales, producing motion-dependent effective
-regularization requirements.
+Differential classification leaves two properties unspecified. First,
+separating the zero differential from policy residuals does not require a
+discriminator to rank two nonzero residuals consistently with physical
+tracking improvement. For example, reducing a rotation-representation
+coordinate difference need not reduce the actual angular error. Second,
+classification does not bound how rapidly a score changes near the policy's
+current states. A useful tracking reward therefore requires both an input
+ordering grounded in physical errors and control over its sensitivity.
 
-The core idea of DARE is to treat these two issues separately rather than
-control them with one motion-dependent coefficient. First, DARE applies
-spectral normalization to every linear layer of the differential
-discriminator, directly bounding the maximum amplification of residual
-variations. Second, after residual normalization is fixed, DARE measures
-the score separation between the unique zero-error anchor and
-representative policy residuals and rescales the discriminator once in
-closed form. The geometry constraint and reward operating scale are thus
-specified independently.
+MIRA builds these properties into a single discriminator. A synchronized
+state pair is converted into $64$ nonnegative error components: Euclidean
+position distances, geodesic rotation angles, and absolute velocity gaps.
+Individual non-root bodies and joint-velocity components remain separate.
+Seven shared group scales account for physical units, and dimension
+normalization controls the contribution of group size to the input norm.
+Nonnegative weights and monotone activations make the energy nondecreasing
+in every error component. A positive, learnable diagonal normalization
+bounds each linear map's spectral norm without a gradient penalty
+\cite{araujo2023unified}. Anchoring the energy at zero error then produces
+a score that cannot decrease when all tracking errors improve.
 
-Constraining the critic's sensitivity alone does not resolve the score
-scale. A Lipschitz bound controls how rapidly the score may change, but
-not the numerical range actually used by the trained critic. DARE
-therefore measures the anchor-to-typical-residual score gap once after
-normalization stabilizes and uses a closed-form global rescaling tied to
-the response range of the reward transform. All motions use exactly the
-same calibration rule; the only quantity that changes across motions is
-the residual statistic measured automatically from the training data.
-The critic's geometry and score scale thus no longer depend on the same
-hand-tuned parameter.
+These guarantees apply in normalized physical-error coordinates. They do
+not specify how to trade a smaller body error against a larger root error,
+guarantee a nonzero response to every joint, or imply that PPO finds a
+globally optimal controller. We retain the original adversarial
+classification objective and reward mapping so that the experiments can
+examine the resulting tracking behavior directly.
 
-The main contributions are threefold. First, we identify that the
-regularizer in existing differential adversarial rewards simultaneously
-affects the critic's local geometry and its score scale, and that this
-coupling can make different motions require different effective
-regularization settings. Second, we propose DARE, which constrains
-discriminator sensitivity through layer-wise spectral normalization and
-sets the score scale automatically through one-shot anchor calibration,
-removing the need for a motion-specific gradient-penalty coefficient.
-Third, we evaluate one shared DARE configuration on six skills with
-different durations, contact patterns, and dynamical characteristics.
+Our contributions are threefold. First, we formulate an adversarial
+tracking reward on componentwise physical errors with an explicit
+improvement ordering. Second, we combine constrained monotone networks
+\cite{runje2023constrained} with positive diagonal normalization to obtain
+one monotone, sensitivity-bounded reward model trained without a gradient
+penalty. Third, we evaluate a shared configuration on six humanoid skills
+and ablate the representation/monotonicity component and the normalization
+constraint, reporting both tracking errors and motion completion.
 
 \section{Related Work}
 \textbf{Physics-based motion tracking and learned imitation objectives.}
@@ -138,17 +146,18 @@ whether preferences are specified explicitly or adapted from objective
 statistics. In differential adversarial tracking, the discriminator
 instead learns this aggregation from the joint residual distribution.
 
-\textbf{Regularization of adversarial critics.} Adversarial critics are
-regularized with gradient penalties or spectral normalization to control
-sensitivity and improve optimization
-\cite{gulrajani2017improved,miyato2018spectral}. Gradient penalties
-constrain sampled input derivatives, whereas spectral normalization
-bounds the gain of individual network maps by construction. For
-non-Wasserstein adversarial losses, the numerical score range also
-determines the operating regime of the loss and its reward transform
-\cite{karras2020ada}. Geometry and score calibration are therefore
-related but distinct considerations when a critic supplies the learning
-signal.
+\textbf{Monotone and Lipschitz neural networks.} Constrained monotone
+networks use nonnegative weights and suitable activation functions to
+preserve componentwise input order \cite{runje2023constrained}. This
+property depends on what the input coordinates mean; it must be imposed
+on physical error magnitudes rather than arbitrary signed state features.
+Gradient penalties and spectral normalization control the sensitivity of
+adversarial critics \cite{gulrajani2017improved,miyato2018spectral}.
+Algebraic constructions also provide Lipschitz bounds through diagonal
+matrix constraints \cite{araujo2023unified}. MIRA uses the positive linear
+construction from this framework within a monotone discriminator. The
+underlying network constructions are prior work; our formulation applies
+their joint constraints to physical-error adversarial motion rewards.
 
 \section{Background}
 \subsection{Reference-Conditioned Motion Tracking}
@@ -213,13 +222,13 @@ discriminator score can therefore be used to construct a policy reward
 that increases as the current differential is judged more consistent with
 perfect tracking.
 
-\begin{figure*}[t]
+\begin{figure*}[!t]
 \centering
-\includegraphics[width=0.88\textwidth,trim=0 64 0 0,clip]{figures/pipeline.pdf}
-\caption{DARE training loop. The synchronized reference and simulated
-state form the policy residual. The residual and zero anchor train the
-equalized discriminator; one-shot anchor calibration rescales its logit,
-and the resulting softplus reward drives the PPO update.}
+\includegraphics[width=\textwidth]{figures/mira_pipeline.pdf}
+\caption{MIRA overview. Normalized physical errors and the zero-error
+positive sample train a monotone, Lipschitz-constrained discriminator.
+Its score provides a softplus imitation reward for PPO, closing the loop
+between the policy and physics simulation.}
 \label{fig:pipeline}
 \end{figure*}
 
@@ -230,9 +239,9 @@ and the resulting softplus reward drives the PPO update.}
 \label{sec:physical_errors}
 
 Physics-based motion imitation requires simultaneously tracking the robot's
-position, orientation, and motion velocities. However, directly computing
-coordinate differences between the current and reference states does not
-accurately quantify physical tracking errors. For example, position and
+position, orientation, and motion velocities. However, the coordinatewise
+ordering of raw state residuals does not consistently represent physical
+tracking improvement. For example, position and
 velocity differences are signed, although deviations in either direction
 indicate tracking errors. Rotations are commonly represented by quaternions
 or 6D representations, whose Euclidean distances do not equal the actual
@@ -255,17 +264,21 @@ parts of the body. We thus construct the physical error vector
 \mathbf e_{\mathrm{dv}}, \mathbf e_{\mathrm{rv}},
 \mathbf e_{\mathrm{rav}}
 \bigr]
-\in \mathbb R_{\geq 0}^{d},
+\in \mathbb R_{\geq 0}^{64},
 \end{aligned}
 \label{eq:physical_errors}
 \end{equation}
 where the terms represent root position, root rotation, body position,
 body rotation, joint velocity, root linear velocity, and root angular
 velocity errors, respectively.
+The seven groups contain $1$, $1$, $14$, $14$, $28$, $3$, and $3$
+components. The body groups exclude the root to avoid duplicating the
+separate root errors.
 
 Because different physical errors have different numerical scales,
-running statistics are used during early training to estimate the mean
-error scale of each group. These scales are fixed after the statistics
+running statistics are used during early training to estimate scales
+from the seven logged tracking metrics. Each scale is shared by the
+retained components of its group and fixed after the statistics
 collection phase. The normalized input is defined as
 \begin{equation}
 \mathbf z_t =
@@ -277,11 +290,12 @@ collection phase. The normalized input is defined as
 \label{eq:physical_normalization}
 \end{equation}
 where $\mathbf e_t^{(g)}$ is the physical error vector for group $g$,
-$\sigma_g$ is its historical mean error scale, $d_g$ is the number of
+$\sigma_g$ is the historical mean of its corresponding tracking metric,
+$d_g$ is the number of
 components in the group, and $\epsilon$ is a numerical stability constant.
-Dimension normalization prevents higher-dimensional error groups from
-overwhelming lower-dimensional groups solely because they contain more
-components. Since all errors are nonnegative and normalization uses
+Dimension normalization controls group-size-dependent growth of the input
+norm; equally scaled component errors yield the same group norm regardless
+of the number of components. Since all errors are nonnegative and normalization uses
 positive scaling, the resulting input $\mathbf z_t$ remains nonnegative
 and preserves the monotonic ordering of each error component.
 
@@ -333,8 +347,11 @@ same reward mapping as ADD:
 r_t=\operatorname{softplus}\left(s_\theta(\mathbf z_t)\right).
 \label{eq:reward}
 \end{equation}
-Since softplus is monotonically increasing, a higher discriminator score
-corresponds to a higher imitation reward. During training, the
+As in ADD, the implementation caps this mapping using
+$-\log\!\left(\max\{1-\operatorname{sigmoid}(s),10^{-4}\}\right)$;
+it equals softplus before the cap.
+The capped mapping is nondecreasing, so increasing the discriminator score
+cannot lower the imitation reward. During training, the
 discriminator is updated using current samples and experience replay,
 while the policy is optimized with PPO using the learned reward. The
 discriminator and policy are updated alternately.
@@ -353,7 +370,7 @@ ensure that increasing any error component cannot decrease the outputs of
 a linear layer. The network uses MixedELU activations, whose branches are
 all monotonically nondecreasing with derivatives bounded above by $1$,
 preserving monotonicity across network layers
-(Runje and Shankaranarayana, 2023).
+\cite{runje2023constrained}.
 
 To satisfy the $1$-Lipschitz constraint, we scale the weight matrix
 columnwise. The scaling factors are controlled by learnable parameters,
@@ -381,8 +398,9 @@ effective matrix used in the forward computation:
 W=P\operatorname{diag}(\mathbf t^{-1/2}).
 \label{eq:diagonal_weights}
 \end{equation}
+Zero weight columns remain zero.
 This scaling satisfies the matrix constraint for Lipschitz networks
-(Araujo et al., 2023), guaranteeing
+\cite{araujo2023unified}, guaranteeing
 \begin{equation}
 W\geq0,\qquad \|W\|_2\leq1.
 \label{eq:diagonal_bound}
@@ -396,24 +414,19 @@ constraint in the normalized physical error space.
 \input{experiments_mira.tex}
 
 \section{Conclusion}
-Manual tracking rewards turn the aggregation of heterogeneous imitation
-objectives into per-motion engineering. Learned differential rewards
-remove the component-wise weights, but regularization can still couple the
-critic's geometric sensitivity to the score range seen by the policy.
-DARE treats these as separate design quantities: layer-wise spectral
-normalization constrains the critic's sensitivity, and one closed-form
-calibration sets the score scale without a motion-specific coefficient.
-The score change relative to the unique zero differential is bounded by
-the normalized residual, and the critic is then rescaled once, in closed
-form, to set its operating scale relative to the response width of the
-reward transform. Across the six skills, DARE attains the
-lowest macro-average for all four geometric errors, the foot-progress
-ratio closest to one, and the smallest lateral drift in
-Table~\ref{tab:main}. The formulation also provides a direct path toward
-multi-clip training and other morphologies, where additional objectives
-can be incorporated directly into the differential.
+MIRA learns one adversarial imitation reward from componentwise physical
+tracking errors. Nonnegative weights and monotone activations provide a
+consistent error-improvement ordering, while learned diagonal
+normalization bounds sensitivity in normalized error coordinates without
+a gradient penalty. The six-skill seed-0 comparison with AMP,
+DeepMimic, and ADD reports tracking accuracy under the listed training
+budgets. Backflip ablations associate both model components
+with improved tracking; removing diagonal normalization also reduces
+motion completion. Further independent training seeds
+and evaluation across additional motions are needed to establish the
+generality of these empirical gains; monotonicity and bounded sensitivity
+alone do not guarantee a preferred trade-off among competing errors.
 
-\FloatBarrier
 \footnotesize
 \begin{thebibliography}{99}
 \setlength{\itemsep}{0pt}
@@ -446,6 +459,12 @@ Information Processing Systems}, 2017.
 \bibitem{miyato2018spectral}
 T.~Miyato, T.~Kataoka, M.~Koyama, and Y.~Yoshida, ``Spectral normalization
 for generative adversarial networks,'' in \emph{Proc. ICLR}, 2018.
+\bibitem{runje2023constrained}
+D.~Runje and S.~M. Shankaranarayana, ``Constrained monotonic neural
+networks,'' in \emph{Proc. ICML}, 2023, pp.~29338--29353.
+\bibitem{araujo2023unified}
+A.~Araujo \textit{et al.}, ``A unified algebraic perspective on Lipschitz
+neural networks,'' in \emph{Proc. ICLR}, 2023.
 \bibitem{karras2020ada}
 T.~Karras \textit{et al.}, ``Training generative adversarial networks with
 limited data,'' in \emph{Advances in Neural Information Processing

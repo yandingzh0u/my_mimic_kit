@@ -1,44 +1,89 @@
-# MIRA experiment draft data
+# MIRA measured experiment data
 
-Regenerate the tables and plots from the repository's measured logs:
+Regenerate the tables, provenance manifest, audit, CSV, and measured curve data:
 
-```bash
-python PAPER/tools/build_mira_experiments.py --synthetic-seed-placeholders
-```
+    python PAPER/tools/build_mira_experiments.py
 
-The flag explicitly enables random **layout-only** seed deviations. Centers
-remain measured seed-0 values. Synthetic slots 1 and 2 are symmetric around
-that center and are not independent runs, empirical uncertainty, or evidence
-of statistical significance. Tables, figures, and the experiment text label
-them accordingly. Omit the flag to generate seed-0-only values and curves.
+Active results contain **measured seed 0 only**. They contain no random seed
+deviations, error bands, estimated seed uncertainty, or unmeasured motion data.
+Historical placeholders and superseded figure assets have been removed.
 
-`mira_measured_seed0.json` contains the measured final values, source paths,
-and SHA-256 hashes. `mira_synthetic_seed_placeholders.json` stores synthetic
-layout values separately. No generated values are written to training logs.
+**MIRA Climb uses 3000 PPO updates (786,432,000 environment samples);
+all other terminal results use 2000 updates (524,288,000 samples).**
+Every run uses 8192 environments. The six motions are Roll, Climb, Backflip,
+Crawl, Get-Up, and Spin Kick. Terminal macro-averages are therefore not
+equal-budget comparisons.
+Run lookup discovers completed MIRA logs across date suffixes instead of
+assuming that every motion was trained on the same date.
 
-The target is three independent seeds per configuration. Currently the
-generator reads verified seed-0 runs only. When seed 1 and 2 are available,
-extend its run manifest to read those logs and replace the layout deviations
-with the sample standard deviation of **measured per-seed macro-averages**.
-Remove the synthetic annotations only after doing so.
+## Files
 
-All main results use exactly 2000 updates (524,288,000 samples). The Climb
-run's later 2500/3000-update records are deliberately excluded. Macro-averages
-in the main table require all six motions. Preliminary learning curves use
-the same currently measured three-motion cohort (Backflip, Climb, Crawl)
-for every compared method, as explicitly authorized for this draft. Their
-captions and image labels identify the three-motion average. Missing motions
-are never filled with random values. Missing current MIRA runs:
-Roll, Get-Up, Spin Kick. Their table cells and the full MIRA aggregate remain
-TODO in the main table. Available per-motion values are retained there.
+- mira_measured_seed0.json: canonical measured values, nominal motion horizons,
+  logged test lengths, full-horizon checks, source paths and SHA-256 hashes.
+- mira_results_audit.json and .md: equal-weight six-motion averages,
+  raw per-motion values and completion for all four methods, ablation
+  diagnostics and limitations. No method is used as a privileged reference.
+- mira_per_motion_seed0.csv: all 24 method-by-motion rows, with all seven ERRs.
+- mira_learning_curve_data.json: measured per-motion curves and their
+  equal-weight six-motion mean aligned by each run's actual terminal-budget
+  fraction. The primary axis is grid_training_progress; per_run_grid_samples
+  records the different actual sample locations. Legacy grid_samples is a
+  2000-update reference schedule only. Interpolation is linear between
+  logged evaluation points; no unmeasured suffix is created for other runs.
+- mira_main_table.tex and mira_ablation_table.tex: current paper tables.
+  Paper tables remain native LaTeX; PowerPoint is used only for figures.
 
-Backflip ablation diagnostics use measured seed-0 data, without synthetic
-observations. Completion checks/crosses refer to this seed's reference-start
-evaluation reaching 60 steps; additional-seed completion is pending. The
-original head regularizer is retained in all variants, with different
-effective behavior after normalization is removed. The full run resumed
-after an interruption, with the same cumulative sample budget.
+## Protocol and interpretation
 
-The six keyframe panels are explicitly TODO because current MIRA renders
-are unavailable. Older DARE images are preserved on disk but are not
-relabelled as MIRA rollouts.
+These tables and learning curves use the **reference-start tests recorded
+during training**, with one measured seed per configuration. They do not use
+the independently collected baseline eval/final/summary.json files, whose
+protocol differs. Existing independent reports are recorded as available
+metadata, never mixed into the current comparisons.
+
+The MIRA Climb terminal record has logged iteration 2999, samples 786432000,
+and resume segment 2. Its measured test length is 299 steps. The source
+directory retains its original 2000-update name after continuation; its
+actual budget is recorded explicitly in every per-run manifest/CSV row.
+The exact 3000-update weights are int_models/model_0000002999.pt inside
+that run. Baseline Climb records remain at their measured 2000-update
+budgets. Tracking errors cover only executed timesteps, so lower error
+does not by itself imply full-motion success.
+
+Learning curves use a training-progress axis: the same percentage maps to
+3000 times that fraction for MIRA Climb and 2000 times that fraction for
+each other run. This describes relative training progress rather than
+equal-sample efficiency. There is no zero-update measurement; the shared
+progress grid begins at 0.0005 and ends at 1. No initial or trailing
+measurements are invented.
+
+A completion check in the ablation table or audit means the mean logged test length
+reaches the configured motion horizon, with a tolerance of 0.001 simulation
+step. It is a full-horizon survival check rather than an independent
+motion-specific success-rate estimate. The nominal horizons are Roll 60,
+Climb 299, Backflip 60, Crawl 77, Get-Up 91, and Spin Kick 60 steps.
+
+AMP, DeepMimic, ADD, and MIRA are reported using the same raw-value layout
+with their actual budgets. Per-motion and aggregate results need not rank methods
+identically; the results do not support universal superiority. Additional
+independent training seeds and a unified independent checkpoint evaluation
+remain **TODO**.
+
+Backflip ablations use the same total sample budget. The monotone-modeling
+ablation jointly changes input representation, normalization, and weight
+signs, so that comparison cannot isolate any one of those changes. The
+diagonal-normalization ablation preserves monotone modeling. Sampled
+gradient diagnostics are local measurements; norms from different input
+representations cannot be interpreted as identical physical-space
+sensitivity. The original head regularizer is retained in all variants.
+
+The main LaTeX table contains the macro-average and seven-error MIRA
+per-motion panels. The per-motion panel has no completion column, and
+the former main-table completion panel is removed. The Backflip ablation
+table retains its completion column. A brief dagger note identifies the
+MIRA Climb 3000-update result in the main table.
+
+The data generator does not write figure files. Current vector plots and
+editable chart slides are generated by `PAPER/tools/build_mira_figures.py`.
+Actual simulator captures and the G1 method diagram have separate generators,
+listed in `PAPER/FIGURE_GUIDE.md`.
