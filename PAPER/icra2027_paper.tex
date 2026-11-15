@@ -96,8 +96,9 @@ current states. A useful tracking reward therefore requires both an input
 ordering grounded in physical errors and control over its sensitivity.
 
 MIRA builds these properties into a single discriminator. A synchronized
-state pair is converted into $64$ nonnegative error components: Euclidean
-position distances, geodesic rotation angles, and absolute velocity gaps.
+state pair is converted into a vector of nonnegative physical errors:
+Euclidean position distances, geodesic rotation angles, and absolute
+velocity gaps.
 Individual non-root bodies and joint-velocity components remain separate.
 Seven shared group scales account for physical units, and dimension
 normalization controls the contribution of group size to the input norm.
@@ -238,24 +239,27 @@ between the policy and physics simulation.}
 \subsection{Physical Error Representation}
 \label{sec:physical_errors}
 
-Physics-based motion imitation requires simultaneously tracking the robot's
-position, orientation, and motion velocities. However, the coordinatewise
-ordering of raw state residuals does not consistently represent physical
-tracking improvement. For example, position and
-velocity differences are signed, although deviations in either direction
-indicate tracking errors. Rotations are commonly represented by quaternions
-or 6D representations, whose Euclidean distances do not equal the actual
-rotation angles. We therefore convert state discrepancies into nonnegative
-errors with clear physical meanings.
+MIRA's monotone discriminator requires each input component to have a clear
+error interpretation: a smaller value indicates that the corresponding
+physical quantity is closer to the reference state. However, directly
+computing the difference between the current and reference states does not satisfy
+this requirement. For example, a velocity difference may be positive or
+negative, and a change from $+1$ to $-1$ does not indicate improved
+tracking. Rotations are commonly represented by quaternions or 6D
+representations, and directly subtracting the representation vectors does
+not accurately measure the actual orientation deviation. We therefore
+convert raw state differences into nonnegative physical errors, so that
+the magnitude of each component reflects the corresponding tracking error.
 
 Let $s_t$ and $\hat{s}_t$ denote the robot's current state and the
-synchronized reference state, respectively. Position errors are measured
-using Euclidean distances, rotation errors using geodesic angles, and
-velocity errors using componentwise absolute differences. Body positions
-are computed relative to the root, whereas body rotations use world-frame
-orientations. The position and rotation errors of individual body parts
-are retained separately to capture tracking quality across different
-parts of the body. We thus construct the physical error vector
+synchronized reference state, respectively. For positions and rotations,
+we use Euclidean distances and geodesic angles, respectively, to convert
+the deviations of the root and each body part into scalar errors. For
+joint velocity, root linear velocity, and root angular velocity, we use
+componentwise absolute differences to retain independent errors in each
+direction.
+
+We thus construct the physical error vector:
 \begin{equation}
 \begin{aligned}
 \mathbf e_t = \bigl[
@@ -264,22 +268,35 @@ parts of the body. We thus construct the physical error vector
 \mathbf e_{\mathrm{dv}}, \mathbf e_{\mathrm{rv}},
 \mathbf e_{\mathrm{rav}}
 \bigr]
-\in \mathbb R_{\geq 0}^{64},
+\in \mathbb R_{\geq 0}^{d},
 \end{aligned}
 \label{eq:physical_errors}
 \end{equation}
-where the terms represent root position, root rotation, body position,
-body rotation, joint velocity, root linear velocity, and root angular
-velocity errors, respectively.
-The seven groups contain $1$, $1$, $14$, $14$, $28$, $3$, and $3$
-components. The body groups exclude the root to avoid duplicating the
-separate root errors.
+where the seven error groups represent root position, root rotation, body
+position, body rotation, joint velocity, root linear velocity, and root
+angular velocity errors, respectively. The dimension of each group is
+determined by the robot's body structure and joint configuration. The
+total dimension is $d=\sum_{g=1}^{G}d_g$, where $G=7$.
 
-Because different physical errors have different numerical scales,
-running statistics are used during early training to estimate scales
-from the seven logged tracking metrics. Each scale is shared by the
-retained components of its group and fixed after the statistics
-collection phase. The normalized input is defined as
+Different physical errors have different units and numerical ranges. For
+example, position is measured in meters, rotation in radians, and linear
+and angular velocities in meters per second and radians per second,
+respectively. If these errors are fed directly into the discriminator,
+errors with larger numerical scales may dominate network learning, while
+the influence of other errors is weakened. To address this, during early
+training we collect the historical mean of each group's tracking metric
+as the normalization scale for the corresponding error group, and fix
+these scales after the statistics collection phase. All errors within
+the same group share this scale.
+
+In addition, error groups such as body position and joint velocity
+typically contain more error terms, whereas root position and rotation
+each contain only one. Without accounting for differences in dimension,
+high-dimensional error groups may occupy a larger share of the input
+simply because they contain more error terms, biasing discriminator
+learning toward high-dimensional body and joint errors while overlooking
+the influence of low-dimensional errors such as those of the root. We
+therefore further introduce group-dimension normalization:
 \begin{equation}
 \mathbf z_t =
 \operatorname{concat}_{g=1}^{G}
@@ -289,41 +306,45 @@ collection phase. The normalized input is defined as
 \right),
 \label{eq:physical_normalization}
 \end{equation}
-where $\mathbf e_t^{(g)}$ is the physical error vector for group $g$,
-$\sigma_g$ is the historical mean of its corresponding tracking metric,
-$d_g$ is the number of
-components in the group, and $\epsilon$ is a numerical stability constant.
-Dimension normalization controls group-size-dependent growth of the input
-norm; equally scaled component errors yield the same group norm regardless
-of the number of components. Since all errors are nonnegative and normalization uses
-positive scaling, the resulting input $\mathbf z_t$ remains nonnegative
-and preserves the monotonic ordering of each error component.
+where $\mathbf e_t^{(g)}$ is the physical error vector of group $g$,
+$\sigma_g$ is the historical mean of the corresponding tracking metric,
+$d_g$ is the number of error terms in the group, and $\epsilon$ is a
+numerical stability constant. This normalization can prevent the
+discriminator from overemphasizing errors with larger numerical
+magnitudes or more components.
 
 \subsection{Adversarial Reward Learning}
 \label{sec:reward}
 
-To learn how different physical errors should be evaluated jointly, MIRA
-uses a monotone discriminator to construct a unified imitation reward
-through adversarial learning, reducing reliance on manually designed
-reward weights.
+In reinforcement learning, a motion-tracking policy learns the reference
+motion by maximizing an imitation reward. Traditional methods typically
+combine tracking rewards for position, orientation, and velocity through
+a weighted sum, relying on manually specified and tuned weights. MIRA
+therefore learns an imitation reward from the normalized physical errors
+$\mathbf z_t$ through adversarial learning and introduces monotonicity
+constraints so that reducing errors cannot decrease the reward.
 
 The discriminator maps the normalized physical error $\mathbf z$ to a
-scalar through a monotone neural network $E_\theta$. Its score is defined
-as
+scalar through a monotone neural network $E_\theta$. The score is defined
+as:
 \begin{equation}
 s_\theta(\mathbf z)
 =b-\left[E_\theta(\mathbf z)-E_\theta(\mathbf 0)\right],
 \label{eq:mira_score}
 \end{equation}
-where $b$ is a learnable scalar. At zero error, the score is
-$s_\theta(\mathbf 0)=b$. Since $E_\theta$ is monotone, increasing physical
-error components cannot decrease $E_\theta(\mathbf z)$ and therefore
-cannot increase the discriminator score $s_\theta(\mathbf z)$.
+where $b$ is a learnable scalar, and the score at zero error is
+$s_\theta(\mathbf 0)=b$. In practice, the zero-error vector is fed into
+the network together with the error inputs of the current batch to
+compute $E_\theta(\mathbf 0)$, which is shared by all samples in that
+batch. Since $E_\theta$ is monotone, larger physical errors produce
+larger $E_\theta(\mathbf z)$ and lower discriminator scores
+$s_\theta(\mathbf z)$.
 
-The discriminator is trained using binary cross-entropy. The zero-error
-vector $\mathbf z^+=\mathbf 0$ serves as the positive sample, while errors
-$\mathbf z^-$ from the current policy and experience replay serve as
-negative samples. The classification loss is
+The discriminator is trained using binary cross-entropy. The ideal state
+in which all physical errors are zero, $\mathbf z^+=\mathbf 0$, serves
+as the positive sample, while actual tracking errors $\mathbf z^-$ from
+the current policy and experience replay serve as negative samples. The
+classification loss is defined as:
 \begin{equation}
 \begin{aligned}
 \mathcal L_D ={}&
@@ -335,11 +356,12 @@ negative samples. The classification loss is
 \end{aligned}
 \label{eq:mira_loss}
 \end{equation}
-where $q_{-}$ denotes the negative-sample distribution. This objective
-encourages higher scores for zero error and lower scores for errors
-produced by the policy, thereby learning a joint evaluation of different
-tracking errors. Output-layer weight regularization is also retained
-during training.
+where $q_{-}$ denotes the negative-sample distribution. The first term of
+the loss encourages the discriminator to increase the score for zero
+error, while the second encourages it to decrease scores for actual
+tracking errors. By minimizing this loss, the discriminator learns to
+distinguish zero error from actual tracking errors and to combine the
+physical errors for scoring.
 
 The discriminator score is converted into an imitation reward using the
 same reward mapping as ADD:
@@ -347,69 +369,76 @@ same reward mapping as ADD:
 r_t=\operatorname{softplus}\left(s_\theta(\mathbf z_t)\right).
 \label{eq:reward}
 \end{equation}
-As in ADD, the implementation caps this mapping using
-$-\log\!\left(\max\{1-\operatorname{sigmoid}(s),10^{-4}\}\right)$;
-it equals softplus before the cap.
-The capped mapping is nondecreasing, so increasing the discriminator score
-cannot lower the imitation reward. During training, the
-discriminator is updated using current samples and experience replay,
-while the policy is optimized with PPO using the learned reward. The
-discriminator and policy are updated alternately.
+Since softplus is monotonically increasing, a higher discriminator score
+corresponds to a higher imitation reward. During training, the
+discriminator updates its parameters using current samples and experience
+replay, while the policy is optimized through PPO using the learned
+reward. The two are updated alternately.
 
 \subsection{Constrained Monotone Discriminator}
 \label{sec:critic}
 
-MIRA combines nonnegative weights, monotone activation functions, and
-learnable weight scaling so that $E_\theta$ satisfies both monotonicity
-and a $1$-Lipschitz constraint.
+The discriminator must not only distinguish zero error from actual
+tracking errors, but also provide distinguishable rewards for different
+levels of tracking quality. If the discriminator is overly sensitive to input
+errors, even small errors may cause its score to drop sharply, leading
+to nearly zero rewards for different degrees of tracking error. ADD uses
+a gradient penalty to constrain discriminator sensitivity, but a penalty
+coefficient that is too small provides insufficient constraint, while
+one that is too large may make the discriminator overly smooth and
+weaken its ability to distinguish different errors. To avoid dependence
+on this penalty coefficient, MIRA directly constrains discriminator
+sensitivity through its network architecture while ensuring that its
+score is monotone with respect to physical errors.
 
-To guarantee monotonicity, the raw weight matrix $V$ of each linear layer
-is transformed elementwise into the nonnegative matrix $P=|V|$. For
-nonnegative physical error inputs $\mathbf z\geq0$, nonnegative weights
-ensure that increasing any error component cannot decrease the outputs of
-a linear layer. The network uses MixedELU activations, whose branches are
-all monotonically nondecreasing with derivatives bounded above by $1$,
-preserving monotonicity across network layers
+Specifically, MIRA combines nonnegative weights, monotone activation
+functions, and learnable weight scaling so that $E_\theta$ satisfies
+both monotonicity and a $1$-Lipschitz constraint.
+
+To guarantee monotonicity, we take the elementwise absolute value of the
+raw weight matrix $V$ of each linear layer to obtain the nonnegative
+matrix $P=|V|$. Nonnegative weights ensure that the outputs of a linear
+layer are monotonically nondecreasing with respect to input errors. The
+network uses MixedELU activation functions, whose branches are all
+monotonically nondecreasing with derivatives no greater than $1$,
+thereby preserving monotonicity across network layers
 \cite{runje2023constrained}.
 
 To satisfy the $1$-Lipschitz constraint, we scale the weight matrix
-columnwise. The scaling factors are controlled by learnable parameters,
-allowing the discriminator to flexibly balance the contributions of
+columnwise. The scaling coefficients are controlled by learnable
+parameters, allowing the discriminator to adjust the contributions of
 different physical errors to its score while bounding the spectral norm
 of each linear layer by $1$.
 
-Specifically, let $P\in\mathbb R^{m\times n}$ be a nonnegative weight
-matrix, where $m$ and $n$ are the output and input dimensions,
-respectively. Introduce learnable parameters
-$\boldsymbol\alpha\in\mathbb R^n$ and let
+Let $P\in\mathbb R^{m\times n}$ be a nonnegative weight matrix, where
+$m$ and $n$ are the output and input dimensions, respectively. Introduce
+learnable parameters $\boldsymbol\alpha\in\mathbb R^n$ and let
 $\mathbf q=\exp(\boldsymbol\alpha)>0$. The scaling coefficients are
-computed from the entire weight matrix as
+computed from the entire weight matrix:
 \begin{equation}
 \mathbf t=\frac{P^\top P\mathbf q}{\mathbf q},
 \label{eq:diagonal_coefficients}
 \end{equation}
-where division is elementwise. Since $P\geq0$, every entry of $P^\top P$
-is nonnegative. Together with $\mathbf q>0$, this ensures that $t_i>0$
-for every nonzero weight column.
+where division is elementwise. Since $P\geq0$ and $\mathbf q>0$,
+$t_i$ is positive for every nonzero weight column.
 
 Using $\mathbf t$, we scale the weight matrix columnwise to obtain the
-effective matrix used in the forward computation:
+effective weight matrix used in the forward computation:
 \begin{equation}
 W=P\operatorname{diag}(\mathbf t^{-1/2}).
 \label{eq:diagonal_weights}
 \end{equation}
-Zero weight columns remain zero.
-This scaling satisfies the matrix constraint for Lipschitz networks
-\cite{araujo2023unified}, guaranteeing
+Zero weight columns remain zero. This scaling satisfies the matrix
+constraints for Lipschitz networks \cite{araujo2023unified}, guaranteeing:
 \begin{equation}
 W\geq0,\qquad \|W\|_2\leq1.
 \label{eq:diagonal_bound}
 \end{equation}
-Thus, every linear layer maintains nonnegative weights and a Lipschitz
-constant no greater than $1$ throughout training. Combined with monotone,
-$1$-Lipschitz activation functions, the complete network $E_\theta$ and
-its associated imitation reward satisfy monotonicity and a $1$-Lipschitz
-constraint in the normalized physical error space.
+Thus, every linear layer maintains nonnegative weights and a spectral
+norm no greater than $1$. Combined with monotone, $1$-Lipschitz
+activation functions, the complete network $E_\theta$ and its associated
+imitation reward satisfy both monotonicity and a $1$-Lipschitz constraint
+in the normalized physical error space.
 
 \input{experiments_mira.tex}
 
