@@ -1,0 +1,155 @@
+\section{Experiments}
+
+\subsection{Experimental Setup}
+\label{sec:setup}
+We evaluate MIRA on a $28$-DoF, $15$-body humanoid in Isaac Lab
+\cite{mittal2023isaaclab,makoviychuk2021isaacgym}. The benchmark comprises
+six skills: Roll, Climb, Backflip, Crawl, Get-Up, and Spin Kick. The main
+comparison uses $2000$ policy updates with $8192$ parallel environments and
+$32$ steps per update, corresponding to $5.24\times10^8$ environment samples.
+The simulator runs at $120\,\mathrm{Hz}$ and PD joint-position actions are
+applied at $30\,\mathrm{Hz}$. MIRA uses the same configuration across motions
+(Table~\ref{tab:config}), without a gradient penalty or an additional
+handcrafted tracking reward.
+
+Three independent training seeds are planned for each configuration.
+\textcolor{orange!70!black}{\textbf{Draft data status:} available measurements
+are from seed~0. Dagger-marked deviations and shaded bands are reproducible
+random layout placeholders for two pending seed repetitions of already
+measured runs, not empirical uncertainty estimates. Unrun motion--method
+combinations remain \textbf{TODO}.}
+
+\begin{table}[t]
+\caption{MIRA configuration shared across motions.}
+\label{tab:config}
+\centering\small
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{ll}
+\toprule
+Component & Setting \\
+\midrule
+Physical error input & $64$ components, $7$ groups \\
+Energy network & $64\to341\to512\to1$ \\
+Activation & MixedELU \\
+Linear maps & nonnegative, diagonal-normalized \\
+Input normalization & group scale and $\sqrt{d_g}$ scaling \\
+Scale statistics & fixed after $10^8$ samples \\
+Actor / value network & MLP, hidden widths $1024$, $512$ \\
+Actor / value optimizer & SGD, lr $10^{-4}$ \\
+Discriminator optimizer & SGD, lr $2.5\times10^{-4}$ \\
+PPO settings & $\gamma=0.99$, GAE $0.95$, clip $0.2$ \\
+Replay capacity & $2\times10^5$ samples \\
+Output-weight regularizer & $0.01$ \\
+Gradient penalty & $0$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+We report seven tracking errors: root position, root rotation, body position,
+body rotation, joint velocity, root linear velocity, and root angular
+velocity. Position errors use Euclidean distances; body positions are
+expressed relative to the root. Rotation errors use quaternion geodesic
+angles, with body orientations measured in world coordinates. Velocity
+errors use mean absolute component differences. The environment's body
+metrics average over its $15$ rigid bodies, while MIRA's input omits
+duplicated root entries from the body groups. All errors are computed on
+reference-aligned executed timesteps. Early-terminated trajectories are not
+padded, so their errors must be interpreted together with completion.
+
+\subsection{Quantitative Comparison}
+We compare MIRA with AMP, DeepMimic, and ADD. Table~\ref{tab:main} summarizes
+the seven tracking errors under the common training budget. Its aggregate
+entries weight the six motions equally; an aggregate remains TODO until
+all six constituent motion results are available. Available MIRA results
+and missing motions are retained in the same table. Climb extensions beyond
+$2000$ updates are excluded from the main comparison. Qualitative rollout
+panels are reserved in Fig.~\ref{fig:snapshots}.
+
+\input{generated/mira_main_table.tex}
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.90\textwidth]{figures/mira_motion_frames_todo.pdf}
+\caption{Motion imitation across the six benchmark skills.
+\textcolor{red}{TODO: replace the marked panels with synchronized keyframes
+rendered from the current MIRA checkpoints. These panels contain no rollout
+observations.}}
+\label{fig:snapshots}
+\end{figure*}
+
+\subsection{Learning Dynamics}
+\label{sec:learning}
+Figure~\ref{fig:learning} reports body-position, body-rotation, and joint-velocity
+errors against environment samples. In the current draft, all methods are
+averaged equally over Backflip, Climb, and Crawl, the three motions with
+available MIRA measurements. This provides a matched preliminary comparison
+without motion-specific panels. The remaining three motions will be added
+to every method's curve together. The shaded regions currently serve only
+as marked three-seed layout placeholders.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.97\textwidth]{figures/mira_learning_macro_draft.pdf}
+\caption{Preliminary three-motion macro-average learning curves over
+Backflip, Climb, and Crawl at the common sample budget. Every method uses
+the same three motions. Lower is better; vertical axes are logarithmic. Lines use measured
+seed-0 evaluation records. \textcolor{orange!70!black}{Shaded bands are random
+seed placeholders, not measured standard deviations.} The six-motion
+extension remains pending. Errors cover
+executed trajectory portions, including early-terminated evaluations.}
+\label{fig:learning}
+\end{figure*}
+
+\subsection{Ablation Study}
+\label{sec:ablation}
+We examine two components on Backflip: \emph{Monotone Error Modeling} and
+\emph{Diagonal Normalization}. Removing Monotone Error Modeling replaces
+the physical error vector with the ADD-style $172$-dimensional signed
+reference--policy differential, applies coordinate-wise normalization, and
+allows signed network weights. The compatible diagonal normalization is
+retained. Removing Diagonal Normalization preserves the physical error
+input and nonnegative weights but removes the layer-wise normalization
+during training. We also evaluate the configuration with both components
+removed.
+
+The binary classification objective, reward mapping, MixedELU activations,
+hidden widths, PPO settings, and training budget are shared. Configurations
+without diagonal normalization start from the corresponding normalized
+model's effective initial weights. This avoids introducing an arbitrary
+initial output-scale change. All variants retain the existing output-weight
+regularizer; removing normalization also changes its action on the effective
+head weights. Monotone Error Modeling is evaluated as a joint representation
+and constraint component, rather than an isolated dimensionality change.
+
+\input{generated/mira_ablation_table.tex}
+
+Table~\ref{tab:ablation} reports tracking errors and whether the
+reference-start evaluation reaches the full motion duration. Removing
+Monotone Error Modeling preserves completion but increases all seven errors
+in the available run. Both configurations without Diagonal Normalization
+terminate early. These comparisons evaluate the components as implemented;
+the additional seed repetitions remain pending.
+
+To inspect discriminator behavior, Fig.~\ref{fig:diagnostics} shows sampled
+input sensitivity, negative-sample logits, and numerically zero rewards.
+Removing Diagonal Normalization is accompanied by increased sensitivity,
+more negative scores, and reward saturation. These observations connect the
+constraint to the reward's operating behavior, without attributing the
+entire control gap to a single mechanism. The diagnostics use the measured
+Backflip run and do not stand in for a six-motion result.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.97\textwidth]{figures/mira_ablation_diagnostics.pdf}
+\caption{Measured seed-0 Backflip discriminator diagnostics for the four
+ablation configurations. Left: sampled maximum score-gradient norm in each
+model's normalized input space; the dashed line marks one. Middle: mean
+negative-sample logit. Right: fraction of sampled rewards that are
+numerically zero. Samples come from each configuration's own rollout, so
+the gradient curves are operating diagnostics rather than a common-state
+causal comparison or a certificate of a global bound. No random seed
+placeholders are used in this figure.}
+\label{fig:diagnostics}
+\end{figure*}
+
+\FloatBarrier
