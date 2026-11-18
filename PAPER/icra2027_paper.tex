@@ -397,9 +397,13 @@ both monotonicity and a $1$-Lipschitz constraint.
 
 To guarantee monotonicity, we take the elementwise absolute value of the
 raw weight matrix $V$ of each linear layer to obtain the nonnegative
-matrix $P=|V|$. Nonnegative weights ensure that the outputs of a linear
-layer are monotonically nondecreasing with respect to input errors. The
-network uses MixedELU activation functions, whose branches are all
+matrix $P=|V|$. Because the weights are nonnegative, increasing any input
+error cannot decrease the output of the linear layer. Combined with
+monotone activation functions, this property propagates from layer to
+layer, thereby guaranteeing the monotonicity of the entire network
+$E_\theta$.
+
+The network uses MixedELU activation functions, whose branches are all
 monotonically nondecreasing with derivatives no greater than $1$,
 thereby preserving monotonicity across network layers
 \cite{runje2023constrained}.
