@@ -17,6 +17,8 @@ import util.torch_util as torch_util
 class MIRAAblationAgent(MIRAMonotoneAgent):
     CHECKPOINT_AGENT_ALIASES = ("DAREAblationAgent",)
     def _load_params(self, config):
+        if config.get("disc_group_size_scaling", True) is not True:
+            raise ValueError("The existing A/B variants require their original input scaling")
         self._ablation_variant = config.get("ablation_variant")
         if self._ablation_variant not in ABLATION_VARIANTS:
             raise ValueError("ablation_variant must be no_a, no_b or no_ab")

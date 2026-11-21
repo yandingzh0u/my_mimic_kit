@@ -1,8 +1,8 @@
 """Historical error scales with fixed per-group RMS geometry.
 
 The discriminator receives every physical component. Each component is
-divided by its group's historical scale and ``sqrt(group_dim)``, so a group's
-squared radius depends on its RMS error instead of its number of coordinates.
+divided by its group's historical scale and, by default, ``sqrt(group_dim)``,
+so a group's squared radius depends on its RMS error instead of its width.
 """
 
 import torch
@@ -18,7 +18,7 @@ class PhysicalErrorNormalizer(DiffNormalizer):
     DiffNormalizer also preserves pending training statistics in checkpoints.
     """
 
-    def __init__(self, device, dtype=torch.float, feature_slices=FEATURE_SLICES):
+    def __init__(self, device, dtype=torch.float, feature_slices=FEATURE_SLICES, *, group_size_scaling=True):
         self._feature_dim = max(part.stop for part in feature_slices.values())
         metric_names = tuple(feature_slices)
         super().__init__((len(metric_names),), device=device, dtype=dtype)
@@ -28,7 +28,8 @@ class PhysicalErrorNormalizer(DiffNormalizer):
         self.register_buffer("_feature_groups", feature_groups)
         group_dims = torch.tensor(
             [part.stop - part.start for part in feature_slices.values()], device=device, dtype=dtype)
-        self.register_buffer("_group_sqrt_dims", group_dims.sqrt())
+        self.register_buffer("_group_sqrt_dims", group_dims.sqrt() if group_size_scaling
+                             else torch.ones_like(group_dims))
 
     def record(self, features):
         super().record(aggregate_physical_groups(features))

@@ -57,6 +57,11 @@ python mimickit/run.py \
 
 The agent configuration is
 [`mira_monotone_humanoid_agent.yaml`](../data/agents/mira_monotone_humanoid_agent.yaml).
+For an ablation of the square-root group-size factor, set
+`disc_group_size_scaling: false` in a copy of the agent configuration.
+The discriminator still divides the 64 physical errors by their running
+group scales. The default also divides by the square root of group size.
+
 The physical-64 model uses monotone schema 4 with fixed group-RMS input
 geometry. Old SN7 and seven-input
 diagonal checkpoints use earlier schemas and must be evaluated with their original source; they are not silently

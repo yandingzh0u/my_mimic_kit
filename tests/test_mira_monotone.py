@@ -334,6 +334,41 @@ def test_physical_normalizer_preserves_old_group_statistics_without_averaging_fe
     assert torch.count_nonzero(actual_delta[:, 31:]) == 0
 
 
+def test_no_sqrt_uses_running_group_scales_for_reward_and_bce():
+    env = Env()
+    agent = MIRAMonotoneAgent(config() | {"disc_group_size_scaling": False}, env, "cpu")
+    (policy, _), (reference, _) = physical_pair(env)
+    fill_buffers(agent, policy, reference)
+    features = agent._pair_error_metrics(policy, reference)
+    norm = agent._disc_obs_norm
+    expected_scales = aggregate_error_metrics(features).mean(0).clamp_min(1e-4)
+    per_feature_scale = torch.repeat_interleave(expected_scales, torch.tensor([1, 1, 14, 14, 28, 3, 3]))
+    expected_inputs = features / per_feature_scale
+    agent._compute_rewards()
+    norm.update()
+    torch.testing.assert_close(norm.normalize(features), expected_inputs)
+    torch.testing.assert_close(norm.unnormalize(expected_inputs), features)
+    torch.testing.assert_close(agent._exp_buffer.get_data_flat("reward"),
+                               agent._calc_disc_rewards(expected_inputs))
+    assert int(norm.get_count()) == len(features)
+    assert norm.training_state_dict()["new_count"] == 0
+
+    calls = []
+    handle = agent._model._disc_energy.register_forward_pre_hook(
+        lambda _, inputs: calls.append(inputs[0].detach().clone()))
+    try:
+        loss = agent._compute_disc_loss({"disc_obs": policy[:16], "disc_obs_demo": reference[:16]})
+    finally:
+        handle.remove()
+    assert loss["disc_loss"].isfinite()
+    torch.testing.assert_close(calls[0][1:17], expected_inputs[:16])
+    assert (agent._get_checkpoint_extra_state()["monotone_disc"]["input_scaling"]
+            == "seven_metric_history_broadcast")
+    grouped = MIRAMonotoneAgent(config(), Env(), "cpu")
+    with pytest.raises(RuntimeError, match="group geometry"):
+        grouped.load_state_dict(agent.state_dict(), strict=False)
+
+
 @pytest.mark.parametrize("release_aware", [False, True])
 def test_carry_velocity_compares_synced_world_vectors_at_equal_pose(monkeypatch, release_aware):
     env = CarryEnv.__new__(CarryEnv)

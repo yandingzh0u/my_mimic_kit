@@ -11,10 +11,14 @@ import util.torch_util as torch_util
 
 
 class MIRAMonotoneAgent(ADDAgent):
-    CHECKPOINT_AGENT_ALIASES = ("DAREMonotoneAgent",)
     """One CMNN scorer, zero-error BCE, original ADD reward and uniform PPO."""
 
+    CHECKPOINT_AGENT_ALIASES = ("DAREMonotoneAgent",)
+
     def _load_params(self, config):
+        self._disc_group_size_scaling = config.get("disc_group_size_scaling", True)
+        if not isinstance(self._disc_group_size_scaling, bool):
+            raise ValueError("disc_group_size_scaling must be a boolean")
         if config.get("disc_group_negatives", False):
             raise ValueError("MIRAMonotone uses only real paired observations, not structured negatives")
         if "disc_reward_scale" in config:
@@ -36,7 +40,8 @@ class MIRAMonotoneAgent(ADDAgent):
         PPOAgent._build_normalizers(self)
         dtype = torch_util.numpy_dtype_to_torch(self._env.get_disc_obs_space().dtype)
         self._disc_obs_norm = PhysicalErrorNormalizer(
-            device=self._device, dtype=dtype, feature_slices=physical_feature_slices(self._env))
+            device=self._device, dtype=dtype, feature_slices=physical_feature_slices(self._env),
+            group_size_scaling=self._disc_group_size_scaling)
 
     @torch.no_grad()
     def _pair_error_metrics(self, policy, reference):
@@ -137,7 +142,8 @@ class MIRAMonotoneAgent(ADDAgent):
                          for name, part in layout.feature_slices.items()},
             "body_positions": "nonroot_root_relative_world_axes_L2",
             "body_rotations": "nonroot_world_geodesic",
-            "input_scaling": metric_count + "_metric_history_broadcast_with_fixed_group_rms",
+            "input_scaling": (metric_count + "_metric_history_broadcast"
+                              + ("_with_fixed_group_rms" if self._disc_group_size_scaling else "")),
             "first_layer": "free_positive_dense_no_group_budget",
             "score": "learned_bias_minus_anchored_positive_diagonal_CMNN_energy",
             "normalization": "SLL_nonresidual_positive_diagonal_logdomain_Perron_init",
