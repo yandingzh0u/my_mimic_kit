@@ -1,0 +1,92 @@
+env_name: add
+motion_name: samp_sofa003
+char_file: data/assets/humanoid/humanoid.xml
+camera_mode: track
+episode_length: 5.7
+global_obs: true
+root_height_obs: true
+pose_termination: true
+pose_termination_dist: 1.0
+enable_phase_obs: false
+enable_tar_obs: true
+num_phase_encoding: 4
+tar_obs_steps:
+- 1
+- 2
+- 3
+num_disc_obs_steps: 1
+rand_reset: true
+log_tracking_error: true
+ref_char_offset:
+- 2.0
+- 0.0
+- 0.0
+init_pose:
+- 1.2921704053878784
+- -0.6614817976951599
+- 0.8685484528541565
+- 0.10906626284122467
+- -0.057383473962545395
+- 2.296762466430664
+- -0.092555470764637
+- 0.39344853162765503
+- 0.117549829185009
+- 0.09740253537893295
+- -0.006112527567893267
+- -0.10176870971918106
+- 1.2010856866836548
+- 0.13451725244522095
+- 0.3658502995967865
+- 0.5697629451751709
+- -1.2419593334197998
+- 0.12569549679756165
+- -0.003164025954902172
+- -0.3822731077671051
+- 0.027923032641410828
+- 0.2219708114862442
+- -0.11474187672138214
+- 0.19312205910682678
+- 0.1842205971479416
+- -0.3275837302207947
+- -0.14632263779640198
+- 0.01150186825543642
+- -0.2749132215976715
+- -0.022763097658753395
+- 0.007241201587021351
+- -0.08389422297477722
+- -0.030490657314658165
+- 0.18000000715255737
+enable_early_termination: true
+key_bodies:
+- head
+- right_hand
+- left_hand
+- right_foot
+- left_foot
+contact_bodies:
+- right_hand
+- left_hand
+- right_foot
+- left_foot
+motion_file: data/motions/humanoid/humanoid_sofa003.pkl
+objects:
+- file: data/assets/objects/samp_sofa003.usd
+  pos:
+  - 0.295
+  - 1.365
+  - 0.0
+  rot:
+  - 0.0
+  - 0.0
+  - 0.0
+  - 1.0
+reward_pose_w: 0.5
+reward_vel_w: 0.1
+reward_root_pose_w: 0.15
+reward_root_vel_w: 0.1
+reward_key_pos_w: 0.15
+reward_pose_scale: 0.25
+reward_vel_scale: 0.01
+reward_root_pose_scale: 5.0
+reward_root_vel_scale: 1.0
+reward_key_pos_scale: 10.0

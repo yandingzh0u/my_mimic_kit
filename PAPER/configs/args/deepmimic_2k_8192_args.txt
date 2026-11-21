@@ -1,4 +1,4 @@
-# Method template; run_serial_matrix.sh supplies --env_config and --out_dir.
+# Supply --env_config and --out_dir alongside this method template.
 --mode train
 --num_envs 8192
 --devices cuda:0

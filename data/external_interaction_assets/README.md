@@ -14,3 +14,9 @@ experiments.  Files under `raw/` are intentionally ignored by Git.
 Generated MimicKit motions contain retargeted robot states rather than copies
 of the original human body model.  Re-run the preparation scripts only after
 obtaining each dataset from its official source and accepting its license.
+
+For `sofa003`, the local retargeted motion is `data/motions/humanoid/humanoid_sofa003.pkl`
+and the matching asset is `data/assets/objects/samp_sofa003.usd`. These two files
+are excluded from Git. The November 2026 interaction runs preserve their original
+environment YAML as `frozen_env.yaml` for strict checkpoint resume on the original
+machine, where legacy asset paths resolve to the relocated files.

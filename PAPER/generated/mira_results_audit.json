@@ -135,7 +135,7 @@
           "independent_summary_path": "output/add_roll_2k_8192_seed0/eval/final/summary.json"
         },
         "MIRA": {
-          "path": "output/dare_cmnn64_group_rms_roll_2000_8192_seed0_20261115/train_metrics.jsonl",
+          "path": "output/mira_cmnn64_group_rms_roll_2000_8192_seed0_20261115/train_metrics.jsonl",
           "sha256": "4a3b6eb4b2e61b6a2fa3f7bc8ab951912e416ac93c83eb4baaea9214a5302d1c",
           "seed": 0,
           "completed_updates_used": 2000,
@@ -156,13 +156,13 @@
           },
           "test_episode_length": 60.0,
           "nominal_horizon_steps": 60,
-          "terminal_policy_checkpoint": "output/dare_cmnn64_group_rms_roll_2000_8192_seed0_20261115/int_models/model_0000001999.pt",
+          "terminal_policy_checkpoint": "output/mira_cmnn64_group_rms_roll_2000_8192_seed0_20261115/int_models/model_0000001999.pt",
           "terminal_policy_checkpoint_sha256": "43ae5427c91e00f524b04f3c9abf6926b9bc2f458bc52fc24192dcf514722fd3",
           "complete": true,
           "independent_summary_available": false,
           "run_status": "completed",
           "total_run_updates": 2000,
-          "pressure_source": "output/dare_cmnn64_group_rms_roll_2000_8192_seed0_20261115/constraint_rounds.jsonl",
+          "pressure_source": "output/mira_cmnn64_group_rms_roll_2000_8192_seed0_20261115/constraint_rounds.jsonl",
           "pressure_sha256": "bb561d4c1ba4d5d5a56d0d66e7da11966edd1a1f65f545805773bec88435b6d6"
         }
       }
@@ -249,7 +249,7 @@
           "independent_summary_path": "output/add_climb_2k_8192_seed0/eval/final/summary.json"
         },
         "MIRA": {
-          "path": "output/dare_cmnn64_group_rms_climb_2000_8192_seed0_20261113/train_metrics.jsonl",
+          "path": "output/mira_cmnn64_group_rms_climb_2000_8192_seed0_20261113/train_metrics.jsonl",
           "sha256": "8a2b7d6e9556b83e07a3a3063047a88ec443e3c8c5b075c5e8d3905b93af51ab",
           "seed": 0,
           "completed_updates_used": 3000,
@@ -270,13 +270,13 @@
           },
           "test_episode_length": 299.0,
           "nominal_horizon_steps": 299,
-          "terminal_policy_checkpoint": "output/dare_cmnn64_group_rms_climb_2000_8192_seed0_20261113/int_models/model_0000002999.pt",
+          "terminal_policy_checkpoint": "output/mira_cmnn64_group_rms_climb_2000_8192_seed0_20261113/int_models/model_0000002999.pt",
           "terminal_policy_checkpoint_sha256": "ba339063157a23d62dbb6eecba03dd7aebbb46adb13dd4f9190b50af14fe0a6f",
           "complete": true,
           "independent_summary_available": false,
           "run_status": "completed",
           "total_run_updates": 3000,
-          "pressure_source": "output/dare_cmnn64_group_rms_climb_2000_8192_seed0_20261113/constraint_rounds.jsonl",
+          "pressure_source": "output/mira_cmnn64_group_rms_climb_2000_8192_seed0_20261113/constraint_rounds.jsonl",
           "pressure_sha256": "36f12346256a272caad5882c20b57a78581f774ccf07ec1dea2cdd340da76afa"
         }
       }
@@ -363,7 +363,7 @@
           "independent_summary_path": "output/add_backflip_2k_8192_seed0/eval/final/summary.json"
         },
         "MIRA": {
-          "path": "output/dare_cmnn64_group_rms_backflip_2000_8192_seed0_20261113/train_metrics.jsonl",
+          "path": "output/mira_cmnn64_group_rms_backflip_2000_8192_seed0_20261113/train_metrics.jsonl",
           "sha256": "548f47c0c1f42357140978f4fa0f35925532c14130a6ef6b20374a194b91abf5",
           "seed": 0,
           "completed_updates_used": 2000,
@@ -384,13 +384,13 @@
           },
           "test_episode_length": 60.0,
           "nominal_horizon_steps": 60,
-          "terminal_policy_checkpoint": "output/dare_cmnn64_group_rms_backflip_2000_8192_seed0_20261113/int_models/model_0000001999.pt",
+          "terminal_policy_checkpoint": "output/mira_cmnn64_group_rms_backflip_2000_8192_seed0_20261113/int_models/model_0000001999.pt",
           "terminal_policy_checkpoint_sha256": "ba365917d0567c68d0a337de3cf8e0c0b86fa0c98c3f5fef3f9ddd46fc4cb339",
           "complete": true,
           "independent_summary_available": false,
           "run_status": "completed",
           "total_run_updates": 2000,
-          "pressure_source": "output/dare_cmnn64_group_rms_backflip_2000_8192_seed0_20261113/constraint_rounds.jsonl",
+          "pressure_source": "output/mira_cmnn64_group_rms_backflip_2000_8192_seed0_20261113/constraint_rounds.jsonl",
           "pressure_sha256": "b298cb5d614432235b3d60302466fa3e0fcb028b64ac1e3bc48581e2e5409f52"
         }
       }
@@ -477,7 +477,7 @@
           "independent_summary_path": "output/add_crawl_2k_8192_seed0/eval/final/summary.json"
         },
         "MIRA": {
-          "path": "output/dare_cmnn64_group_rms_crawl_2000_8192_seed0_20261113/train_metrics.jsonl",
+          "path": "output/mira_cmnn64_group_rms_crawl_2000_8192_seed0_20261113/train_metrics.jsonl",
           "sha256": "df407afc481f1f60c86d691d05368b952c586b954eedb737bb4ca883b6c5c616",
           "seed": 0,
           "completed_updates_used": 2000,
@@ -498,13 +498,13 @@
           },
           "test_episode_length": 77.0,
           "nominal_horizon_steps": 77,
-          "terminal_policy_checkpoint": "output/dare_cmnn64_group_rms_crawl_2000_8192_seed0_20261113/int_models/model_0000001999.pt",
+          "terminal_policy_checkpoint": "output/mira_cmnn64_group_rms_crawl_2000_8192_seed0_20261113/int_models/model_0000001999.pt",
           "terminal_policy_checkpoint_sha256": "197e4ff3e588636e95470f9e824d257edfb5a702b70cac62767790fb118d8203",
           "complete": true,
           "independent_summary_available": false,
           "run_status": "completed",
           "total_run_updates": 2000,
-          "pressure_source": "output/dare_cmnn64_group_rms_crawl_2000_8192_seed0_20261113/constraint_rounds.jsonl",
+          "pressure_source": "output/mira_cmnn64_group_rms_crawl_2000_8192_seed0_20261113/constraint_rounds.jsonl",
           "pressure_sha256": "6d5ba059d82d31dd160190cabb996c4dc369104b7468e60c0718bf12baef7cd4"
         }
       }
@@ -591,7 +591,7 @@
           "independent_summary_path": "output/add_getup_facedown_2k_8192_seed0/eval/final/summary.json"
         },
         "MIRA": {
-          "path": "output/dare_cmnn64_group_rms_getup_facedown_2000_8192_seed0_20261115/train_metrics.jsonl",
+          "path": "output/mira_cmnn64_group_rms_getup_facedown_2000_8192_seed0_20261115/train_metrics.jsonl",
           "sha256": "b8985ae620cea9358cb00cd16f1a0a7196e1cba28d91f1cf66d77a312e582c39",
           "seed": 0,
           "completed_updates_used": 2000,
@@ -612,13 +612,13 @@
           },
           "test_episode_length": 91.0,
           "nominal_horizon_steps": 91,
-          "terminal_policy_checkpoint": "output/dare_cmnn64_group_rms_getup_facedown_2000_8192_seed0_20261115/int_models/model_0000001999.pt",
+          "terminal_policy_checkpoint": "output/mira_cmnn64_group_rms_getup_facedown_2000_8192_seed0_20261115/int_models/model_0000001999.pt",
           "terminal_policy_checkpoint_sha256": "ecb392828b0160a028621623fa9a0e78ceb057ae700ddfddd7eb60dbc6de3d2c",
           "complete": true,
           "independent_summary_available": false,
           "run_status": "completed",
           "total_run_updates": 2000,
-          "pressure_source": "output/dare_cmnn64_group_rms_getup_facedown_2000_8192_seed0_20261115/constraint_rounds.jsonl",
+          "pressure_source": "output/mira_cmnn64_group_rms_getup_facedown_2000_8192_seed0_20261115/constraint_rounds.jsonl",
           "pressure_sha256": "7a1f3f24c4266d05abb5c0a5ace281e7d13777bfa6f7fdbf1d0650cbcdf7f00d"
         }
       }
@@ -705,7 +705,7 @@
           "independent_summary_path": "output/add_spinkick_2k_8192_seed0/eval/final/summary.json"
         },
         "MIRA": {
-          "path": "output/dare_cmnn64_group_rms_spinkick_2000_8192_seed0_20261115/train_metrics.jsonl",
+          "path": "output/mira_cmnn64_group_rms_spinkick_2000_8192_seed0_20261115/train_metrics.jsonl",
           "sha256": "dd65d34f102d51fa7bbc589ff233bcb1d7d30c1b1e9194285d40f4b5d992d27f",
           "seed": 0,
           "completed_updates_used": 2000,
@@ -726,13 +726,13 @@
           },
           "test_episode_length": 60.0,
           "nominal_horizon_steps": 60,
-          "terminal_policy_checkpoint": "output/dare_cmnn64_group_rms_spinkick_2000_8192_seed0_20261115/int_models/model_0000001999.pt",
+          "terminal_policy_checkpoint": "output/mira_cmnn64_group_rms_spinkick_2000_8192_seed0_20261115/int_models/model_0000001999.pt",
           "terminal_policy_checkpoint_sha256": "dcff55a41d2201adc7e0f7614ac0e0049f7090a4c800baf67c09ef6f78983482",
           "complete": true,
           "independent_summary_available": false,
           "run_status": "completed",
           "total_run_updates": 2000,
-          "pressure_source": "output/dare_cmnn64_group_rms_spinkick_2000_8192_seed0_20261115/constraint_rounds.jsonl",
+          "pressure_source": "output/mira_cmnn64_group_rms_spinkick_2000_8192_seed0_20261115/constraint_rounds.jsonl",
           "pressure_sha256": "0ecac25d45acc792efe8dd8261e3d3629d2b45f5571ae0e52acffb1e0529f3bf"
         }
       }
@@ -740,7 +740,7 @@
   },
   "ablation_final": {
     "MIRA": {
-      "path": "output/dare_cmnn64_group_rms_backflip_2000_8192_seed0_20261113/train_metrics.jsonl",
+      "path": "output/mira_cmnn64_group_rms_backflip_2000_8192_seed0_20261113/train_metrics.jsonl",
       "sha256": "548f47c0c1f42357140978f4fa0f35925532c14130a6ef6b20374a194b91abf5",
       "seed": 0,
       "completed_updates_used": 2000,
@@ -761,13 +761,13 @@
       },
       "test_episode_length": 60.0,
       "nominal_horizon_steps": 60,
-      "terminal_policy_checkpoint": "output/dare_cmnn64_group_rms_backflip_2000_8192_seed0_20261113/int_models/model_0000001999.pt",
+      "terminal_policy_checkpoint": "output/mira_cmnn64_group_rms_backflip_2000_8192_seed0_20261113/int_models/model_0000001999.pt",
       "terminal_policy_checkpoint_sha256": "ba365917d0567c68d0a337de3cf8e0c0b86fa0c98c3f5fef3f9ddd46fc4cb339",
       "complete": true,
       "independent_summary_available": false,
       "run_status": "completed",
       "total_run_updates": 2000,
-      "pressure_source": "output/dare_cmnn64_group_rms_backflip_2000_8192_seed0_20261113/constraint_rounds.jsonl",
+      "pressure_source": "output/mira_cmnn64_group_rms_backflip_2000_8192_seed0_20261113/constraint_rounds.jsonl",
       "pressure_sha256": "b298cb5d614432235b3d60302466fa3e0fcb028b64ac1e3bc48581e2e5409f52",
       "diagnostic_final": {
         "sampled_max_score_gradient_L2": 0.9953247904777527,
@@ -776,7 +776,7 @@
       }
     },
     "w/o Monotone Modeling": {
-      "path": "output/dare_ablation_backflip_matched_init_2000_8192_seed0_20261114/formal/no_a/train_metrics.jsonl",
+      "path": "output/mira_ablation_backflip_matched_init_2000_8192_seed0_20261114/formal/no_a/train_metrics.jsonl",
       "sha256": "555b7d31e79c3800ee5cb4f6902cb8f1b556f297a05fddf58dd86fce6086531a",
       "seed": 0,
       "completed_updates_used": 2000,
@@ -797,13 +797,13 @@
       },
       "test_episode_length": 60.0,
       "nominal_horizon_steps": 60,
-      "terminal_policy_checkpoint": "output/dare_ablation_backflip_matched_init_2000_8192_seed0_20261114/formal/no_a/int_models/model_0000001999.pt",
+      "terminal_policy_checkpoint": "output/mira_ablation_backflip_matched_init_2000_8192_seed0_20261114/formal/no_a/int_models/model_0000001999.pt",
       "terminal_policy_checkpoint_sha256": "2b708a8c6ff69f5f628206aa7ee3fd0e6f3eb8cda0e605169ddd25745d6e51be",
       "complete": true,
       "independent_summary_available": false,
       "run_status": "completed",
       "total_run_updates": 2000,
-      "pressure_source": "output/dare_ablation_backflip_matched_init_2000_8192_seed0_20261114/formal/no_a/constraint_rounds.jsonl",
+      "pressure_source": "output/mira_ablation_backflip_matched_init_2000_8192_seed0_20261114/formal/no_a/constraint_rounds.jsonl",
       "pressure_sha256": "875ebd9280623fed73a511aae3c72c3e67731b482f7ee0f5a2b1095eb2091255",
       "diagnostic_final": {
         "sampled_max_score_gradient_L2": 0.6240821480751038,
@@ -812,7 +812,7 @@
       }
     },
     "w/o Diagonal Norm.": {
-      "path": "output/dare_ablation_backflip_matched_init_2000_8192_seed0_20261114/formal/no_b/train_metrics.jsonl",
+      "path": "output/mira_ablation_backflip_matched_init_2000_8192_seed0_20261114/formal/no_b/train_metrics.jsonl",
       "sha256": "b3197bae98bb96961606fe6e506c9f97e54272d161b87e1012d85cbd3b6922c7",
       "seed": 0,
       "completed_updates_used": 2000,
@@ -833,13 +833,13 @@
       },
       "test_episode_length": 26.0006103515625,
       "nominal_horizon_steps": 60,
-      "terminal_policy_checkpoint": "output/dare_ablation_backflip_matched_init_2000_8192_seed0_20261114/formal/no_b/int_models/model_0000001999.pt",
+      "terminal_policy_checkpoint": "output/mira_ablation_backflip_matched_init_2000_8192_seed0_20261114/formal/no_b/int_models/model_0000001999.pt",
       "terminal_policy_checkpoint_sha256": "165a94085954d49e3b3597a919363cccf11c99954826823e2f83651cb8428bb2",
       "complete": false,
       "independent_summary_available": false,
       "run_status": "completed",
       "total_run_updates": 2000,
-      "pressure_source": "output/dare_ablation_backflip_matched_init_2000_8192_seed0_20261114/formal/no_b/constraint_rounds.jsonl",
+      "pressure_source": "output/mira_ablation_backflip_matched_init_2000_8192_seed0_20261114/formal/no_b/constraint_rounds.jsonl",
       "pressure_sha256": "df597c569070a217d21c39b18dbbf8a9331bb2ce0c3a91734c7eb0625c162da1",
       "diagnostic_final": {
         "sampled_max_score_gradient_L2": 10.2138032913208,
@@ -848,7 +848,7 @@
       }
     },
     "w/o Both Components": {
-      "path": "output/dare_ablation_backflip_matched_init_2000_8192_seed0_20261114/formal/no_ab/train_metrics.jsonl",
+      "path": "output/mira_ablation_backflip_matched_init_2000_8192_seed0_20261114/formal/no_ab/train_metrics.jsonl",
       "sha256": "b5177cf62b41ab4c2cdba550e3fdff3a86d0ea2d15639f4dba62fe8cc392cc5b",
       "seed": 0,
       "completed_updates_used": 2000,
@@ -869,13 +869,13 @@
       },
       "test_episode_length": 28.0,
       "nominal_horizon_steps": 60,
-      "terminal_policy_checkpoint": "output/dare_ablation_backflip_matched_init_2000_8192_seed0_20261114/formal/no_ab/int_models/model_0000001999.pt",
+      "terminal_policy_checkpoint": "output/mira_ablation_backflip_matched_init_2000_8192_seed0_20261114/formal/no_ab/int_models/model_0000001999.pt",
       "terminal_policy_checkpoint_sha256": "75307ccec22aa3b082ef4208c7d6e4368bf0845091430cb114aa336799d34ba9",
       "complete": false,
       "independent_summary_available": false,
       "run_status": "completed",
       "total_run_updates": 2000,
-      "pressure_source": "output/dare_ablation_backflip_matched_init_2000_8192_seed0_20261114/formal/no_ab/constraint_rounds.jsonl",
+      "pressure_source": "output/mira_ablation_backflip_matched_init_2000_8192_seed0_20261114/formal/no_ab/constraint_rounds.jsonl",
       "pressure_sha256": "284d4dc86131af2fcbc455943b14e3957e1b93fbac88927fb3fbc091e263ef65",
       "diagnostic_final": {
         "sampled_max_score_gradient_L2": 9.174497604370117,

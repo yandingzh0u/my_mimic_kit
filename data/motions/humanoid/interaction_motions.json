@@ -1,0 +1,135 @@
+{
+  "description": "Three saved interaction references for the original 28-DOF MimicKit humanoid.",
+  "entries": {
+    "carry_box": {
+      "motion_name": "continuous_box_transport",
+      "motion_file": "data/motions/humanoid/humanoid_carry_box.pkl",
+      "frames": 198,
+      "fps": 30,
+      "duration_s": 6.5666666667,
+      "object": "5 kg box",
+      "source": "CooHOI SingleAgent policy PhysX rollout with smoothing and release feedback",
+      "environment_config": "data/envs/mira_monotone_humanoid_carry_box_env.yaml",
+      "training_args": "args/mira_monotone_humanoid_carry_box_args.txt",
+      "training_run": "output/mira_cmnn68_group_rms_carry_box_2000_512_seed0_20261120",
+      "mira_training": {
+        "from_zero": true,
+        "updates": 2000,
+        "num_envs": 512,
+        "seed": 0
+      },
+      "reference_audit": {
+        "lane": 79,
+        "init_plan": [
+          7.0,
+          0.07,
+          0.0,
+          2.0,
+          0.28,
+          0.26,
+          1.0,
+          5.0
+        ],
+        "first_lift_frame": 58,
+        "peak_frame": 112,
+        "first_down_frame": 145,
+        "lift_10cm_to_peak_s": 1.8,
+        "peak_lift_z_mps": 2.1033217906951904,
+        "first_descent_peak_mps": 1.3072471618652344,
+        "transport_distance_m": 1.8873906135559082,
+        "continuous_bimanual_supported_distance_m": 0.372651606798172,
+        "middle_stall_fraction": 0.0,
+        "max_lift_m": 0.5924320555244655,
+        "release_windows": [
+          [
+            159,
+            212
+          ]
+        ],
+        "min_distance_m": 0.10114268213510513,
+        "root_min": 0.5458971261978149,
+        "max_nonfoot_ground_force_N": 0.0,
+        "number_of_lifts_before_release": 1,
+        "delay_from_first_ground_to_release_s": 0.4666666666666667,
+        "fps": 30,
+        "frames": 198,
+        "duration_s": 6.566666666666666,
+        "box_mass_kg": 5.0,
+        "box_dimensions_m": [
+          0.41320306062698364,
+          0.41320306062698364,
+          0.41320306062698364
+        ],
+        "final_box_to_goal_m": 0.1106514260172844,
+        "final_box_speed_mps": 0.05535224452614784,
+        "stable_no_hand_contact_s": 1.3,
+        "source": "PhysX rollout on original humanoid. Released CooHOI SingleAgent actor + smoothing of joint commands + feedback based arm release once the box is supported by the floor. No trajectory retiming."
+      },
+      "reference_file": "data/motions/humanoid/humanoid_carry_box_reference.npz",
+      "object_track": "data/motions/humanoid/humanoid_carry_box_box_track.npy",
+      "object_asset": "data/assets/objects/carry_box.usd"
+    },
+    "sofa003": {
+      "motion_name": "samp_sofa003",
+      "motion_file": "data/motions/humanoid/humanoid_sofa003.pkl",
+      "frames": 172,
+      "fps": 30,
+      "duration_s": 5.7,
+      "object": "SAMP sofa",
+      "source": "Retargeted SAMP sofa003_stageII reference, with local SAMP research assets.",
+      "environment_config": "data/envs/mira_monotone_humanoid_sofa003_env.yaml",
+      "training_args": "args/mira_monotone_humanoid_sofa003_args.txt",
+      "training_run": "output/mira_cmnn64_group_rms_sofa003_2000_512_seed0_20261121",
+      "mira_training": {
+        "from_zero": true,
+        "updates": 2000,
+        "num_envs": 512,
+        "seed": 0
+      },
+      "object_asset": "data/assets/objects/samp_sofa003.usd"
+    },
+    "soccer_spin_kick": {
+      "motion_name": "spin_kick_with_ball_track",
+      "motion_file": "data/motions/humanoid/humanoid_soccer_spin_kick.pkl",
+      "object_track": "data/motions/humanoid/humanoid_soccer_spin_kick_ball_track.npy",
+      "frames": 47,
+      "fps": 30,
+      "duration_s": 1.5333333333,
+      "object": "freely simulated football",
+      "source": "Isaac Lab reference rollout using the pre-existing Spin Kick policy; the listed interaction run learned from this reference with a fresh model.",
+      "actor_checkpoint": "output/mira_cmnn64_group_rms_spinkick_2000_8192_seed0_20261115/model.pt",
+      "environment_config": "data/envs/mira_monotone_humanoid_soccer_spin_kick_env.yaml",
+      "training_args": "args/mira_monotone_humanoid_soccer_spin_kick_args.txt",
+      "training_run": "output/mira_cmnn64_group_rms_soccer_spin_kick_2000_512_seed0_20261121",
+      "mira_training": {
+        "from_zero": true,
+        "updates": 2000,
+        "num_envs": 512,
+        "seed": 0
+      },
+      "reference_audit": {
+        "lane": 22,
+        "foot": "right_foot",
+        "contact_frame": 34,
+        "first_ball_moved_frame": 34,
+        "peak_ball_xy_speed_mps": 5.537664413452148,
+        "ball_xy_displacement_m": 2.557210419116036,
+        "peak_ball_center_height_m": 0.11050000041723251,
+        "max_humanoid_position_change_vs_no_ball_m": 0.005332054570317268,
+        "initial_ball_xy": [
+          -0.39317203924665095,
+          0.409415856025809
+        ],
+        "score": 2.442150145930664,
+        "source": "Actual Isaac Lab physics rollout of the original 28-DOF humanoid using the existing MIRA Spin Kick checkpoint. The stationary football is freely simulated and the impulse is from the right foot.",
+        "actor_checkpoint": "output/mira_cmnn64_group_rms_spinkick_2000_8192_seed0_20261115/model.pt",
+        "exported_fps": 30,
+        "exported_frames": 47,
+        "exported_duration_s": 1.5333333333333334,
+        "exported_ball_xy_displacement_m": 1.6395838260650635,
+        "right_foot_impulse_N_s": 3.4526705741882324
+      },
+      "object_asset": "data/assets/objects/soccer_ball.usd"
+    }
+  }
+}

@@ -143,8 +143,10 @@ def infer_method(
         return "AMP"
     if agent_name == "ADD":
         return "ADD"
-    if agent_name in ("DARE", "DAREMONOTONE"):
-        return "DARE"
+    if agent_name in ("MIRA", "MIRAMONOTONE", "DARE", "DAREMONOTONE"):
+        return "MIRA"
+    if agent_name in ("MIRAABLATION", "DAREABLATION"):
+        return "MIRA Ablation"
     return agent_name or env_name or "unknown"
 
 

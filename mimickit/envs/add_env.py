@@ -32,6 +32,13 @@ class ADDEnv(amp_env.AMPEnv):
         return
     
     def _update_disc_obs(self, env_ids=None):
+        disc_obs = self._compute_policy_disc_obs(env_ids)
+        if (env_ids is None):
+            self._disc_obs_buf[:] = disc_obs
+        else:
+            self._disc_obs_buf[env_ids] = disc_obs
+
+    def _compute_policy_disc_obs(self, env_ids):
         root_pos = self._disc_hist_root_pos.get_all()
         root_rot = self._disc_hist_root_rot.get_all()
         root_vel = self._disc_hist_root_vel.get_all()
@@ -49,7 +56,7 @@ class ADDEnv(amp_env.AMPEnv):
             dof_vel = dof_vel[env_ids]
             body_pos = body_pos[env_ids]
 
-        disc_obs = compute_disc_obs(root_pos=root_pos,
+        return compute_disc_obs(root_pos=root_pos,
                                   root_rot=root_rot, 
                                   root_vel=root_vel,
                                   root_ang_vel=root_ang_vel,
@@ -58,13 +65,6 @@ class ADDEnv(amp_env.AMPEnv):
                                   body_pos=body_pos,
                                   global_obs=self._global_obs)
 
-        if (env_ids is None):
-            self._disc_obs_buf[:] = disc_obs
-        else:
-            self._disc_obs_buf[env_ids] = disc_obs
-
-        return
-    
     def _update_disc_obs_demo(self, env_ids=None):
         if (env_ids is None):
             motion_ids = self._motion_ids

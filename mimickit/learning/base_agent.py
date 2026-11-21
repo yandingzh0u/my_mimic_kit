@@ -289,6 +289,9 @@ class BaseAgent(torch.nn.Module):
                 "not approximated.")
         for key, expected_val in expected_metadata.items():
             saved_val = metadata.get(key, expected_val)
+            if (key == "agent_class"
+                    and saved_val in getattr(self, "CHECKPOINT_AGENT_ALIASES", ())):
+                continue
             if (saved_val != expected_val):
                 raise ValueError(
                     "Checkpoint {} mismatch: saved {!r}, current {!r}."

@@ -38,7 +38,7 @@ METRICS = (
 )
 GRID = np.array([1, *range(101, 2000, 100), 2000]) * SAMPLES_PER_UPDATE
 GRID_PROGRESS = GRID / MAX_SAMPLES
-ABLATION_ROOT = BENCHMARK / "dare_ablation_backflip_matched_init_2000_8192_seed0_20261114"
+ABLATION_ROOT = BENCHMARK / "mira_ablation_backflip_matched_init_2000_8192_seed0_20261114"
 VARIANTS = (
     ("MIRA", None),
     ("w/o Monotone Modeling", "no_a"),
@@ -54,14 +54,14 @@ def load_lines(path: Path) -> list[dict]:
 def run_path(method: str, motion: str) -> Path:
     if method == "MIRA":
         candidates = sorted(BENCHMARK.glob(
-            f"dare_cmnn64_group_rms_{motion}_2000_8192_seed0_*"), reverse=True)
+            f"mira_cmnn64_group_rms_{motion}_2000_8192_seed0_*"), reverse=True)
         for path in candidates:
             source = path / "train_metrics.jsonl"
             samples = TERMINAL_UPDATES.get((method, motion), UPDATES) * SAMPLES_PER_UPDATE
             if source.exists() and any(sample_count(row) == samples
                                        for row in load_lines(source)):
                 return path
-        return BENCHMARK / f"dare_cmnn64_group_rms_{motion}_2000_8192_seed0_MISSING"
+        return BENCHMARK / f"mira_cmnn64_group_rms_{motion}_2000_8192_seed0_MISSING"
     return BENCHMARK / f"{method.lower()}_{motion}_2k_8192_seed0"
 
 
@@ -366,7 +366,7 @@ def export_data(runs: dict, ablations: dict) -> None:
     }
     (GENERATED / "mira_learning_curve_data.json").write_text(json.dumps(curves, indent=2, allow_nan=False) + "\n")
     with (GENERATED / "mira_per_motion_seed0.csv").open("w", newline="") as file:
-        writer = csv.writer(file)
+        writer = csv.writer(file, lineterminator="\n")
         writer.writerow(["motion", "method", "seed", "ppo_updates", "samples",
                          *[metric for metric, _, _ in METRICS],
                          "test_episode_length", "nominal_horizon_steps", "complete", "source"])

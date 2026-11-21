@@ -1,0 +1,26 @@
+#usda 1.0
+(
+    defaultPrim = "Asset"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+def Xform "Asset" (
+    prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+){
+    float physics:mass = 5.0
+    def Cube "geom" (
+        prepend apiSchemas = ["PhysicsCollisionAPI", "MaterialBindingAPI"]
+    ){
+        double size = 1
+        double3 xformOp:scale = (0.413203061, 0.413203061, 0.413203061)
+        uniform token[] xformOpOrder = ["xformOp:scale"]
+        rel material:binding:physics = </Asset/physicsMaterial>
+    }
+    def Material "physicsMaterial" (
+        prepend apiSchemas = ["PhysicsMaterialAPI"]
+    ){
+        float physics:staticFriction = 1.0
+        float physics:dynamicFriction = 1.0
+        float physics:restitution = 0.0
+    }
+}

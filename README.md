@@ -15,7 +15,7 @@ Instructions for each method are available here:
 - [ASE - Adversarial Skill Embeddings](docs/README_ASE.md)
 - [LCP - Lipschitz-Constrained Policies](docs/README_LCP.md)
 - [ADD - Adversarial Differential Discriminator](docs/README_ADD.md)
-- [DARE - Constrained Monotonic Neural Network discriminator](docs/README_DARE.md)
+- [MIRA - Constrained Monotonic Neural Network discriminator](docs/README_MIRA.md)
 - [SMP - Score-Matching Motion Priors](docs/README_SMP.md)
 
 ---
@@ -134,6 +134,8 @@ where 3D rotations are specified using 3D exponential maps. Joint rotations are 
 [root position (3D), root rotation (3D), abdomen (3D), neck (3D), right_shoulder (3D), right_elbow (1D), left_shoulder (3D), left_elbow (1D), right_hip (3D), right_knee (1D), right_ankle (3D), left_hip (3D), left_knee (1D), left_ankle (3D)]
 ```
 The rotations of 3D joints are represented using 3D exponential maps, and the rotations of 1D joints are represented using 1D rotation angles.
+
+The humanoid motion directory also contains the carry, sofa, and soccer interaction references. Their [motion index](data/motions/humanoid/interaction_motions.json) lists the scene assets, environment arguments, training runs, and reference provenance. Use the listed argument file with `mimickit/run.py` to launch a fresh run. The SAMP motion and sofa asset are local research files; see the [external asset notes](data/external_interaction_assets/README.md).
 
 
 ## Motion Retargeting

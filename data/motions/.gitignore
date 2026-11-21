@@ -1,2 +1,9 @@
 *
 !.gitignore
+!/humanoid/
+!/humanoid/humanoid_carry_box.pkl
+!/humanoid/humanoid_carry_box_reference.npz
+!/humanoid/humanoid_carry_box_box_track.npy
+!/humanoid/humanoid_soccer_spin_kick.pkl
+!/humanoid/humanoid_soccer_spin_kick_ball_track.npy
+!/humanoid/interaction_motions.json

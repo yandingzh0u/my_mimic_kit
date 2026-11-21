@@ -22,8 +22,8 @@ from PAPER.tools.evaluation.evaluate_checkpoint import (
 from PAPER.tools.evaluation.input_geometry import InputGeometryAccumulator
 
 
-def test_monotone_agent_is_evaluated_under_dare_method_label():
-    assert infer_method({"agent_name": "DAREMonotone"}, {"env_name": "add"}) == "DARE"
+def test_monotone_agent_is_evaluated_under_mira_method_label():
+    assert infer_method({"agent_name": "MIRAMonotone"}, {"env_name": "add"}) == "MIRA"
 
 
 def test_paired_reward_adapter_avoids_signed_input_normalization():
@@ -111,7 +111,7 @@ def _summary(seed, value, source):
     return {
         "_source_file": source,
         "metadata": {
-            "method": "DARE",
+            "method": "MIRA",
             "motion": "roll",
             "representation": None,
             "condition": "nominal",

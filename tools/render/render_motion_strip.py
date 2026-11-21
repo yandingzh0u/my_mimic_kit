@@ -6,7 +6,7 @@ motion file and every prop is spawned as visual-only geometry (no physics), so
 no rigid-body setup is needed and the frame poses are exact.
 
 Unlike `render_motion_frames.py` this keeps the ground and the sky visible,
-matching the look of the existing `PAPER/figures/dare_*_10.png` strips.
+matching the look of the existing `PAPER/figures/mira_*_10.png` strips.
 
 Standalone: nothing under `mimickit/` is modified. `view_motion` forgets to
 forward `record_video`, and `IsaacLabEngine` only builds lights/camera when
@@ -73,7 +73,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--prop-size", default="0.5,0.4,0.4")
     p.add_argument("--char-color", default="0.2,0.25,0.7",
                    help="'r,g,b' tint. The default matches the blue cast used by "
-                        "the paper's dare_*_10.png strips; 'natural' keeps the "
+                        "the paper's mira_*_10.png strips; 'natural' keeps the "
                         "asset materials (the G1 USD has none, so it renders white)")
     p.add_argument("--no-ground", action="store_true")
     p.add_argument("--no-sky", action="store_true")

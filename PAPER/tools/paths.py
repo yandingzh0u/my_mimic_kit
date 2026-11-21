@@ -37,5 +37,9 @@ def resolve_relocated_path(value: str | Path) -> Path:
             suffix = relative.relative_to(old)
         except ValueError:
             continue
-        return REPO_ROOT / new / suffix
+        relative = Path(new) / suffix
+        break
+    parts = relative.parts
+    if len(parts) > 1 and parts[0] == "output" and parts[1].startswith("dare_"):
+        relative = Path(parts[0], "mira_" + parts[1][5:], *parts[2:])
     return REPO_ROOT / relative

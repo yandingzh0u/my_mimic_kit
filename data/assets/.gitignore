@@ -1,2 +1,5 @@
 *
 !.gitignore
+!/objects/
+!/objects/carry_box.usd
+!/objects/soccer_ball.usd

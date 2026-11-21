@@ -2,7 +2,7 @@
 """Compose per-motion frame folders into a stacked strip figure.
 
 Each row is one motion, laid out left to right like
-`PAPER/figures/dare_climb_10.png`; rows are stacked top to bottom.
+`PAPER/figures/mira_climb_10.png`; rows are stacked top to bottom.
 
 Example
 -------

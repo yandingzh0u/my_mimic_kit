@@ -1,0 +1,11 @@
+--mode train
+--num_envs 512
+--max_samples 32768000
+--rand_seed 0
+--visualize false
+
+--engine_config data/engines/isaac_lab_engine.yaml
+--env_config data/envs/mira_monotone_humanoid_sofa003_env.yaml
+--agent_config data/agents/mira_monotone_humanoid_agent.yaml
+
+--out_dir output/mira_cmnn64_group_rms_sofa003_repro

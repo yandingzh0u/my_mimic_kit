@@ -1,0 +1,28 @@
+#usda 1.0
+(
+    defaultPrim = "Asset"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+def Xform "Asset" (
+    prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+)
+{
+    float physics:mass = 0.43
+    def Sphere "ball" (
+        prepend apiSchemas = ["PhysicsCollisionAPI", "MaterialBindingAPI"]
+    )
+    {
+        double radius = 0.11
+        color3f[] primvars:displayColor = [(0.88, 0.73, 0.23)]
+        rel material:binding:physics = </Asset/physicsMaterial>
+    }
+    def Material "physicsMaterial" (
+        prepend apiSchemas = ["PhysicsMaterialAPI"]
+    )
+    {
+        float physics:staticFriction = 0.65
+        float physics:dynamicFriction = 0.55
+        float physics:restitution = 0.28
+    }
+}

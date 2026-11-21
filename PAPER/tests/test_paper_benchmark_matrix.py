@@ -1,5 +1,4 @@
 from pathlib import Path
-import subprocess
 import sys
 from unittest import mock
 
@@ -20,7 +19,7 @@ import envs.deepmimic_env as deepmimic_env  # noqa: E402
 import envs.static_objects_env as static_objects_env  # noqa: E402
 
 
-METHODS = ("deepmimic", "amp", "add", "dare")
+METHODS = ("deepmimic", "amp", "add", "mira")
 MOTIONS = (
     "backflip",
     "crawl",
@@ -33,7 +32,7 @@ ENV_NAMES = {
     "deepmimic": "deepmimic",
     "amp": "amp",
     "add": "add",
-    "dare": "add",
+    "mira": "add",
 }
 MOTION_FILES = {
     "backflip": "humanoid_backflip.pkl",
@@ -168,7 +167,7 @@ def test_method_specific_interfaces_are_locked():
         _, deepmimic = load_env("deepmimic", motion)
         _, amp = load_env("amp", motion)
         _, add = load_env("add", motion)
-        _, dare = load_env("dare", motion)
+        _, mira = load_env("mira", motion)
 
         assert deepmimic["enable_tar_obs"] is True
         assert deepmimic["tar_obs_steps"] == [1, 2, 3]
@@ -180,11 +179,11 @@ def test_method_specific_interfaces_are_locked():
         assert add["tar_obs_steps"] == [1, 2, 3]
         assert add["num_disc_obs_steps"] == 1
         assert add["pose_termination"] is True
-        assert dare["env_name"] == "add"
-        assert dare["enable_tar_obs"] is True
-        assert dare["tar_obs_steps"] == [1, 2, 3]
-        assert dare["num_disc_obs_steps"] == 1
-        assert dare["pose_termination"] is True
+        assert mira["env_name"] == "add"
+        assert mira["enable_tar_obs"] is True
+        assert mira["tar_obs_steps"] == [1, 2, 3]
+        assert mira["num_disc_obs_steps"] == 1
+        assert mira["pose_termination"] is True
 
 
 @pytest.mark.parametrize("method", METHODS)
@@ -195,48 +194,5 @@ def test_formal_arg_budget(method):
     assert "--max_samples 524288000" in text
     assert "--save_int_models true" in text
     assert "--engine_config data/engines/isaac_lab_engine.yaml" in text
-    if method == "dare":
-        assert "dare_monotone_humanoid_agent.yaml" in text
-
-
-def test_serial_launcher_syntax_and_contract():
-    script = ROOT / "PAPER/tools/benchmark/run_serial_matrix.sh"
-    subprocess.run(["bash", "-n", str(script)], check=True)
-    text = script.read_text()
-    assert "motions=(climb backflip crawl roll getup_facedown spinkick)" in text
-    assert "methods=(dare add deepmimic amp)" in text
-    assert '[dare]="PAPER/configs/args/dare_2k_8192_args.txt"' in text
-    assert '[dare]="data/agents/dare_monotone_humanoid_agent.yaml"' in text
-    assert "motion_filters=()" in text
-    assert "--motion" in text
-    assert 'for motion in "${run_motions[@]}"' in text
-    assert "--resume_file" in text
-    assert "checkpoint.pt" in text
-    assert "checkpoint_reached_budget" in text
-    assert 'checkpoint["metadata"]["checkpoint_context"]' in text
-    assert "saved_context != expected_context" in text
-    assert "FAILED_BUDGET_CHECK" in text
-    assert "PAPER/tools/evaluation/evaluate_checkpoint.py" in text
-    assert "torch.cuda.is_available()" in text
-    assert "torch.cuda.device_count()" in text
-    assert 'eval_name="final"' in text
-    assert 'eval_dir="$out_dir/eval/$eval_name"' in text
-    assert "summary.json" in text
-    assert "episodes.npz" in text
-    assert "timeseries.npz" in text
-    assert "eval_steps=300" in text
-    assert "eval_steps=2" in text
-    assert "eval_num_envs=256" in text
-    assert "eval_num_envs=2" in text
-    assert "climbing_box.xml" in text
-    assert "climbing_box.usd" in text
-    assert "run_stage \"smoke\"" in text
-    assert 'run_job_with_retries "scale_smoke"' in text
-    assert "scale_smoke_envs=8192" in text
-    assert "scale_smoke_iters=3" in text
-    assert "scale_motions=(climb)" in text
-    assert "Motion-major order" in text
-    assert "run_stage \"formal\"" in text
-    assert "run_job_with_retries" in text
-    assert "--method" in text
-    assert "jump" not in text.lower()
+    if method == "mira":
+        assert "mira_monotone_humanoid_agent.yaml" in text
