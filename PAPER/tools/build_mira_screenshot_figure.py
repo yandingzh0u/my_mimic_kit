@@ -20,15 +20,19 @@ from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 from pptx.util import Inches, Pt
 
 ROOT = Path(__file__).resolve().parents[2]
-DATA = ROOT / 'PAPER/artifacts/screenshots/mira_20261115'
+DATA = ROOT / 'PAPER/artifacts/screenshots'
+ORIGINAL = DATA / 'mira_20261115'
+INTERACTIONS = DATA / 'mira_20261121_interactions'
+BACKFLIP_CAPTURE = DATA / 'mira_20261121_backflip'
 OUT = ROOT / 'PAPER/figures'
 NAME = 'mira_rollout_screenshots'
 # Six chronological frames per row. The longer strips continue in a second
 # row rather than shrinking twelve whole-body views into a single row.
-MOTIONS = [('getup_facedown', 'Get-Up', 1.42), ('crawl', 'Crawl', 1.02),
+MOTIONS = [('sofa', 'Sofa Sit', 1.42), ('carry', 'Box Carry', 1.42),
            ('backflip', 'Backflip', 1.42), ('climb', 'Climb', 1.45),
-           ('roll', 'Roll', 1.42), ('spinkick', 'Spin Kick', 1.42)]
-DOUBLE_MOTIONS = {'backflip', 'climb', 'roll', 'spinkick'}
+           ('roll', 'Roll', 1.42), ('soccer', 'Soccer', 1.42)]
+DOUBLE_MOTIONS = {'backflip', 'climb', 'roll'}
+PROP_MOTIONS = {'sofa', 'carry', 'soccer'}
 W, GAP, LABEL, RIGHT, ROW_GAP = 16.0, .040, 1.18, .08, .11
 TILE_W = (W - LABEL - RIGHT - 5 * GAP) / 6
 ROW_COUNT = sum(2 if key in DOUBLE_MOTIONS else 1 for key, _, _ in MOTIONS)
@@ -38,27 +42,46 @@ H = sum(h * (2 if key in DOUBLE_MOTIONS else 1) for key, _, h in MOTIONS) + ROW_
 def load():
     items = []
     for motion, label, height in MOTIONS:
-        directory = DATA / motion
+        if motion == 'backflip':
+            directory = BACKFLIP_CAPTURE
+        else:
+            directory = (INTERACTIONS if motion in PROP_MOTIONS else ORIGINAL) / motion
         meta = json.loads((directory / 'metadata.json').read_text())
         expected = 12 if motion in DOUBLE_MOTIONS else 6
         assert len(meta['frames']) == expected, (motion, len(meta['frames']))
         assert meta['actual_policy_rollout'] and meta['deterministic_mean_action']
-        assert meta['training_updates'] == (3000 if motion == 'climb' else 2000)
+        assert meta['training_updates'] == {'climb': 3000, 'soccer': 61}.get(motion, 2000)
+        if motion in PROP_MOTIONS:
+            assert meta['done_flag'] == 2
+            assert meta['frames'][-1]['step'] == meta['executed_steps']
+        if motion == 'soccer':
+            assert meta['motion'] == 'cmu_10_02_physics'
+            assert meta['archive_replay_check']['ball_max_abs_position_delta_m'] < .01
         images, boxes = [], []
         for entry in meta['frames']:
             path = directory / entry['file']
             assert hashlib.sha256(path.read_bytes()).hexdigest() == entry['sha256']
             image = Image.open(path).convert('RGB')
             rgb = np.array(image).astype(float)
-            mask = ((rgb[:, :, 1] > rgb[:, :, 0] + 25) &
-                    (rgb[:, :, 2] > rgb[:, :, 0] + 25) &
-                    (rgb[:, :, 1] > 65))
+            r, g, b = rgb.transpose(2, 0, 1)
+            mask = (g > r + 25) & (b > r + 25) & (g > 65)
+            assert mask.sum() > 100, (motion, entry['file'], 'robot')
+            if motion == 'sofa':
+                # The dark neutral sofa sits below the horizon on a light floor.
+                prop = ((rgb.max(axis=2) < 163) & (np.ptp(rgb, axis=2) < 22)
+                        & (np.arange(len(rgb))[:, None] > .30 * len(rgb)))
+                assert prop.sum() > 100, (motion, entry['file'], 'sofa')
+                mask |= prop
+            elif motion == 'carry' or (motion == 'soccer' and entry != meta['frames'][-1]):
+                # Include the brown box and red flag, or the gold ball before
+                # it leaves the last soccer frame.
+                prop = ((r > g + 10) & (r > b + 24))
+                assert prop.sum() > 100, (motion, entry['file'], 'prop')
+                mask |= prop
             yy, xx = np.nonzero(mask)
-            assert len(xx) > 100, (motion, entry['file'])
             boxes.append([xx.min(), yy.min(), xx.max(), yy.max()])
             images.append((entry, path, image))
-        # Compute one common crop from the union of the entire motion's body
-        # silhouettes. Thus there is no frame-by-frame change of robot scale.
+        # One crop per motion preserves the scale and world-relative movement.
         boxes = np.array(boxes)
         x0, y0 = boxes[:, :2].min(axis=0)
         x1, y1 = boxes[:, 2:].max(axis=0)
@@ -140,7 +163,7 @@ def build(items):
             caption.fill.fore_color.rgb = RGBColor(255, 255, 255)
         y += total_h + ROW_GAP
     slide.notes_slide.notes_text_frame.text = json.dumps(
-        {'source': str(DATA.relative_to(ROOT)),
+        {'sources': [str(path.relative_to(ROOT)) for path in (ORIGINAL, INTERACTIONS, BACKFLIP_CAPTURE)],
          'description': 'Real simulator RGB camera frames; each image remains a raster capture.',
          'layout_changes': 'Centered crop per motion, whitespace, labels only.',
          'provenance': [meta for _, _, _, meta, _ in items]}, indent=2)
@@ -159,7 +182,8 @@ def build(items):
              'checkpoint_sha256': meta['model_sha256'],
              'capture_steps': [frame[0]['step'] for frame in frames],
              'rows': 2 if motion in DOUBLE_MOTIONS else 1,
-             'common_crop_contains_all_robot_silhouettes': True}
+             'common_crop_contains_all_robot_silhouettes': True,
+             'common_crop_contains_visible_props': motion in PROP_MOTIONS}
             for motion, _, _, meta, frames in items],
         'total_frames': total_frames, 'row_count': ROW_COUNT,
         'slide_count': 1, 'embedded_movable_screenshots': total_frames,
@@ -169,7 +193,7 @@ def build(items):
         'image_integrity': 'Every official RGB screenshot is SHA-256 verified against capture metadata.',
         'files': {f'{NAME}.{ext}': hashlib.sha256((OUT / f'{NAME}.{ext}').read_bytes()).hexdigest()
                   for ext in ('png', 'pptx', 'pdf')}}
-    (DATA / 'validation.json').write_text(json.dumps(validation, indent=2) + '\n')
+    (INTERACTIONS / 'validation.json').write_text(json.dumps(validation, indent=2) + '\n')
     print(f'Wrote {NAME}: {total_frames} actual simulator frames; {W:.2f} × {H:.2f} inches')
 
 

@@ -1,0 +1,5 @@
+engine_name: isaac_lab
+control_mode: pos
+control_freq: 60
+sim_freq: 240
+env_spacing: 10
