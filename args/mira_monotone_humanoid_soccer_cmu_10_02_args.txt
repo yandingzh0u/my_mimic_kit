@@ -1,0 +1,11 @@
+--mode train
+--num_envs 512
+--max_samples 32768000
+--rand_seed 0
+--visualize false
+
+--engine_config data/engines/isaac_lab_soccer_cmu_10_02_engine.yaml
+--env_config data/envs/mira_monotone_humanoid_soccer_cmu_10_02_env.yaml
+--agent_config data/agents/mira_monotone_humanoid_soccer_cmu_10_02_agent.yaml
+
+--out_dir output/mira_cmnn64_group_rms_soccer_cmu_10_02_2000_512_seed0_20261121

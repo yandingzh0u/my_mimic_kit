@@ -2,11 +2,13 @@
 
 import math
 
+import numpy as np
 import torch
 
 from engines.engine import ObjType
 from envs.add_env import ADDEnv
 from envs.base_env import EnvMode
+from envs.char_env import CharEnv
 from util import torch_util
 
 
@@ -46,8 +48,11 @@ class SoccerEnv(ADDEnv):
                 times = times.masked_fill(draw < 0.5, 0)
         return ids, times
 
-    def _ref_state_init(self, env_ids):
+    def _init_soccer_character(self, env_ids):
         super()._ref_state_init(env_ids)
+
+    def _ref_state_init(self, env_ids):
+        self._init_soccer_character(env_ids)
         n = len(env_ids)
         ball_pos = self._ball_pos.expand(n, -1)
         if self._mode == EnvMode.TRAIN and self._reset_speed_radius:
@@ -94,3 +99,47 @@ class SoccerEnv(ADDEnv):
         residual = 2 * (actions - low) / (high - low) - 1
         available = torch.where(residual >= 0, high - guide, guide - low)
         super()._apply_action(guide + residual.clamp(-1, 1) * available)
+
+
+class CMUSoccerEnv(SoccerEnv):
+    """The CMU 10_02 task: a learned residual around the recorded joint guide."""
+
+    def __init__(self, env_config, engine_config, num_envs, device, visualize,
+                 record_video=False):
+        config = env_config.copy()
+        self._residual_limit = float(config.pop("residual_limit_rad"))
+        with np.load(config.pop("physical_reference"), allow_pickle=False) as ref:
+            self._reference_fps = int(ref["fps"])
+            self._guide = {name: torch.as_tensor(ref[name], device=device)
+                           for name in ("commands", "root_vel", "root_ang_vel", "dof_vel")}
+        steps = len(self._guide["commands"])
+        if (self._reference_fps != engine_config["control_freq"] or
+                not math.isclose(steps / self._reference_fps, config["episode_length"])):
+            raise ValueError("CMU timing must match the archived guide")
+        if not math.isfinite(self._residual_limit) or self._residual_limit <= 0:
+            raise ValueError("CMU residual limit must be positive")
+        super().__init__(config, engine_config, num_envs, device, visualize, record_video)
+        dofs = len(self._action_bound_low)
+        expected = {"commands": (steps, dofs), "root_vel": (steps + 1, 3),
+                    "root_ang_vel": (steps + 1, 3), "dof_vel": (steps + 1, dofs)}
+        if any(v.shape != expected[k] or not torch.isfinite(v).all()
+               for k, v in self._guide.items()):
+            raise ValueError("CMU guide arrays must match the episode and the robot")
+
+    def _reference_frame(self):
+        return (self._get_motion_times() * self._reference_fps).round().long()
+
+    def _init_soccer_character(self, env_ids):
+        super()._init_soccer_character(env_ids)
+        frames = self._reference_frame()[env_ids].clamp(0, len(self._guide["commands"]))
+        char_id = self._get_char_id()
+        # SoccerEnv adds the configured planar perturbation after these velocities.
+        for name in ("root_vel", "root_ang_vel", "dof_vel"):
+            getattr(self._engine, "set_" + name)(env_ids, char_id, self._guide[name][frames])
+
+    def _apply_action(self, actions):
+        low, high = self._action_bound_low, self._action_bound_high
+        residual = (2 * (actions - low) / (high - low) - 1).clamp(-1, 1)
+        commands = self._guide["commands"]
+        frame = self._reference_frame().clamp(0, len(commands) - 1)
+        CharEnv._apply_action(self, commands[frame] + self._residual_limit * residual)

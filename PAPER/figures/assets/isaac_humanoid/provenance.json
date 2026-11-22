@@ -1,0 +1,60 @@
+{
+  "renderer": "Isaac Lab / Isaac Sim RGB camera",
+  "embodiment": "data/assets/humanoid/humanoid.xml",
+  "paper_figure": "Same actual experiment humanoid, model and teal material as Fig. 2 Backflip",
+  "motion": "data/motions/humanoid/humanoid_backflip.pkl",
+  "checkpoint": "output/mira_cmnn64_group_rms_backflip_2000_8192_seed0_20261113/int_models/model_0000001999.pt",
+  "checkpoint_sha256": "ba365917d0567c68d0a337de3cf8e0c0b86fa0c98c3f5fef3f9ddd46fc4cb339",
+  "simulation_pose": "Actual deterministic mean-policy rollout, starting at reference time zero",
+  "reference_pose": "Synchronized motion-library pose rendered via native DeepMimic reference visualization",
+  "reference_time_s": 0.5,
+  "control_step": 15,
+  "processing": "The actual camera RGB values are preserved in robot pixels. Set gray scene and shadows transparent using the teal silhouette, then crop both images at identical scale.",
+  "frames": [
+    {
+      "file": "simulated.png",
+      "visible_object": "/World/envs/env_0/obj_0",
+      "camera_position_m": [
+        1.4372875187622873,
+        -2.649696766666818,
+        1.2827967658338022
+      ],
+      "camera_target_m": [
+        -0.03997858613729477,
+        0.03624160587787628,
+        0.5575934052467346
+      ],
+      "source_rgb_sha256": "a292f690aa3eb6562313a81fee279ad3cb46bc8f45fe58a48040899edb0fb677",
+      "cutout_sha256": "8f7c2d7438bee6763a7c57cd692c4f494834cc5d0bb1f0d0af19f7f6435b0ab2"
+    },
+    {
+      "file": "reference.png",
+      "visible_object": "/World/envs/env_0/obj_1",
+      "camera_position_m": [
+        3.4324596244918673,
+        -2.648950352601457,
+        1.31808229830832
+      ],
+      "camera_target_m": [
+        1.9551935195922852,
+        0.036988019943237305,
+        0.5928789377212524
+      ],
+      "source_rgb_sha256": "d7cd14a427271323f1df4ba65b2d8381ddb03d44973c6b199a4de22f9b5fcb60",
+      "cutout_sha256": "2dd2cdf72c0e50dd734b5698260cbdab10bccdb053bf64e6669a5124586fcaf4"
+    }
+  ],
+  "source_for_figure_2": "PAPER/artifacts/screenshots/mira_20261121_backflip",
+  "mask_crop": [
+    335,
+    225,
+    460,
+    545
+  ],
+  "fig2_pose_check": {
+    "file": "PAPER/artifacts/screenshots/mira_20261121_backflip/frame_01_step_015.png",
+    "same_control_step": 15,
+    "humanoid_silhouette_iou": 0.9900168465714108,
+    "mean_absolute_scene_rgb_difference_8bit": 0.728759375
+  }
+}

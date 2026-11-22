@@ -1,4 +1,4 @@
-env_name: soccer
+env_name: soccer_cmu
 motion_name: cmu_10_02_physics
 char_file: data/assets/humanoid/humanoid.xml
 camera_mode: track
