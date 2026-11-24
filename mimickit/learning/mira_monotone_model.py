@@ -18,6 +18,7 @@ from util.carry_geometry import CarryGeometry
 
 
 MONOTONE_SCHEMA_VERSION = 4
+SIGNED_WEIGHT_SCHEMA_VERSION = 5
 HIDDEN_WIDTHS = (341, 512)
 METRIC_NAMES = ("root_pos", "root_rot", "body_pos", "body_rot",
                 "dof_vel", "root_vel", "root_ang_vel")
@@ -106,6 +107,25 @@ def positive_diagonal_linear(in_features, out_features, bias=True):
     layer = nn.Linear(in_features, out_features, bias=bias)
     parametrize.register_parametrization(layer, "weight", PositiveWeight())
     normalization = PositiveDiagonalRescaling(
+        in_features, device=layer.weight.device, dtype=layer.weight.dtype)
+    normalization.initialize_from_weight(layer.weight)
+    parametrize.register_parametrization(layer, "weight", normalization)
+    return layer
+
+
+class SignedMagnitudeDiagonalRescaling(PositiveDiagonalRescaling):
+    """Apply the same diagonal scales to signed weights as to their magnitudes."""
+    def forward(self, weight):
+        # If B bounds |W| entrywise, then |W x| <= B |x|. In this case
+        # B is exactly the production magnitude-normalized weight matrix.
+        return weight.sign() * super().forward(weight.abs())
+
+
+def signed_diagonal_linear(in_features, out_features, bias=True):
+    layer = nn.Linear(in_features, out_features, bias=bias)
+    with torch.no_grad():
+        layer.weight.abs_()  # Match MIRA at initialization, then allow both signs.
+    normalization = SignedMagnitudeDiagonalRescaling(
         in_features, device=layer.weight.device, dtype=layer.weight.dtype)
     normalization.initialize_from_weight(layer.weight)
     parametrize.register_parametrization(layer, "weight", normalization)
@@ -224,14 +244,19 @@ class MIRAMonotoneModel(ADDModel):
         self.register_buffer("_mira_schema_version", torch.tensor(2, dtype=torch.int64))
 
     def _build_disc(self, config, env):
+        self.disc_signed_weights = config.get("disc_signed_weights", False)
+        if not isinstance(self.disc_signed_weights, bool):
+            raise ValueError("disc_signed_weights must be a boolean")
+        linear = signed_diagonal_linear if self.disc_signed_weights else positive_diagonal_linear
         self._pair_metrics = ADDPairErrorMetrics(env)
         self._disc_energy = nn.Sequential(
-            positive_diagonal_linear(self._pair_metrics.feature_dim, HIDDEN_WIDTHS[0]), MixedELU(),
-            positive_diagonal_linear(HIDDEN_WIDTHS[0], HIDDEN_WIDTHS[1]), MixedELU(),
-            positive_diagonal_linear(HIDDEN_WIDTHS[1], 1, bias=False))
+            linear(self._pair_metrics.feature_dim, HIDDEN_WIDTHS[0]), MixedELU(),
+            linear(HIDDEN_WIDTHS[0], HIDDEN_WIDTHS[1]), MixedELU(),
+            linear(HIDDEN_WIDTHS[1], 1, bias=False))
         self._anchor_logit = nn.Parameter(torch.zeros(()))
-        self.register_buffer("_monotone_schema_version", torch.tensor(
-            MONOTONE_SCHEMA_VERSION, dtype=torch.int64))
+        self.disc_schema_version = (SIGNED_WEIGHT_SCHEMA_VERSION if self.disc_signed_weights
+                                    else MONOTONE_SCHEMA_VERSION)
+        self.register_buffer("_monotone_schema_version", torch.tensor(self.disc_schema_version, dtype=torch.int64))
 
     def pair_to_error_metrics(self, policy, reference):
         return self._pair_metrics(policy, reference)
@@ -262,7 +287,7 @@ class MIRAMonotoneModel(ADDModel):
                               strict, missing_keys, unexpected_keys, error_msgs):
         version = state_dict.get(prefix + "_monotone_schema_version")
         if (version is None or version.dtype != torch.int64 or version.numel() != 1
-                or int(version.item()) != MONOTONE_SCHEMA_VERSION):
+                or int(version.item()) != self.disc_schema_version):
             error_msgs.append("Cannot load a different monotone physical-error schema")
         old_marker = prefix + "_dare_schema_version"
         new_marker = prefix + "_mira_schema_version"

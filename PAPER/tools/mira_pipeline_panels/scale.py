@@ -1,113 +1,123 @@
-"""Panel (b): editable group-normalization illustration for the MIRA diagram."""
+"""Panel (b): two stages of group normalization, drawn in native PPT."""
 
 import math
 
 
 INK = '#101F3B'
 NAVY = '#102757'
-BLUE = '#1764BD'
-ORANGE = '#E97919'
+BLUE = '#1B57CF'
+ORANGE = '#EB7F15'
 RULE = '#AAC5E0'
-GRAPH_BG = '#F9FCFF'
+MATH = 'Liberation Serif'
+RMS_A, RMS_B = .62, 1.0
+
+
+def _example_norms(size):
+    """Orange and blue use different dimensionless per-component RMS values."""
+    return RMS_A * math.sqrt(size), RMS_B
 
 
 def draw(d):
     """Paint panel (b) inside the corresponding frame on the overview slide."""
-    def strip(y, number, title, symbol):
-        d.shape(22, y, 464, 31, ('#CFE3F8', '#BBD7F1'), r=8)
-        d.oval(34, y + 4.5, 22, 22, '#E4F1FC', NAVY, 1.35)
-        d.text(34, y + 4.3, 22, 22, str(number), 14, NAVY, True)
-        if symbol == 'σ':
-            d.text(69, y + 1, 251, 28, title, 18, INK, True, 'left')
-            d.text(319, y + 1, 17, 27, 'σ', 20, INK, False, font='Times New Roman', italic=True)
-            d.text(332, y + 14, 10, 14, 'g', 13, INK, False, font='Times New Roman', italic=True)
+    group_dimension = [('d', True, False), ('g', True, True)]
+
+    def strip(y, number, title):
+        d.shape(22, y, 464, 28, ('#D8E8FC', '#B2CEF5'), r=7)
+        d.oval(34, y + 3, 22, 22, '#DFEBFD', NAVY, 1.35)
+        d.text(34, y + 3, 22, 22, str(number), 14, NAVY, True)
+        d.text(68, y + 1, 250, 26, title, 17.7, INK, True, 'left')
+        if number == 1:
+            d.math(316, y, 39, 26, [('σ', True, False), ('g', True, True)], 20)
         else:
-            d.text(69, y + 1, 216, 28, title, 18, INK, True, 'left')
-            d.text(284, y + 1, 39, 27, '√d', 20, INK, False, font='Times New Roman', italic=True)
-            d.text(312, y + 14, 10, 14, 'g', 13, INK, False, font='Times New Roman', italic=True)
+            d.radical(277, y + 5, 28, 19, group_dimension, 18)
 
-    strip(458, 1, 'Normalize by historical scale', 'σ')
-    for x, icon_name, color, colors, border, label, unit in (
-        (28, 'pin', BLUE, ('#F6FCF0', '#EDF6E3'), '#CFDFC4', 'position', 'm'),
-        (111, 'rotation', BLUE, ('#F3F9FE', '#E6F1FA'), '#CCDEEC', 'rotation', 'rad'),
-        (192, 'gauge', '#144995', ('#FFF8EF', '#FAEBDD'), '#F1DAC1', 'velocity', 'rad · s⁻¹'),
+    def benefit(y, label):
+        d.shape(22, y, 464, 25, ('#F3FAEC', '#E5F3DA'), r=8)
+        d.check(44, y + 12.5, 8.6)
+        d.text(61, y, 417, 25, label, 13.5, '#183C24', True, 'left')
+
+    strip(458, 1, 'Normalize by historical scale')
+    card_y, card_h = 493, 112
+    for x, w, title in (
+        (28, 203, 'Physical errors'),
+        (289, 192, 'Dimensionless errors'),
     ):
-        d.shape(x, 500, 78, 83, colors, border, 1, 8)
-        d.icon(icon_name, x + 39, 520, 28, color)
-        d.text(x + 1, 534, 76, 20, label, 14, INK, True)
-        d.text(x + 1, 556, 76, 16, unit, 13, INK)
+        d.shape(x, card_y, w, card_h, ('#F4F8FF', '#EBF3FC'), '#91ACCD', 1.15, 8)
+        d.shape(x + .65, card_y + .65, w - 1.3, 34, ('#DFECFC', '#D5E5FC'), r=7)
+        d.shape(x + .65, card_y + 24, w - 1.3, 10.7, '#D5E5FC')
+        d.text(x + 2, 494, w - 4, 32, title, 16.5, INK, True)
 
-    d.poly([(275, 536), (289, 536), (289, 530), (303, 542), (289, 554), (289, 548), (275, 548)], '#8494A6')
-    d.shape(309, 500, 172, 83, ('#FAFCFF', '#F1F6FB'), '#C6D8E9', 1, 9)
-    for y, width, gradient, border in (
-        (511, 91, ('#A5D671', '#84BB51'), '#679B47'),
-        (535, 61, ('#B6DDF8', '#8CC3EE'), '#498FCE'),
-        (559, 127, ('#FFC77F', '#F5A447'), '#D78437'),
+    scales = (
+        ('pin', '#278B62', 'position', 'p', 'm',
+         ('#F0FAE9', '#E4F3DB'), '#BDDBAD', ('#8BCB5F', '#65AD47'), '#588F42', .60),
+        ('rotation', '#155DC6', 'rotation', 'r', 'rad',
+         ('#EDF6FF', '#D9EAFD'), '#AECCEA', ('#ADDAFF', '#71B4F6'), '#438CCF', .39),
+        ('gauge', '#184687', 'velocity', 'v', 'rad · s⁻¹',
+         ('#FFF8EE', '#FAEBD6'), '#F0D6B5', ('#FFC66D', '#F6A139'), '#D88831', .83),
+    )
+    for i, (icon, color, label, group, units, card, border, bar, bar_border,
+            bar_fraction) in enumerate(scales):
+        y = 532 + 22 * i
+        d.shape(35, y, 188, 18, card, border, .8, 4)
+        d.icon(icon, 51, y + 9, 16, color)
+        d.text(65, y, 59, 18, label, 14, INK, True, 'left')
+        d.text(128, y - .5, 9, 18, 'e', 15.5, INK, italic=True, font=MATH)
+        d.text(135, y - 1.4, 18, 11, f'({group})', 9.6, INK, italic=True, font=MATH)
+        d.line([(161, y + 1), (161, y + 17)], border, .7)
+        d.text(164, y, 55, 18, units, 12.2, INK)
+        d.shape(300, y + 2, 169, 14, '#D8E1EC', r=4)
+        d.shape(300, y + 2, 169 * bar_fraction, 14, bar, bar_border, .9, 4)
+
+    d.math(236, 530, 50, 24,
+           [('÷ ', False, False), ('σ', True, False), ('g', True, True)], 19)
+    d.poly([(241, 562), (264, 562), (264, 557), (279, 568),
+            (264, 579), (264, 574), (241, 574)], '#8292A1')
+    benefit(613, 'Puts different error types on dimensionless scales.')
+    d.line([(22, 645), (486, 645)], RULE, 1.2)
+
+    strip(652, 2, 'Normalize by group size')
+    x_axis, y_axis = 104, 782
+    d.line([(x_axis, y_axis), (338, y_axis)], NAVY, 1.8, arrow=True)
+    d.line([(x_axis, y_axis), (x_axis, 689)], NAVY, 1.8, arrow=True)
+    d.text(23, 696, 74, 16, 'Group input', 13.5, INK, True)
+    d.text(23, 712, 74, 16, 'L₂ norm', 13.5, INK, True)
+    d.text(147, 785, 118, 19, 'Group dimension', 14, INK, True, 'left')
+    d.math(260, 784, 24, 20, group_dimension, 17)
+
+    # A has lower per-component RMS than B. For paired inputs from the
+    # same group the orange norm would never be smaller than the blue norm.
+    dims = [1. + 11. * k / 40 for k in range(41)]
+    norms = [_example_norms(n) for n in dims]
+    for column, color in ((1, BLUE), (0, ORANGE)):
+        points = [(109 + 217 * (n - 1.) / 11., y_axis - 39 * v[column])
+                  for n, v in zip(dims, norms)]
+        curve = d.line(points, color, 2.9)
+        curve.name = ('Group B — with dimension scaling' if column
+                      else 'Group A — without dimension scaling')
+
+    d.shape(345, 712, 136, 58, ('#FAFDFF', '#EEF5FC'), '#A7BFD9', 1, 7)
+    for y, color, text in (
+        (727, ORANGE, 'Group A before'), (754, BLUE, 'Group B after'),
     ):
-        d.shape(320, y, 150, 14, '#E2EAF0', r=4)
-        d.shape(320, y, width, 14, gradient, border, 0.8, 4)
+        d.line([(353, y), (373, y)], color, 2.7)
+        d.text(379, y - 9, 97, 18, text, 12.8, INK, True, 'left')
 
-    d.shape(22, 592, 464, 34, ('#F6FCF2', '#E8F5E2'), r=8)
-    d.check(47, 609, 10)
-    d.text(66, 594, 411, 28, 'Reduces unit and scale differences across error types.', 14, '#183C24', True, 'left')
-    d.line([(22, 634), (486, 634)], RULE, 1.25)
+    benefit(825, 'Makes group norms comparable across different sizes.')
+    d.shape(52, 859, 409, 48, ('#ECF5FE', '#CFDEF4'), r=9)
+    d.text(58, 862, 127, 19, 'Group', 15.2, INK, True)
+    d.text(58, 880, 127, 20, 'Normalization', 15.2, INK, True)
+    d.shape(191, 859, 270, 48, ('#FCFEFF', '#EDF5FD'), '#91AFD1', 1, 8)
 
-    strip(645, 2, 'Normalize by group size', '√d')
+    def symbol_with_indices(x, y, symbol, size):
+        d.text(x, y, 13, 23, symbol, size, INK, italic=True, font=MATH)
+        d.text(x + 9, y + 12, 8, 11, 't', 10.3, INK, italic=True, font=MATH)
+        d.text(x + 12, y - 2, 19, 14, '(g)', 12.4, INK, italic=True, font=MATH)
 
-    # Equal per-component, scale-normalized errors produce a sqrt(d_g) L2
-    # norm before dimension normalization and a constant L2 norm after it.
-    # Both lines are editable PPT paths, with no measured data implied.
-    x_axis, y_axis = 118, 790
-    d.line([(x_axis, y_axis), (365, y_axis)], NAVY, 1.8, True)
-    d.line([(x_axis, y_axis), (x_axis, 688)], NAVY, 1.8, True)
-    d.text(25, 690, 79, 16, 'Group Input', 14, INK, True)
-    d.text(25, 708, 79, 16, 'L2 Norm', 14, INK, True)
-    d.text(174, 796, 136, 18, 'Group Dimension', 14, INK, True, 'left')
-    d.text(298, 796, 12, 18, 'd', 17, INK, False, font='Times New Roman', italic=True)
-    d.text(307, 807, 9, 10, 'g', 10, INK, False, font='Times New Roman', italic=True)
-    left, right = 121, 348
-    dim_min, dim_max = 1.0, 12.0
-    norm_at_one, norm_px = 764.0, 20.5
-    dims = [dim_min + (dim_max - dim_min) * k / 32 for k in range(33)]
-
-    def points(divisor):
-        return [
-            (left + (right - left) * (n - dim_min) / (dim_max - dim_min),
-             norm_at_one - norm_px * (math.sqrt(n) / divisor(n) - 1))
-            for n in dims
-        ]
-
-    d.line(points(lambda n: 1.0), ORANGE, 2.9)
-    d.line(points(math.sqrt), BLUE, 2.75)
-
-    d.shape(365, 711, 120, 65, GRAPH_BG, '#BDD1E4', 1, 7)
-    for y, color, text in ((730, ORANGE, 'Without'), (757, BLUE, 'With')):
-        d.line([(372, y), (399, y)], color, 2.7)
-        d.text(404, y - 10, 51, 18, text, 12, INK, True, 'left')
-        d.text(455, y - 11, 21, 19, '√d', 14, INK, False, font='Times New Roman', italic=True)
-        d.text(474, y, 7, 11, 'g', 9, INK, False, font='Times New Roman', italic=True)
-
-    d.shape(50, 830, 409, 75, ('#ECF5FE', '#CDE2F7'), r=11)
-    d.text(57, 842, 144, 21, 'Group', 17, INK, True)
-    d.text(57, 865, 144, 21, 'Normalization', 17, INK, True)
-    d.shape(207, 831, 251, 73, ('#FCFEFF', '#E9F4FD'), '#91AFD1', 1, 10)
-    # Typeset a native editable fraction, including explicit subscripts and
-    # superscripts in their own boxes rather than depending on fallback glyphs.
-    serif = 'Times New Roman'
-    d.text(230, 857, 16, 28, 'z', 24, INK, False, font=serif, italic=True)
-    d.text(242, 872, 8, 12, 't', 12, INK, False, font=serif, italic=True)
-    d.text(244, 849, 23, 18, '(g)', 15, INK, False, font=serif, italic=True)
-    d.text(272, 856, 19, 26, '=', 22, INK, False, font=serif)
-    d.text(355, 838, 15, 26, 'e', 23, INK, False, font=serif, italic=True)
-    d.text(368, 853, 8, 11, 't', 12, INK, False, font=serif, italic=True)
-    d.text(369, 834, 24, 17, '(g)', 15, INK, False, font=serif, italic=True)
-    d.line([(299, 868), (441, 868)], INK, 1.1)
-    d.text(300, 871, 52, 24, 'max(', 20, INK, False, 'left', font=serif)
-    d.text(343, 871, 17, 24, 'σ', 20, INK, False, font=serif, italic=True)
-    d.text(355, 886, 9, 13, 'g', 12, INK, False, font=serif, italic=True)
-    d.text(364, 871, 15, 24, ',', 20, INK, False, 'left', font=serif)
-    d.text(375, 871, 11, 24, 'ε', 20, INK, False, font=serif, italic=True)
-    d.text(387, 871, 11, 24, ')', 20, INK, False, font=serif)
-    d.text(399, 871, 34, 24, '√d', 20, INK, False, font=serif, italic=True)
-    d.line([(415, 876), (439, 876)], INK, 0.7)
-    d.text(429, 886, 9, 13, 'g', 12, INK, False, font=serif, italic=True)
+    symbol_with_indices(211, 871, 'z', 19.5)
+    d.text(244, 872, 24, 21, '=', 19.5, INK, font=MATH)
+    symbol_with_indices(343, 859, 'e', 19.5)
+    d.line([(277, 882), (440, 882)], INK, 1)
+    d.math(306, 882, 75, 22,
+           [('max(', False, False), ('σ', True, False), ('g', True, True),
+            (', ε)', False, False)], 17.7)
+    d.radical(383, 885, 27, 17, group_dimension, 17.7)

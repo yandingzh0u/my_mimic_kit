@@ -126,5 +126,5 @@ class MPOptimizer():
         return torch.sqrt(grad_sq_sum).item()
     
     def _clip_grads(self, max_norm):
-        torch.nn.utils.clip_grad_norm_(self._param_list, max_norm)
+        torch.nn.utils.clip_grad_norm_(self._param_list, max_norm, error_if_nonfinite=True)
         return

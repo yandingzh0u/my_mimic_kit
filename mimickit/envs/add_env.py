@@ -6,11 +6,27 @@ import util.torch_util as torch_util
 
 class ADDEnv(amp_env.AMPEnv):
     def __init__(self, env_config, engine_config, num_envs, device, visualize, record_video=False):
+        representation = env_config.get("disc_observation", "add")
+        if representation not in ("add", "amp"):
+            raise ValueError(f"Unsupported discriminator observation: {representation}")
+        self._use_amp_disc_obs = representation == "amp"
+        self._enable_tracking_reward = env_config.get("enable_tracking_reward", False)
         super().__init__(env_config=env_config, engine_config=engine_config, 
                          num_envs=num_envs, device=device, visualize=visualize,
                          record_video=record_video)
         return
     
+    def fetch_disc_obs_demo(self, num_samples):
+        if not self._use_amp_disc_obs:
+            return super().fetch_disc_obs_demo(num_samples)
+        # Sample expert motion independently of the task reset distribution.
+        ids = self._motion_lib.sample_motions(num_samples)
+        return self._compute_disc_obs_demo(ids, self._motion_lib.sample_time(ids))
+
+    def _update_reward(self):
+        if self._enable_tracking_reward:
+            deepmimic_env.DeepMimicEnv._update_reward(self)
+
     def _build_disc_obs_buffers(self):
         super()._build_disc_obs_buffers()
         self._disc_obs_demo_buf = torch.zeros_like(self._disc_obs_buf)
@@ -39,6 +55,8 @@ class ADDEnv(amp_env.AMPEnv):
             self._disc_obs_buf[env_ids] = disc_obs
 
     def _compute_policy_disc_obs(self, env_ids):
+        if self._use_amp_disc_obs:
+            return super()._compute_policy_disc_obs(env_ids)
         root_pos = self._disc_hist_root_pos.get_all()
         root_rot = self._disc_hist_root_rot.get_all()
         root_vel = self._disc_hist_root_vel.get_all()
@@ -82,6 +100,8 @@ class ADDEnv(amp_env.AMPEnv):
         return
     
     def _compute_disc_obs_demo(self, motion_ids, motion_times0):
+        if self._use_amp_disc_obs:
+            return super()._compute_disc_obs_demo(motion_ids, motion_times0)
         root_pos, root_rot, root_vel, root_ang_vel, joint_rot, dof_vel, body_pos = self._fetch_disc_demo_data(motion_ids, motion_times0)
 
         disc_obs = compute_disc_obs(root_pos=root_pos,

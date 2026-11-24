@@ -199,6 +199,13 @@ class AMPEnv(deepmimic_env.DeepMimicEnv):
         return
 
     def _update_disc_obs(self, env_ids=None):
+        disc_obs = self._compute_policy_disc_obs(env_ids)
+        if env_ids is None:
+            self._disc_obs_buf[:] = disc_obs
+        else:
+            self._disc_obs_buf[env_ids] = disc_obs
+
+    def _compute_policy_disc_obs(self, env_ids):
         root_pos = self._disc_hist_root_pos.get_all()
         root_rot = self._disc_hist_root_rot.get_all()
         root_vel = self._disc_hist_root_vel.get_all()
@@ -242,12 +249,7 @@ class AMPEnv(deepmimic_env.DeepMimicEnv):
                                   root_height_obs=self._root_height_obs,
                                   dof_vel_obs=self._disc_dof_vel_obs)
 
-        if (env_ids is None):
-            self._disc_obs_buf[:] = disc_obs
-        else:
-            self._disc_obs_buf[env_ids] = disc_obs
-
-        return
+        return disc_obs
 
     def _update_done(self):
         motion_times = self._get_motion_times()

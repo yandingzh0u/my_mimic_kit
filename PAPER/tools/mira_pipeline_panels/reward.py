@@ -120,38 +120,31 @@ def _label(d, x, y, point):
     _math(d, x + 2, y + 1, 37, 24, [_m('z'), _sub(point)], 19, ORANGE_TEXT)
 
 
-def _vector_arrow(d, x0, y0, x1, y1, color, width=3.1, head=14):
-    delta = hypot(x1 - x0, y1 - y0)
-    ux, uy = (x1 - x0) / delta, (y1 - y0) / delta
-    vx, vy = -uy, ux
-    tail_x, tail_y = x1 - head * ux, y1 - head * uy
-    d.line([(x0, y0), (tail_x, tail_y)], color, width)
-    d.poly([(x1, y1), (tail_x + .42 * head * vx, tail_y + .42 * head * vy),
-            (tail_x - .42 * head * vx, tail_y - .42 * head * vy)], color)
-
-
 def draw(d):
     left, top, right, bottom = 1130, 484, 1425, 793
     _contours(d, left, top, right, bottom)
     d.line([(1129, 793), (1444, 793)], NAVY, 2.1, arrow=True)
     d.line([(1129, 793), (1129, 470)], NAVY, 2.1, arrow=True)
 
-    d.text(1182, 799, 215, 24, 'Root Pos. Error', 17.5, TEXT, bold=True)
-    ylabel = d.text(1045, 620, 124, 24, 'Root Rot. Error', 17.5, TEXT, bold=True)
+    d.text(1144, 799, 265, 24, 'root pos. error', 16.0, TEXT, bold=True)
+    ylabel = d.text(977, 620, 260, 24, 'Normalized root rotation error', 16.0, TEXT, bold=True)
     ylabel.rotation = 270
 
     legend = d.shape(1142, 489, 171, 55, L_BLUE, '#92A9C7', 1.1, r=6)
     _gradient(legend, '#EDF4FE', '#DAE7F7', 270)
     _point(d, 1159, 503, 14, '#43AE2B')
     _point(d, 1159, 528, 14, ORANGE)
-    d.text(1173, 493, 133, 19, '= zero / ideal sample', 12.5, TEXT, bold=True, align='left')
-    d.text(1173, 518, 133, 19, '= policy samples', 12.5, TEXT, bold=True, align='left')
+    d.text(1173, 493, 133, 19, 'Ideal sample', 13.5, TEXT, bold=True, align='left')
+    d.text(1173, 518, 133, 19, 'Policy samples', 13.5, TEXT, bold=True, align='left')
     d.text(1324, 488, 99, 19, '2D example', 14, '#455367', italic=True)
 
-    _vector_arrow(d, 1252, 686, 1325, 613, WHITE, width=3.2, head=16)
+    # The two perpendicular segments expose the comparison coordinate by
+    # coordinate. They are guides, not a trajectory or gradient direction.
+    guide = d.line([(1244, 692), (1331, 692), (1331, 607)], WHITE, 2.6, dash=True)
+    guide.name = 'Componentwise order guide between z_a and z_b'
     for x, y, diameter in [
         (1180, 569, 12), (1257, 605, 13), (1331, 607, 17),
-        (1366, 677, 13), (1244, 692, 17), (1301, 729, 13), (1359, 756, 13),
+        (1366, 688, 13), (1244, 692, 17), (1301, 730, 13),
     ]:
         _point(d, x, y, diameter, ORANGE)
     _point(d, 1131, 793, 16, '#43AE2B')

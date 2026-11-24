@@ -130,16 +130,31 @@ def draw(d):
     params = [
         (529, 123, 'learnable α', alpha),
         (668, 118, 'q = exp(α)', q),
-        (802, 120, 't = (PᵀPq) / q', t),
-        (938, 119, 'c = 1/√t', c),
+        (802, 120, 't', t),
+        (938, 119, 'c', c),
     ]
     for x, width, title, values in params:
         d.shape(x, 735, width, 60, ('#F7FCFF', '#EEF7FC'),
                 '#6383A8', lw=1.2, r=8)
-        d.text(x + 2, 739, width - 4, 23, title, size=16,
-               color=ink, bold=(x == params[0][0]),
-               italic=(x != params[0][0]),
-               font='Arial' if x == params[0][0] else 'Liberation Serif')
+        if title in ('t', 'c'):
+            is_column_factor = title == 'c'
+            center = x + (74 if is_column_factor else 76)
+            width_f = 26 if is_column_factor else 43
+            d.math(center - width_f / 2 - 30, 740, 28, 23,
+                   [(title, True, False), (' =', False, False)], 16, ink)
+            d.math(center - width_f / 2, 737, width_f, 14,
+                   [('1', False, False)] if is_column_factor else [('PᵀPq', True, False)],
+                   14, ink)
+            d.line([(center - width_f / 2, 751), (center + width_f / 2, 751)], ink, .9)
+            if is_column_factor:
+                d.radical(center - 8, 754, 16, 10, [('t', True, False)], 13, ink)
+            else:
+                d.math(center - 12, 751, 24, 13, [('q', True, False)], 13, ink)
+        else:
+            d.text(x + 2, 739, width - 4, 23, title, size=16,
+                   color=ink, bold=(x == params[0][0]),
+                   italic=(x != params[0][0]),
+                   font='Arial' if x == params[0][0] else 'Liberation Serif')
         vector = '[' + ', '.join(f'{value:.3f}' for value in values) + ']'
         d.text(x + 2, 766, width - 4, 21, vector.replace('-', '−'),
                size=11.7, color=ink, font='Liberation Sans')
@@ -148,7 +163,7 @@ def draw(d):
                width=1.55, arrow=True)
 
     d.shape(522, 838, 289, 63, ('#E8F2FC', '#D7E9FC'), None, r=12)
-    d.text(536, 843, 265, 24, 'Learnable column scaling •',
+    d.text(536, 843, 265, 24, 'Learnable column scaling',
            size=18, color=ink, bold=True, align='left')
     d.text(536, 869, 265, 22, 'monotone and spectrally bounded',
            size=15.8, color=ink, bold=True, align='left')

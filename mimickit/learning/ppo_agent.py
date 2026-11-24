@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 import torch
 
@@ -30,7 +32,10 @@ class PPOAgent(base_agent.BaseAgent):
         self._action_entropy_weight = config["action_entropy_weight"]
         self._action_reg_weight = config["action_reg_weight"]
 
-        self._critic_eval_batch_size = int(config.get("critic_eval_batch_size", 0))
+        self._critic_eval_batch_size = int(os.getenv(
+            "MIMICKIT_CRITIC_EVAL_TIME_BATCH", config.get("critic_eval_batch_size", 0)))
+        if self._critic_eval_batch_size < 0:
+            raise ValueError("Critic evaluation batch size cannot be negative")
         
         self._exp_anneal_samples = config.get("exp_anneal_samples", np.inf)
         self._exp_prob_beg = config.get("exp_prob_beg", 1.0)
@@ -106,6 +111,14 @@ class PPOAgent(base_agent.BaseAgent):
         self._exp_buffer.record("rand_action_mask", action_info["rand_action_mask"])
         return
     
+    @torch.no_grad()
+    def _eval_rollout_values(self, obs):
+        def evaluate(obs):
+            return self._model.eval_critic(self._obs_norm.normalize(obs))
+
+        return torch_util.eval_minibatch(
+            evaluate, {"obs": obs}, self._critic_eval_batch_size).squeeze(-1)
+
     def _build_train_data(self):
         self.eval()
         
@@ -115,10 +128,7 @@ class PPOAgent(base_agent.BaseAgent):
         done = self._exp_buffer.get_data("done")
         rand_action_mask = self._exp_buffer.get_data("rand_action_mask")
         
-        norm_next_obs = self._obs_norm.normalize(next_obs)
-        next_critic_inputs = {"obs": norm_next_obs}
-        next_vals = torch_util.eval_minibatch(self._model.eval_critic, next_critic_inputs, self._critic_eval_batch_size)
-        next_vals = next_vals.squeeze(-1).detach()
+        next_vals = self._eval_rollout_values(next_obs)
 
         succ_val = self._compute_succ_val()
         succ_mask = (done == base_env.DoneFlags.SUCC.value)
@@ -130,10 +140,7 @@ class PPOAgent(base_agent.BaseAgent):
 
         new_vals = rl_util.compute_td_lambda_return(r, next_vals, done, self._discount, self._td_lambda)
 
-        norm_obs = self._obs_norm.normalize(obs)
-        critic_inputs = {"obs": norm_obs}
-        vals = torch_util.eval_minibatch(self._model.eval_critic, critic_inputs, self._critic_eval_batch_size)
-        vals = vals.squeeze(-1).detach()
+        vals = self._eval_rollout_values(obs)
         adv = new_vals - vals
 
         # Termination-conditioned TD-target statistics are diagnostics only.

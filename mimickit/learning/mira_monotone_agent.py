@@ -5,7 +5,7 @@ import torch
 from learning.add_agent import ADDAgent, calc_unscaled_disc_reward
 from learning.ppo_agent import PPOAgent
 from learning.mira_monotone_model import (
-    MIRAMonotoneModel, HIDDEN_WIDTHS, MONOTONE_SCHEMA_VERSION, physical_feature_slices)
+    MIRAMonotoneModel, HIDDEN_WIDTHS, physical_feature_slices)
 from learning.physical_error_normalizer import PhysicalErrorNormalizer, aggregate_physical_groups
 import util.torch_util as torch_util
 
@@ -135,7 +135,7 @@ class MIRAMonotoneAgent(ADDAgent):
         layout = self._model._pair_metrics
         metric_count = {7: "seven", 11: "eleven", 12: "twelve"}[len(layout.metric_names)]
         state["monotone_disc"] = {
-            "version": MONOTONE_SCHEMA_VERSION,
+            "version": self._model.disc_schema_version,
             "metrics": layout.metric_names, "hidden_widths": HIDDEN_WIDTHS,
             "input": f"same_frame_unpooled_{layout.feature_dim}_physical_errors",
             "features": {name: (part.start, part.stop)
@@ -148,11 +148,17 @@ class MIRAMonotoneAgent(ADDAgent):
             "score": "learned_bias_minus_anchored_positive_diagonal_CMNN_energy",
             "normalization": "SLL_nonresidual_positive_diagonal_logdomain_Perron_init",
             "learned_diagonal_parameters": sum(
-                layer.parametrizations.weight[1].log_q.numel()
+                layer.parametrizations.weight[-1].log_q.numel()
                 for layer in self._model._disc_energy
                 if isinstance(layer, torch.nn.Linear)),
             "reward": "original_ADD_clipped_mapping_no_multiplier",
         }
+        if self._model.disc_signed_weights:
+            state["monotone_disc"].update({
+                "first_layer": "signed_dense_no_group_budget",
+                "score": "learned_bias_minus_anchored_signed_diagonal_energy",
+                "normalization": "same_positive_diagonal_scales_on_weight_magnitudes",
+            })
         if layout.grip_release_aware:
             state["monotone_disc"]["carry_grip"] = "through_last_reference_contact"
         return state

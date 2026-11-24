@@ -19,8 +19,10 @@ class CarryEnv(ADDEnv):
     tracks_box = True
 
     def __init__(self, env_config, engine_config, num_envs, device, visualize, record_video=False):
-        if env_config["num_disc_obs_steps"] != 1 or not env_config["global_obs"]:
-            raise ValueError("Carry requires one global discriminator frame")
+        if not env_config["global_obs"] or (
+            env_config.get("disc_observation", "add") != "amp" and env_config["num_disc_obs_steps"] != 1
+        ):
+            raise ValueError("Carry requires global observations and one ADD discriminator frame")
         reference_file = env_config.get("carry_reference_file")
         self._reference = CarryReference(reference_file or env_config["motion_file"], device)
         if reference_file is not None:

@@ -1,60 +1,60 @@
 {
   "renderer": "Isaac Lab / Isaac Sim RGB camera",
   "embodiment": "data/assets/humanoid/humanoid.xml",
-  "paper_figure": "Same actual experiment humanoid, model and teal material as Fig. 2 Backflip",
-  "motion": "data/motions/humanoid/humanoid_backflip.pkl",
-  "checkpoint": "output/mira_cmnn64_group_rms_backflip_2000_8192_seed0_20261113/int_models/model_0000001999.pt",
-  "checkpoint_sha256": "ba365917d0567c68d0a337de3cf8e0c0b86fa0c98c3f5fef3f9ddd46fc4cb339",
-  "simulation_pose": "Actual deterministic mean-policy rollout, starting at reference time zero",
-  "reference_pose": "Synchronized motion-library pose rendered via native DeepMimic reference visualization",
-  "reference_time_s": 0.5,
-  "control_step": 15,
-  "processing": "The actual camera RGB values are preserved in robot pixels. Set gray scene and shadows transparent using the teal silhouette, then crop both images at identical scale.",
+  "env_config": "output/mira_cmnn64_group_rms_soccer_cmu_10_02_2000_8192_seed0_20261122/env_config.yaml",
+  "checkpoint": "output/mira_cmnn64_group_rms_soccer_cmu_10_02_2000_8192_seed0_20261122/model.pt",
+  "checkpoint_sha256": "5be1003d393c0fc0f0985b83d715f1bb1ecc6c00ab8eeb0c4b352b7832af30d4",
+  "simulation_pose": "Deterministic policy from the reference start",
+  "reference_pose": "Synchronized motion-library pose from Isaac Lab reference visualization",
+  "presentation": "Shared visualization mesh with cool silver and muted steel blue; same floor, lighting and shadows",
   "frames": [
     {
-      "file": "simulated.png",
-      "visible_object": "/World/envs/env_0/obj_0",
-      "camera_position_m": [
-        1.4372875187622873,
-        -2.649696766666818,
-        1.2827967658338022
+      "file": "reference.png",
+      "role": "reference",
+      "step": 55,
+      "time_s": 0.9166666666666666,
+      "visible_object": "/World/envs/env_0/obj_1",
+      "pose_source": "reference",
+      "camera_eye": [
+        7.044510968871896,
+        1.2007510691505554,
+        2.344017687402356
       ],
-      "camera_target_m": [
-        -0.03997858613729477,
-        0.03624160587787628,
-        0.5575934052467346
+      "camera_target": [
+        2.665006637573242,
+        -0.3532665967941284,
+        0.7900000214576721
       ],
-      "source_rgb_sha256": "a292f690aa3eb6562313a81fee279ad3cb46bc8f45fe58a48040899edb0fb677",
-      "cutout_sha256": "8f7c2d7438bee6763a7c57cd692c4f494834cc5d0bb1f0d0af19f7f6435b0ab2"
+      "robot_rgb": [
+        0.28,
+        0.31,
+        0.35
+      ],
+      "image_sha256": "05c85a694cc755f6a60c2388bae33107fee3f348cb69c70f26753c6740bce630"
     },
     {
-      "file": "reference.png",
+      "file": "simulated.png",
+      "role": "simulated",
+      "step": 55,
+      "time_s": 0.9166666666666666,
       "visible_object": "/World/envs/env_0/obj_1",
-      "camera_position_m": [
-        3.4324596244918673,
-        -2.648950352601457,
-        1.31808229830832
+      "pose_source": "simulated",
+      "camera_eye": [
+        7.082931646056955,
+        1.1749293535572174,
+        2.344017687402356
       ],
-      "camera_target_m": [
-        1.9551935195922852,
-        0.036988019943237305,
-        0.5928789377212524
+      "camera_target": [
+        2.703427314758301,
+        -0.37908831238746643,
+        0.7900000214576721
       ],
-      "source_rgb_sha256": "d7cd14a427271323f1df4ba65b2d8381ddb03d44973c6b199a4de22f9b5fcb60",
-      "cutout_sha256": "2dd2cdf72c0e50dd734b5698260cbdab10bccdb053bf64e6669a5124586fcaf4"
+      "robot_rgb": [
+        0.105,
+        0.225,
+        0.355
+      ],
+      "image_sha256": "383fc02ffa1847e2dc7527a79dab1868ab04049aa11df1328653eca2975eaba4"
     }
-  ],
-  "source_for_figure_2": "PAPER/artifacts/screenshots/mira_20261121_backflip",
-  "mask_crop": [
-    335,
-    225,
-    460,
-    545
-  ],
-  "fig2_pose_check": {
-    "file": "PAPER/artifacts/screenshots/mira_20261121_backflip/frame_01_step_015.png",
-    "same_control_step": 15,
-    "humanoid_silhouette_iou": 0.9900168465714108,
-    "mean_absolute_scene_rgb_difference_8bit": 0.728759375
-  }
+  ]
 }

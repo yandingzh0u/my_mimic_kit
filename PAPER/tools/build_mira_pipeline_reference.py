@@ -130,6 +130,14 @@ class Canvas:
                 run._r.get_or_add_rPr().set('baseline', '-24000')
         return box
 
+    def radical(self, x, y, w, h, parts, size, color=INK):
+        """An editable radicand with a continuous radical and vinculum."""
+        hook = .45 * h
+        self.math(x + hook, y + .08 * h, w - hook - 1, h, parts, size, color)
+        return self.line([(x, y + .55 * h), (x + .10 * h, y + .48 * h),
+                          (x + .23 * h, y + .88 * h), (x + hook, y),
+                          (x + w, y)], color, max(.8, size * .058))
+
     def _path(self, points, fill, line, lw, close):
         path = self.shapes.build_freeform(px(points[0][0]), px(points[0][1]))
         path.add_line_segments([(px(x), px(y)) for x, y in points[1:]], close=close)
@@ -152,10 +160,19 @@ class Canvas:
     def image(self, filename, x, y, w, h, name):
         with Image.open(filename) as im:
             iw, ih = im.size
-        k = min(w / iw, h / ih)
-        pic = self.shapes.add_picture(str(filename), px(x + (w - k * iw) / 2),
-                                      px(y + (h - k * ih) / 2), px(k * iw), px(k * ih))
+        pic = self.shapes.add_picture(str(filename), px(x), px(y), px(w), px(h))
+        source_aspect, target_aspect = iw / ih, w / h
+        if source_aspect > target_aspect:
+            pic.crop_left = pic.crop_right = (1 - target_aspect / source_aspect) / 2
+        elif source_aspect < target_aspect:
+            pic.crop_top = pic.crop_bottom = (1 - source_aspect / target_aspect) / 2
         pic.name = name
+        geometry = pic._element.spPr.xpath('a:prstGeom')[0]
+        geometry.set('prst', 'roundRect')
+        adjustment = OxmlElement('a:gd')
+        adjustment.set('name', 'adj')
+        adjustment.set('fmla', 'val 9000')
+        geometry.xpath('a:avLst')[0].append(adjustment)
         return pic
 
     def check(self, cx, cy, r):
@@ -236,17 +253,15 @@ def frame(d, x, y, w, h, title, tab_width=None, size=21):
 
 
 def overview(d, robot_files, robot_names):
-    frame(d, 10, 10, 1654, 383, '(a)  Overview of MIRA reward learning', 521, 25)
-    for y, title, state, image, name, (a, b, edge, color) in zip(
-        (65,190), ('Reference state', 'Simulated state'), ('ŝ','s'),
+    frame(d, 10, 10, 1654, 383, 'a  Overview of MIRA reward learning', 521, 25)
+    for y, title, state, image, name in zip(
+        (61,190), ('Reference state', 'Simulated state'), ('ŝ','s'),
         robot_files, robot_names,
-        (('#F3FAED','#E1F1D9','#A5C893','#234829'),
-         ('#FFF5EB','#F9E6D8','#E1B58D','#6E3B23')),
     ):
-        d.shape(35, y, 225, 109, (a,b), edge, 1.3, 12)
-        d.image(image, 48, y+6, 88, 97, name)
-        d.text(137, y+24, 110, 25, title, 15.8, color, True)
-        d.math(144, y+48, 96, 34, [(state, True, False), ('t', True, True)], 25, color)
+        d.shape(35, y, 225, 120, ('#F2F7FF', '#DAE8F7'), '#8BA8C9', 1.3, 12)
+        d.image(image, 36, y + 24, 223, 95, name)
+        d.text(58, y + 1, 142, 23, title, 17, INK, True)
+        d.math(195, y + 1, 30, 23, [(state, True, False), ('t', True, True)], 20)
 
     d.shape(311, 58, 255, 243, ('#F5FAFF','#E3F0FE'), '#83A8D1', 1.35, 12)
     d.shape(311.8, 58.8, 253.4, 34, ('#D6E9FD','#BDD8F2'), r=10)
@@ -254,15 +269,14 @@ def overview(d, robot_files, robot_names):
     d.text(322, 61, 205, 27, 'Physical error groups', 18.5, INK, True)
     d.math(521, 61, 36, 27, [('e', True, False), ('t', True, True)], 22)
     for y, glyph, label in zip(
-        range(104, 269, 25), ('pin','rotation','nodes','body','gauge','velocity','angular'),
+        range(107, 290, 28), ('pin','rotation','nodes','body','gauge','velocity','angular'),
         ('Root position','Root rotation','Body position','Body rotation','Joint velocity',
          'Root linear velocity','Root angular velocity'),
     ):
         d.icon(glyph, 340, y+1, 20, '#285B9B')
         d.text(363, y-10, 184, 21, label, 15.8, INK, True, 'left')
-        if y < 245:
+        if y < 275:
             d.line([(330, y+13), (549, y+13)], '#CEDFF0', .7)
-    d.text(322, 273, 233, 22, '(robot-dependent dimensions)', 14, '#4B6482', italic=True)
 
     d.shape(603, 132, 184, 107, ('#EDF7FF','#D2E6FB'), '#7D9EC9', 1.35, 11)
     d.text(612, 142, 166, 23, 'Group', 20.5, INK, True)
@@ -331,7 +345,7 @@ def overview(d, robot_files, robot_names):
     d.text(1029,326,137,24,'Update π',16,'#694A80',True)
     d.line([(776,355),(623,355)],CONNECTION,2.05,True)
     d.math(653,326,70,24,[('a',True,False),('t',True,True)],20)
-    d.line([(328,355),(148,355),(141,348),(141,299)],CONNECTION,2.05,True)
+    d.line([(328,355),(148,355),(141,348),(141,310)],CONNECTION,2.05,True)
 
 
 def build(output_dir):
@@ -359,15 +373,19 @@ def build(output_dir):
         ('d',1087,579,'Reward geometry in error space',22,reward),
     ]:
         panel = d.group(f'{name} · {title}')
-        frame(panel, x, 412, w, 510, f'({name})  {title}', size=size)
+        frame(panel, x, 412, w, 510, f'{name}  {title}', size=size)
         module.draw(panel)
     slide.notes_slide.notes_text_frame.text = (
         'Both robot images use the Isaac Lab humanoid from the paper experiments, '
-        'captured at the same Backflip timestep. See figures/assets/isaac_humanoid/provenance.json.\n'
+        'captured at the same run-up timestep with the simulated floor and shadows. '
+        'See figures/assets/isaac_humanoid/provenance.json.\n'
         'The lower panels use illustrative values, not measured results. '
-        'The scale plot assumes equal normalized per-component errors. The weight example '
-        'uses elementwise division for t and full precision until display. The reward '
-        'contour illustrates a monotone softplus reward. All non-robot artwork is native '
+        'In panel (b), the orange curve is for group A with per-component RMS 0.62; '
+        'the blue curve is for group B with per-component RMS 1.0. For the same input, '
+        'dividing by sqrt(d_g) cannot increase its norm. The weight example uses '
+        'elementwise division for t and full precision until display. Panel (d) holds '
+        'all other error coordinates fixed and uses a dashed guide to show componentwise '
+        'order on an illustrative softplus reward contour. All non-robot artwork is native '
         'PowerPoint text or geometry. Select a panel and use Ungroup to edit individual objects.'
     )
 

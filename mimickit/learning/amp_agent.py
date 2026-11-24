@@ -145,8 +145,12 @@ class AMPAgent(ppo_agent.PPOAgent):
         task_r = self._exp_buffer.get_data_flat("reward")
         disc_obs = self._exp_buffer.get_data_flat("disc_obs")
 
-        norm_disc_obs = self._disc_obs_norm.normalize(disc_obs)
-        disc_r = self._calc_disc_rewards(norm_disc_obs)
+        # Normalize inside the existing evaluation chunks so wide histories
+        # don't materialize an extra normalized copy of the entire rollout.
+        def reward_chunk(disc_obs):
+            return self._calc_disc_rewards(self._disc_obs_norm.normalize(disc_obs))
+
+        disc_r = torch_util.eval_minibatch(reward_chunk, {"disc_obs": disc_obs}, self._disc_eval_batch_size)
         disc_reward_std, disc_reward_mean = torch.std_mean(disc_r)
 
         r = self._task_reward_weight * task_r + self._disc_reward_weight * disc_r
