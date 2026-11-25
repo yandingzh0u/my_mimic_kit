@@ -9,7 +9,7 @@ configurations remain in their usual repository directories.
 | Location | Contents |
 | --- | --- |
 | `icra2027_paper.tex`, `mira.pdf` | Main manuscript and compiled paper |
-| `experiments_mira.tex`, `ieeeconf.cls` | Experiment section and LaTeX class |
+| `experiments_mira.tex`, `appendix_mira.tex` | Experiment section and supplementary material |
 | `figures/` | Current figures, editable PowerPoint sources, and G1 illustration assets |
 | `generated/` | Measured data exports, provenance, and native LaTeX tables |
 | `configs/envs/`, `configs/args/` | Paper-specific environment and training configurations |
@@ -27,8 +27,10 @@ See [FIGURE_GUIDE.md](FIGURE_GUIDE.md) for figure details and
 
 ```bash
 python PAPER/tools/build_mira_experiments.py
+python PAPER/tools/build_mira_tracking_table.py
 python PAPER/tools/build_mira_figures.py
-python PAPER/tools/build_mira_pipeline.py
+python PAPER/tools/build_mira_supplement.py
+python PAPER/tools/build_mira_pipeline_reference.py
 python PAPER/tools/build_mira_screenshot_figure.py
 cd PAPER
 mkdir -p build/latex

@@ -1,6 +1,67 @@
 # MIRA measured experiment data
 
-Regenerate the tables, provenance manifest, audit, CSV, and measured curve data:
+## Current manuscript
+
+Run `python PAPER/tools/build_mira_tracking_table.py` to regenerate
+`mira_tracking_table.tex` and `mira_tracking_results.json`. The table
+covers the six motions in Fig. 2: Sofa Sit, Box Carry, Soccer, Backflip,
+Climb, and Roll. The JSON records per-motion errors, source files and hashes,
+episode counts, and sample counts. The figure generator uses its
+`curve_logs` paths for the same six motions at equal sample counts.
+
+The three motions with objects use independent reference-start evaluations
+of the final checkpoints in `PAPER/build/interaction_eval/`, with the same
+time window for every method (171, 197, and 129 steps, respectively). The
+other three use the latest reference-start training log with a mean test
+length equal to the motion horizon. Climb uses 299 steps for DeepMimic, ADD,
+and MIRA. The ADD record is from `add_climb_2k_8192_seed0_resume500_v3`.
+AMP has no logged full-horizon Backflip or Climb record and has no
+six-motion aggregate; its three-motion aggregate is reported alongside
+the other methods. Curve endpoints are training-time tests through
+524,288,000 samples and need not match the table's selected records.
+
+## Current supplement and motion-quality figures
+
+Run `python PAPER/tools/build_mira_supplement.py` from the repository root
+after regenerating the tracking manifest. It reads the raw contact-motion
+and Backflip traces, exports `mira_supplement_results.json`, and writes
+the native LaTeX tables and two vector time-series figures. The manifest
+records each trace and checkpoint hash. Only measured seed 0 is used.
+
+- `mira_motion_quality_table.tex` and `mira_per_motion_quality_table.tex`:
+  planar root-speed correlation, foot--ground support timing IoU, stance
+  slip, and body jerk. The macro gives equal weight to Sofa Sit, Box Carry,
+  and Soccer. Replicas come from the same trained checkpoint, not 256 seeds.
+- `mira_per_motion_table.tex`: the full six-motion tracking breakdown.
+  Missing full-window AMP entries stay blank in the aggregate and appear
+  as dashes in the tables.
+- `mira_matched_ablation_table.tex` and `mira_full_ablation_table.tex`:
+  independent Backflip rollouts from the final six checkpoints, with
+  errors compared within 60-step or 26-step common prefixes.
+
+To recreate the quality traces, run the following with Isaac Lab Python
+from the repository root (serial execution):
+
+```bash
+for motion in sofa003 carry_box soccer_cmu_10_02; do
+  for method in AMP DeepMimic ADD MIRA; do
+    python PAPER/tools/evaluation/record_motion_quality.py "$motion" "$method" \
+      --destination PAPER/build/mira_motion_metric_audit
+  done
+done
+```
+
+For each key in `mira_supplement_results.json` under `ablations`, use
+the recorded `model_file` and its run's `env_config.yaml`,
+`agent_config.yaml`, and `engine_config.yaml` with
+`PAPER/tools/evaluation/evaluate_checkpoint.py --motion backflip --steps 60
+--num-envs 256 --start-mode phase0 --seed 0`. Write the output to
+`PAPER/build/appendix_backflip_eval/<key>`.
+
+## Legacy tracking benchmark and training-time ablation
+
+Regenerate the earlier six-motion tracking assets and legacy Backflip
+training-time ablation diagnostics from logs:
 
     python PAPER/tools/build_mira_experiments.py
 
@@ -30,8 +91,8 @@ assuming that every motion was trained on the same date.
   records the different actual sample locations. Legacy grid_samples is a
   2000-update reference schedule only. Interpolation is linear between
   logged evaluation points; no unmeasured suffix is created for other runs.
-- mira_main_table.tex and mira_ablation_table.tex: current paper tables.
-  Paper tables remain native LaTeX; PowerPoint is used only for figures.
+- mira_main_table.tex and mira_ablation_table.tex: the earlier tracking
+  and ablation tables, respectively. Paper tables are native LaTeX.
 
 ## Protocol and interpretation
 
@@ -67,7 +128,7 @@ AMP, DeepMimic, ADD, and MIRA are reported using the same raw-value layout
 with their actual budgets. Per-motion and aggregate results need not rank methods
 identically; the results do not support universal superiority. Additional
 independent training seeds and a unified independent checkpoint evaluation
-remain **TODO**.
+for the six-motion tracking benchmark remain **TODO**.
 
 Backflip ablations use the same total sample budget. The monotone-modeling
 ablation jointly changes input representation, normalization, and weight
@@ -77,11 +138,31 @@ gradient diagnostics are local measurements; norms from different input
 representations cannot be interpreted as identical physical-space
 sensitivity. The original head regularizer is retained in all variants.
 
-The main LaTeX table contains the macro-average and seven-error MIRA
+The legacy tracking table contains the macro-average and seven-error MIRA
 per-motion panels. The per-motion panel has no completion column, and
 the former main-table completion panel is removed. The Backflip ablation
 table retains its completion column. A brief dagger note identifies the
 MIRA Climb 3000-update result in the main table.
+
+## Archived physical outcome evaluation
+
+`mira_interaction_results.json` contains separate checkpoint evaluations
+for Box Carry, Sofa Sit, and CMU 10_02 Soccer: exact success and horizon
+completion counts, physical thresholds, tracking errors averaged over
+executed steps per trial and then over trials, and checkpoint hashes.
+These are fixed-reference-start simulator replicas of one training seed
+per method, with $524{,}288{,}000$ samples per policy. They are not random
+initial conditions or independent training runs. These task-specific success
+counts are not used in the current manuscript.
+
+Run `PAPER/tools/evaluation/evaluate_interactions.py TASK METHOD
+--destination PAPER/build/interaction_eval/TASK/METHOD` in the Isaac Lab
+environment for each task and method, capturing output in the destination's
+`eval.log`. For Box Carry and Soccer, also run the MIRA configuration with
+`--controller guide` and the destination `TASK/guide`. The guide control
+uses zero residual action. Then run
+`PAPER/tools/evaluation/build_interaction_table.py` to check the saved
+trajectories and regenerate the result file and LaTeX table.
 
 The data generator does not write figure files. Current vector plots and
 editable chart slides are generated by `PAPER/tools/build_mira_figures.py`.

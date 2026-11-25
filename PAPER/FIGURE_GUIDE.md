@@ -1,80 +1,40 @@
-# MIRA manuscript and editable figures
+# MIRA manuscript figures
 
-The compiled manuscript is `icra2027_paper.pdf`. Its title, abstract,
-introduction, method, experiments, and conclusion use the current MIRA
-formulation.
+The compiled manuscript is [mira.pdf](mira.pdf). Tables use native LaTeX.
+The six-motion comparison and the three-motion quality comparison put AMP,
+DeepMimic, ADD, and MIRA on the same footing; their numerical values are
+not repeated as bar charts.
 
-## Tables
+| Figure | Source | Contents |
+| --- | --- | --- |
+| 1 | `figures/mira_pipeline_reference.pptx` | Reward-learning overview with Unitree G1 illustrations and the normalized error space. |
+| 2 | `figures/mira_rollout_screenshots.pptx` | Actual Isaac Lab RGB captures: six frames each for Sofa Sit, Box Carry, and Soccer, and twelve each for Backflip, Climb, and Roll. |
+| 3 | `tools/build_mira_supplement.py` | Soccer root-speed and ground-support timing from the final checkpoints, exported as a vector PDF. |
+| Appendix | `figures/mira_results_editable.pptx` | Editable charts for the six-motion learning curves and Backflip discriminator diagnostics. |
+| Appendix | `tools/build_mira_supplement.py` | Roll and Climb joint-velocity learning curves at their actual sample counts. |
 
-All manuscript tables are native LaTeX. They are not PowerPoint assets or
-embedded table screenshots:
+Fig. 2 is illustrative. Soccer uses the final checkpoint from the tables,
+Climb uses the 3000-update policy, and the Sofa Sit and Box Carry rows
+retain their earlier illustrative captures. The experimental humanoid
+is the 28-DoF model; G1 appears only in the method illustration. The raw
+frames, timestamps, hashes, and cameras are documented under
+`artifacts/screenshots/`. The screenshot builder verifies the RGB hashes
+and the Soccer checkpoint hash before regenerating the editable slide.
 
-- Configuration: `experiments_mira.tex`.
-- Main comparison: `generated/mira_main_table.tex`.
-- Backflip ablations: `generated/mira_ablation_table.tex`.
+Fig. 3 uses the actual reference and simulator traces from the same
+seed-0 policies used in the three-motion quality table. Contact spans in
+the plot use the majority across simulator replicas; the table's IoU
+uses all foot/time/replica labels. The training curves use the actual
+environment sample counts and do not extrapolate beyond measured tests.
 
-AMP, DeepMimic, ADD, and MIRA are reported together. The quantitative comparison is presented in the LaTeX table; there is no
-redundant seven-error bar chart or baseline-ratio heatmap.
-
-## Editable PowerPoint sources
-
-| File in `figures/` | Contents |
-| --- | --- |
-| `mira_pipeline.pptx` | Reference-layout method illustration with rendered Unitree G1 icons, aligned sample cards, pastel fills, the constrained discriminator, softplus reward, and PPO control loop; layer sizes and training settings remain in the text. |
-| `mira_results_editable.pptx` | Native charts for learning curves and discriminator diagnostics only. No tables, heatmaps, or repeated numerical-comparison figure. |
-| `mira_rollout_screenshots.pptx` | Actual Isaac Lab camera captures: Get-Up and Crawl first with six frames each, then Backflip, Climb, Roll, and Spin Kick with twelve frames each (60 total). Image placement and labels remain editable. |
-
-Plots and the method illustration have vector PDF exports and PNG previews.
-The screenshot PDF embeds the actual rendered raster frames. PowerPoint
-charts retain editable data; the overview uses native shapes and the
-rendered Unitree G1 model images. The G1 illustrations belong only to the method diagram; the experimental policies and humanoid remain unchanged.
-
-## Data and interpretation
-
-All active results use measured seed 0. MIRA Climb uses the actual 3000-update
-checkpoint (786,432,000 samples); other results use 2000 updates
-(524,288,000 samples). The manuscript briefly records this budget distinction.
-Main learning curves average the same six motions equally, aligned by the
-fraction of each run's actual training budget. They do not represent equal
-absolute-sample efficiency. There are no simulated extra seeds or uncertainty
-bands. Source log paths and SHA-256 hashes are recorded in
-`generated/mira_measured_seed0.json`.
-
-The comparison uses deterministic reference-start tests recorded during
-training. Independent evaluation under one unified protocol and further
-training seeds remain TODO. Errors cover executed trajectory portions.
-Completion marks remain in the Backflip ablation table; the main table has
-no completion column or completion panel. Bold values mark the lowest error
-for each metric in panel (a) only; panel (b) uses regular-weight values.
-
-The action figure contains real RGB captures from Isaac Lab executions of
-the frozen policies, with the actual climbing box retained. Climb uses the
-3000-update model and 12 keyframes. Backflip, Roll, and Spin Kick use their
-2000-update models and 12 keyframes each; Get-Up and Crawl use six each
-and appear first in the figure. Changing camera, lighting, and visual colors
-does not change policy weights or physical behavior. Raw PNG captures,
-frame timestamps, checkpoint hashes, and camera provenance are under
-`PAPER/artifacts/screenshots/mira_20261115/`. These are
-illustrative rollouts, not additional training seeds or success-rate samples.
-
-## Regeneration
-
-Run from the repository root with Python, Matplotlib, python-pptx, PyMuPDF,
-and LibreOffice installed:
+See [README.md](README.md) for compilation and
+[generated/README.md](generated/README.md) for trace collection and metric
+regeneration. The Soccer row can be recaptured with Isaac Lab Python:
 
 ```bash
-python PAPER/tools/build_mira_experiments.py
-python PAPER/tools/build_mira_figures.py
-python PAPER/tools/build_mira_pipeline.py
+python PAPER/tools/capture_mira_screenshots.py \
+  --run-dir output/mira_cmnn64_group_rms_soccer_cmu_10_02_2000_8192_seed0_20261122 \
+  --out-dir PAPER/artifacts/screenshots/mira_20261124_soccer \
+  --current-run --steps 1 31 57 69 80 130
 python PAPER/tools/build_mira_screenshot_figure.py
-cd PAPER
-mkdir -p build/latex
-/home/y/.local/bin/tectonic --only-cached --outdir build/latex icra2027_paper.tex
-cp build/latex/icra2027_paper.pdf icra2027_paper.pdf
 ```
-
-The screenshot-figure generator reads saved RGB captures. Actual simulator
-capture uses `PAPER/tools/capture_mira_screenshots.py` with the Isaac Lab
-Python environment and a selected frozen run; it does not train the policy. Superseded diagrams, placeholder panels, and redundant plots have been
-removed. The data generator produces tables and measured data only; current
-plots are produced exclusively by `build_mira_figures.py`.

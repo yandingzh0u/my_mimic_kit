@@ -1,0 +1,265 @@
+{
+  "evaluation": {
+    "replicas": 256,
+    "seed": 0,
+    "start": "phase0",
+    "actor": "deterministic mean action",
+    "training_samples": 524288000,
+    "training_seed": 0
+  },
+  "tasks": {
+    "carry_box": {
+      "control_hz": 30,
+      "criteria": {
+        "clearance_m": 0.1,
+        "lift_s": 0.2,
+        "hand_force_n": 5.0,
+        "air_travel_m": 0.3,
+        "total_travel_m": 1.0,
+        "goal_error_m": 0.15,
+        "floor_error_m": 0.04,
+        "tilt_deg": 15.0,
+        "speed_m_s": 0.2,
+        "spin_rad_s": 1.0,
+        "settle_s": 0.2
+      },
+      "episode_s": 6.566666666666666,
+      "results": {
+        "AMP": {
+          "success": 2,
+          "completed": 256,
+          "run": "output/amp_carry_box_2k_8192_seed0_20261122",
+          "model_sha256": "38dcd5044c91fecc99b7ec8dd5b9a2ce337458ac02d0e4532259adbe4cb1ea43",
+          "tracking_episode_mean": {
+            "root_pos_err": 0.06527277303453023,
+            "root_rot_err": 0.07424715611383997,
+            "body_pos_err": 0.02918962566040192,
+            "body_rot_err": 0.11726076299617744,
+            "dof_vel_err": 0.34581403683889955,
+            "root_vel_err": 0.08314523427997755,
+            "root_ang_vel_err": 0.2427189222295876
+          }
+        },
+        "DeepMimic": {
+          "success": 248,
+          "completed": 256,
+          "run": "output/deepmimic_carry_box_2k_8192_seed0_20261122",
+          "model_sha256": "950cf88300304390f68e4d7a63f4eb07df0d8af0752a17de0d3cddcc9ad4abdf",
+          "tracking_episode_mean": {
+            "root_pos_err": 0.03610127742596083,
+            "root_rot_err": 0.07578330197688293,
+            "body_pos_err": 0.02602891150275766,
+            "body_rot_err": 0.12042824436111503,
+            "dof_vel_err": 0.3908149477491523,
+            "root_vel_err": 0.07569102897559328,
+            "root_ang_vel_err": 0.23779208232000995
+          }
+        },
+        "ADD": {
+          "success": 239,
+          "completed": 256,
+          "run": "output/add_carry_box_2k_8192_seed0_20261122",
+          "model_sha256": "060181432a88461b0c07515b588e3ca9ca206e0ddc025a136257768ec7cd2287",
+          "tracking_episode_mean": {
+            "root_pos_err": 0.03294003988393973,
+            "root_rot_err": 0.029135525387328894,
+            "body_pos_err": 0.014094965244043,
+            "body_rot_err": 0.05078759277003066,
+            "dof_vel_err": 0.24308095645480945,
+            "root_vel_err": 0.0533962751819095,
+            "root_ang_vel_err": 0.14942130688483332
+          }
+        },
+        "MIRA": {
+          "success": 253,
+          "completed": 256,
+          "run": "output/mira_cmnn68_group_rms_carry_box_2000_8192_seed0_20261122",
+          "model_sha256": "9253681ec06495463b09f701430d9a275216ee2d8f0b6b0f435df5403a4e1496",
+          "tracking_episode_mean": {
+            "root_pos_err": 0.017580952367693352,
+            "root_rot_err": 0.03003617075418459,
+            "body_pos_err": 0.014541790650467274,
+            "body_rot_err": 0.0659812305897928,
+            "dof_vel_err": 0.264188487820214,
+            "root_vel_err": 0.0400929978864296,
+            "root_ang_vel_err": 0.12313188113234375
+          }
+        }
+      },
+      "guide_only": {
+        "success": 0,
+        "completed": 0,
+        "run": "output/mira_cmnn68_group_rms_carry_box_2000_8192_seed0_20261122",
+        "model_sha256": null,
+        "tracking_episode_mean": {
+          "root_pos_err": 0.22873102360254333,
+          "root_rot_err": 0.6674943286905423,
+          "body_pos_err": 0.21288910970089062,
+          "body_rot_err": 0.7188146213207894,
+          "dof_vel_err": 0.5563907792871491,
+          "root_vel_err": 0.30438041700732255,
+          "root_ang_vel_err": 0.7327860827159031
+        }
+      }
+    },
+    "soccer_cmu_10_02": {
+      "control_hz": 60,
+      "criteria": {
+        "impulse_n_s": 0.05,
+        "timing_s": 0.2,
+        "travel_window_s": 0.2,
+        "travel_m": 0.5,
+        "direction_deg": 30.0
+      },
+      "episode_s": 2.1666666666666665,
+      "results": {
+        "AMP": {
+          "success": 0,
+          "completed": 256,
+          "run": "output/amp_soccer_cmu_10_02_2k_8192_seed0_20261122",
+          "model_sha256": "3612b9b92f9bf4c1c86976de731c1a6c1397b108b3dfcd3d7833f2b28f33b033",
+          "tracking_episode_mean": {
+            "root_pos_err": 0.20003331360908652,
+            "root_rot_err": 0.18731464078793175,
+            "body_pos_err": 0.04143726027642305,
+            "body_rot_err": 0.17550062170395486,
+            "dof_vel_err": 0.48496958131973555,
+            "root_vel_err": 0.16256608590483662,
+            "root_ang_vel_err": 0.4532784504386096
+          }
+        },
+        "DeepMimic": {
+          "success": 256,
+          "completed": 256,
+          "run": "output/deepmimic_soccer_cmu_10_02_2k_8192_seed0_20261122",
+          "model_sha256": "96e027035d30239bb500e8cea708c09a6389b2ad30c2d3ead95003e07db67615",
+          "tracking_episode_mean": {
+            "root_pos_err": 0.05868620232034186,
+            "root_rot_err": 0.12814507730878313,
+            "body_pos_err": 0.038008363043459586,
+            "body_rot_err": 0.14421082987235131,
+            "dof_vel_err": 0.5180528118060187,
+            "root_vel_err": 0.14059309019492222,
+            "root_ang_vel_err": 0.4808865139117605
+          }
+        },
+        "ADD": {
+          "success": 256,
+          "completed": 231,
+          "run": "output/add_soccer_cmu_10_02_2k_8192_seed0_20261122",
+          "model_sha256": "0671ec2b4f2030179776c84a45063ab2ed2deeb797ed8709913f7101a6cf6dc8",
+          "tracking_episode_mean": {
+            "root_pos_err": 0.09456257736915694,
+            "root_rot_err": 0.16389577050221843,
+            "body_pos_err": 0.05622915587297458,
+            "body_rot_err": 0.16885036292730804,
+            "dof_vel_err": 0.3919462655279422,
+            "root_vel_err": 0.18919089719448762,
+            "root_ang_vel_err": 0.4299885058010275
+          }
+        },
+        "MIRA": {
+          "success": 256,
+          "completed": 256,
+          "run": "output/mira_cmnn64_group_rms_soccer_cmu_10_02_2000_8192_seed0_20261122",
+          "model_sha256": "5be1003d393c0fc0f0985b83d715f1bb1ecc6c00ab8eeb0c4b352b7832af30d4",
+          "tracking_episode_mean": {
+            "root_pos_err": 0.04317067097872495,
+            "root_rot_err": 0.07157450324067702,
+            "body_pos_err": 0.022293290338264063,
+            "body_rot_err": 0.0897928458566849,
+            "dof_vel_err": 0.3592793547190151,
+            "root_vel_err": 0.06820225386092292,
+            "root_ang_vel_err": 0.23771348561231906
+          }
+        }
+      },
+      "guide_only": {
+        "success": 256,
+        "completed": 256,
+        "run": "output/mira_cmnn64_group_rms_soccer_cmu_10_02_2000_8192_seed0_20261122",
+        "model_sha256": null,
+        "tracking_episode_mean": {
+          "root_pos_err": 0.014608371510761428,
+          "root_rot_err": 0.0400243713668225,
+          "body_pos_err": 0.012889148061871162,
+          "body_rot_err": 0.03884849527653737,
+          "dof_vel_err": 0.3882181072464357,
+          "root_vel_err": 0.06283752464044552,
+          "root_ang_vel_err": 0.2676722311056577
+        }
+      }
+    },
+    "sofa003": {
+      "control_hz": 30,
+      "criteria": {
+        "settle_s": 0.5,
+        "support_n": 30.0,
+        "pelvis_speed_m_s": 0.2
+      },
+      "episode_s": 5.7,
+      "results": {
+        "AMP": {
+          "success": 256,
+          "completed": 256,
+          "run": "output/amp_sofa003_2k_8192_seed0_20261122",
+          "model_sha256": "ed160839faabe1a456ff65c7b9ea758a7ce3c1a47af0ab369664a9ea8f49b1a2",
+          "tracking_episode_mean": {
+            "root_pos_err": 0.05643179300322867,
+            "root_rot_err": 0.053544534969399545,
+            "body_pos_err": 0.01897896801758753,
+            "body_rot_err": 0.08017128307306978,
+            "dof_vel_err": 0.22264267905065205,
+            "root_vel_err": 0.04912270074002228,
+            "root_ang_vel_err": 0.15148403979184333
+          }
+        },
+        "DeepMimic": {
+          "success": 256,
+          "completed": 256,
+          "run": "output/deepmimic_sofa003_2k_8192_seed0_20261122",
+          "model_sha256": "5deed4cfd8a04b8925e0417c2cc0953794d218c414992ee268d0411d8757f1ed",
+          "tracking_episode_mean": {
+            "root_pos_err": 0.06289454996150143,
+            "root_rot_err": 0.0688552310722962,
+            "body_pos_err": 0.019385314214299308,
+            "body_rot_err": 0.10133998749548928,
+            "dof_vel_err": 0.26330479988229205,
+            "root_vel_err": 0.06187623780634669,
+            "root_ang_vel_err": 0.1590554496785354
+          }
+        },
+        "ADD": {
+          "success": 256,
+          "completed": 256,
+          "run": "output/add_sofa003_2k_8192_seed0_20261122",
+          "model_sha256": "14949b3c3ef7ab8efc92367d1f90ca469c473b0c48bfada395a72d4d60e90b8d",
+          "tracking_episode_mean": {
+            "root_pos_err": 0.04646427903259007,
+            "root_rot_err": 0.04788440722993939,
+            "body_pos_err": 0.02465788281539032,
+            "body_rot_err": 0.10496349314674303,
+            "dof_vel_err": 0.20030912931202446,
+            "root_vel_err": 0.05911219220238123,
+            "root_ang_vel_err": 0.12598424051937313
+          }
+        },
+        "MIRA": {
+          "success": 256,
+          "completed": 256,
+          "run": "output/mira_cmnn64_group_rms_sofa003_2000_8192_seed0_20261122",
+          "model_sha256": "f82f561af17fa13c19db3f6409a85296b07722d919db7b6e8298cef9df4569e4",
+          "tracking_episode_mean": {
+            "root_pos_err": 0.025096491621861675,
+            "root_rot_err": 0.03492522240774323,
+            "body_pos_err": 0.017563936943242788,
+            "body_rot_err": 0.0735351851329818,
+            "dof_vel_err": 0.21264569522344573,
+            "root_vel_err": 0.044351502915310564,
+            "root_ang_vel_err": 0.0938992131479651
+          }
+        }
+      }
+    }
+  }
+}

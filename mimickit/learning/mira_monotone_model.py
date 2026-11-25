@@ -19,6 +19,8 @@ from util.carry_geometry import CarryGeometry
 
 MONOTONE_SCHEMA_VERSION = 4
 SIGNED_WEIGHT_SCHEMA_VERSION = 5
+FIXED_ANCHOR_SCHEMA_VERSION = 6
+SIGNED_FIXED_ANCHOR_SCHEMA_VERSION = 7
 HIDDEN_WIDTHS = (341, 512)
 METRIC_NAMES = ("root_pos", "root_rot", "body_pos", "body_rot",
                 "dof_vel", "root_vel", "root_ang_vel")
@@ -247,15 +249,23 @@ class MIRAMonotoneModel(ADDModel):
         self.disc_signed_weights = config.get("disc_signed_weights", False)
         if not isinstance(self.disc_signed_weights, bool):
             raise ValueError("disc_signed_weights must be a boolean")
+        self.disc_learn_anchor_logit = config.get("disc_learn_anchor_logit", True)
+        if not isinstance(self.disc_learn_anchor_logit, bool):
+            raise ValueError("disc_learn_anchor_logit must be a boolean")
         linear = signed_diagonal_linear if self.disc_signed_weights else positive_diagonal_linear
         self._pair_metrics = ADDPairErrorMetrics(env)
         self._disc_energy = nn.Sequential(
             linear(self._pair_metrics.feature_dim, HIDDEN_WIDTHS[0]), MixedELU(),
             linear(HIDDEN_WIDTHS[0], HIDDEN_WIDTHS[1]), MixedELU(),
             linear(HIDDEN_WIDTHS[1], 1, bias=False))
-        self._anchor_logit = nn.Parameter(torch.zeros(()))
-        self.disc_schema_version = (SIGNED_WEIGHT_SCHEMA_VERSION if self.disc_signed_weights
-                                    else MONOTONE_SCHEMA_VERSION)
+        if self.disc_learn_anchor_logit:
+            self._anchor_logit = nn.Parameter(torch.zeros(()))
+            self.disc_schema_version = (SIGNED_WEIGHT_SCHEMA_VERSION if self.disc_signed_weights
+                                        else MONOTONE_SCHEMA_VERSION)
+        else:
+            self.register_parameter("_anchor_logit", None)
+            self.disc_schema_version = (SIGNED_FIXED_ANCHOR_SCHEMA_VERSION if self.disc_signed_weights
+                                        else FIXED_ANCHOR_SCHEMA_VERSION)
         self.register_buffer("_monotone_schema_version", torch.tensor(self.disc_schema_version, dtype=torch.int64))
 
     def pair_to_error_metrics(self, policy, reference):
@@ -272,13 +282,19 @@ class MIRAMonotoneModel(ADDModel):
         anchor = disc_obs.new_zeros((1, feature_dim))
         # Sample and anchor share the same deterministic effective weights.
         energy = self._disc_energy(torch.cat((disc_obs, anchor), dim=0))
-        return self._anchor_logit - (energy[:-1] - energy[-1:])
+        relative_energy = energy[:-1] - energy[-1:]
+        if self._anchor_logit is None:
+            return -relative_energy
+        return self._anchor_logit - relative_energy
 
     def eval_disc(self, disc_obs):
         return self.eval_disc_raw(disc_obs)
 
     def get_disc_params(self):
-        return list(self._disc_energy.parameters()) + [self._anchor_logit]
+        params = list(self._disc_energy.parameters())
+        if self._anchor_logit is not None:
+            params.append(self._anchor_logit)
+        return params
 
     def get_disc_logit_weights(self):
         return self._disc_energy[-1].weight.flatten()

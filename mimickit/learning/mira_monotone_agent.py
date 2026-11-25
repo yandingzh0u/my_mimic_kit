@@ -159,6 +159,9 @@ class MIRAMonotoneAgent(ADDAgent):
                 "score": "learned_bias_minus_anchored_signed_diagonal_energy",
                 "normalization": "same_positive_diagonal_scales_on_weight_magnitudes",
             })
+        if not self._model.disc_learn_anchor_logit:
+            score = state["monotone_disc"]["score"]
+            state["monotone_disc"]["score"] = score.replace("learned_bias", "fixed_zero_bias", 1)
         if layout.grip_release_aware:
             state["monotone_disc"]["carry_grip"] = "through_last_reference_contact"
         return state

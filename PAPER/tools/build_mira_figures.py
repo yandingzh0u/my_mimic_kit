@@ -1,6 +1,6 @@
 """Publication figures and a native, editable PowerPoint from measured seed-0 logs.
 
-Reads the audited manifest produced by build_mira_experiments.py. Does not synthesize
+Reads the audited tracking and ablation manifests. Does not synthesize
 seeds, uncertainty, missing results, motion images, or independent evaluations.
 The PowerPoint uses native editable charts, with no tables, heatmaps or screenshots.
 """
@@ -29,8 +29,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PAPER = ROOT / 'PAPER'
 FIGURES = PAPER / 'figures'
 MANIFEST = PAPER / 'generated/mira_measured_seed0.json'
-MOTIONS = ('roll', 'climb', 'backflip', 'crawl', 'getup_facedown', 'spinkick')
-MOTION_NAMES = ('Roll', 'Climb', 'Backflip', 'Crawl', 'Get-Up', 'Spin Kick')
+TRACKING_MANIFEST = PAPER / 'generated/mira_tracking_results.json'
 METHODS = ('AMP', 'DeepMimic', 'ADD', 'MIRA')
 METRICS = (
     ('Root_Pos_Err', 'Root position', 'm'),
@@ -49,8 +48,8 @@ COLORS = {'AMP': '#A2AAB4', 'DeepMimic': '#617D9B', 'ADD': '#C58A3D', 'MIRA': '#
 NAVY = '#17334E'
 MUTED = '#586877'
 GRID = np.array([1, *range(101, 2000, 100), 2000], dtype=float)
-PROGRESS_GRID = GRID / 2000
 SAMPLES_PER_UPDATE = 8192 * 32
+SAMPLE_GRID = GRID * SAMPLES_PER_UPDATE / 1e8
 
 
 def json_lines(path: str) -> list[dict]:
@@ -61,37 +60,35 @@ def load_data() -> dict:
     manifest = json.loads(MANIFEST.read_text())
     if manifest.get('actual_seed_ids') != [0]:
         raise ValueError('Figure generator requires an explicitly measured seed-0 manifest.')
-    for method in METHODS:
-        for motion in MOTIONS:
-            run = manifest['runs'][method][motion]
-            if not isinstance(run, dict):
-                raise ValueError(f'Missing measured result: {method}/{motion}')
-            expected_budget = 3000 if method == 'MIRA' and motion == 'climb' else 2000
-            if run['completed_updates_used'] != expected_budget:
-                raise ValueError(f'Unexpected recorded budget: {method}/{motion}')
-            run['_rows'] = json_lines(run['path'])
+    tracking = json.loads(TRACKING_MANIFEST.read_text())
+    if tracking['seed'] != 0 or len(tracking['motions']) != 6:
+        raise ValueError('Expected six measured motions with training seed 0.')
+    manifest['tracking_runs'] = {
+        method: [dict(path=path, completed_updates_used=2000, _rows=json_lines(path))
+                 for path in tracking['curve_logs'][method].values()]
+        for method in METHODS
+    }
     for name, run in manifest['ablations'].items():
         run['_rows'] = json_lines(run['path'])
         run['_pressure'] = json_lines(run['pressure_source'])
     return manifest
 
 
-def measured_curve(run: dict, key: str, relative_progress: bool = False) -> np.ndarray:
+def measured_curve(run: dict, key: str) -> np.ndarray:
     budget = run['completed_updates_used']
-    target = PROGRESS_GRID * budget if relative_progress else GRID
     by_update = {}
     for r in run['_rows']:
         update = float(r.get('Samples', r.get('samples'))) / SAMPLES_PER_UPDATE
         if 0 < update <= budget and key in r:
             by_update[update] = float(r[key])
     xs = np.array(sorted(by_update))
-    if len(xs) < 2 or xs[0] > target[0] or xs[-1] < target[-1]:
+    if len(xs) < 2 or xs[0] > GRID[0] or xs[-1] < GRID[-1]:
         raise ValueError(f'Incomplete measured curve: {run["path"]}: {key}')
-    return np.interp(target, xs, [by_update[x] for x in xs])
+    return np.interp(GRID, xs, [by_update[x] for x in xs])
 
 
 def macro_curve(data: dict, method: str, key: str) -> np.ndarray:
-    return np.mean([measured_curve(data['runs'][method][motion], key, relative_progress=True) for motion in MOTIONS], axis=0)
+    return np.mean([measured_curve(run, key) for run in data['tracking_runs'][method]], axis=0)
 
 
 def style() -> None:
@@ -111,12 +108,12 @@ def save(fig, name: str) -> None:
     plt.close(fig)
 
 
-def line_axes(ax, title: str, ylabel: str, progress: bool = False) -> None:
+def line_axes(ax, title: str, ylabel: str, samples: bool = False) -> None:
     ax.set_title(title, loc='left', pad=7)
-    ax.set_xlabel('Training progress (%)' if progress else 'PPO updates')
+    ax.set_xlabel(r'Environment samples ($\times 10^8$)' if samples else 'PPO updates')
     ax.set_ylabel(ylabel, labelpad=3)
-    ax.set_xlim(0, 100 if progress else 2000)
-    ax.set_xticks([0, 25, 50, 75, 100] if progress else [0, 500, 1000, 1500, 2000])
+    ax.set_xlim(0, SAMPLE_GRID[-1] if samples else 2000)
+    ax.set_xticks(range(6) if samples else [0, 500, 1000, 1500, 2000])
     ax.grid(axis='y')
     ax.tick_params(length=2.5, width=.6, pad=2)
 
@@ -131,9 +128,9 @@ def plot_tracking(data: dict) -> None:
     fig, axes = plt.subplots(1, 3, figsize=(7.2, 2.38))
     for index, (ax, (key, name, unit)) in enumerate(zip(axes, TRACK)):
         for method in METHODS:
-            ax.plot(PROGRESS_GRID * 100, macro_curve(data, method, key), color=COLORS[method],
+            ax.plot(SAMPLE_GRID, macro_curve(data, method, key), color=COLORS[method],
                     lw=1.65, label=method, zorder=2)
-        line_axes(ax, f'({chr(97 + index)}) {name}', f'Error ({unit}; log scale)', progress=True)
+        line_axes(ax, f'({chr(97 + index)}) {name}', f'Error ({unit}; log scale)', samples=True)
         ax.set_yscale('log')
         all_values = np.concatenate([macro_curve(data, method, key) for method in METHODS])
         lower, upper, ticks = logarithmic_bounds(all_values)
@@ -219,7 +216,7 @@ def slide_base(prs, title: str, subtitle: str, index: int):
 
 
 def xy_chart(slide, series, left, top, width, height, title: str, ylabel: str,
-             y_zero: bool = False, log_y: bool = False, progress: bool = False):
+             y_zero: bool = False, log_y: bool = False, samples: bool = False):
     chart_data = XyChartData()
     for name, x, y, color in series:
         s = chart_data.add_series(name)
@@ -237,10 +234,10 @@ def xy_chart(slide, series, left, top, width, height, title: str, ylabel: str,
         target.format.line.width = Pt(1.8)
     xaxis = chart.category_axis
     xaxis.minimum_scale = 0
-    xaxis.maximum_scale = 100 if progress else 2000
-    xaxis.major_unit = 25 if progress else 500
+    xaxis.maximum_scale = float(SAMPLE_GRID[-1]) if samples else 2000
+    xaxis.major_unit = 1 if samples else 500
     xaxis.has_title = True
-    xaxis.axis_title.text_frame.text = 'Training progress (%)' if progress else 'PPO updates'
+    xaxis.axis_title.text_frame.text = 'Environment samples (×10⁸)' if samples else 'PPO updates'
     xaxis.axis_title.text_frame.paragraphs[0].font.size = Pt(11)
     xaxis.tick_labels.font.size = Pt(10)
     xaxis.major_tick_mark = XL_TICK_MARK.NONE
@@ -300,15 +297,15 @@ def create_ppt(data: dict) -> None:
     properties.subject = 'Editable learning curves and Backflip discriminator diagnostics'
     properties.author = 'MIRA paper'
     s = slide_base(prs, 'Tracking performance across six motions',
-        'Equal-weight means across Roll, Climb, Backflip, Crawl, Get-Up and Spin Kick; no synthetic seed bands.', 1)
+        'Equal-weight means across Sofa Sit, Box Carry, Soccer, Backflip, Climb and Roll.', 1)
     legend(s, METHODS, 4, 1.6, 6)
     for i, (key, name, unit) in enumerate(TRACK):
-        series = [(m, PROGRESS_GRID * 100, macro_curve(data, m, key), COLORS[m]) for m in METHODS]
-        xy_chart(s, series, .45+i*4.28, 2.25, 4.25, 3.85, name, f'Error ({unit}; log scale)', log_y=True, progress=True)
-    textbox(s, 'Training progress: MIRA Climb uses 3000 updates; all other runs use 2000. Errors cover executed test timesteps.',
+        series = [(m, SAMPLE_GRID, macro_curve(data, m, key), COLORS[m]) for m in METHODS]
+        xy_chart(s, series, .45+i*4.28, 2.25, 4.25, 3.85, name, f'Error ({unit}; log scale)', log_y=True, samples=True)
+    textbox(s, 'All methods are shown through the same training sample budget. Curves use training-time reference-start errors.',
             .65, 6.45, 12, .4, size=12, color=MUTED)
-    add_notes(s, 'Source: PAPER/generated/mira_measured_seed0.json and the train_metrics.jsonl paths recorded there. '
-        'All six motions, equal motion weights, one measured seed (0). MIRA Climb uses 3000 updates, all other runs 2000. Each curve aligns fractions of the actual training budget, not equal absolute samples. '
+    add_notes(s, 'Source: PAPER/generated/mira_tracking_results.json and its curve_logs entries. '
+        'All six motions, equal motion weights, one measured seed (0), through 524288000 samples. '
         'Curves interpolate only between actual logged test snapshots; no smoothing or fabricated uncertainty. '
         'These are training-time reference-start tests, not newly generated independent evaluations. '
         'All charts, data series, titles and text remain editable in PowerPoint.')

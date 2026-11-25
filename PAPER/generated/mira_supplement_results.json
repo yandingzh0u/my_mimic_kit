@@ -1,0 +1,392 @@
+{
+  "motion_quality": {
+    "protocol": {
+      "training_seed": 0,
+      "evaluation_seed": 0,
+      "episodes_per_motion_and_method": 256,
+      "aligned_start": "phase0",
+      "differentiation_rate_hz": 30,
+      "reference_plant_max_sole_clearance_m": 0.04,
+      "reference_plant_max_speed_m_s": 0.15,
+      "minimum_simulated_normal_contact_force_n": 5,
+      "checkpoint_sha256": {
+        "sofa003": {
+          "AMP": "ed160839faabe1a456ff65c7b9ea758a7ce3c1a47af0ab369664a9ea8f49b1a2",
+          "DeepMimic": "5deed4cfd8a04b8925e0417c2cc0953794d218c414992ee268d0411d8757f1ed",
+          "ADD": "14949b3c3ef7ab8efc92367d1f90ca469c473b0c48bfada395a72d4d60e90b8d",
+          "MIRA": "f82f561af17fa13c19db3f6409a85296b07722d919db7b6e8298cef9df4569e4"
+        },
+        "carry_box": {
+          "AMP": "38dcd5044c91fecc99b7ec8dd5b9a2ce337458ac02d0e4532259adbe4cb1ea43",
+          "DeepMimic": "950cf88300304390f68e4d7a63f4eb07df0d8af0752a17de0d3cddcc9ad4abdf",
+          "ADD": "060181432a88461b0c07515b588e3ca9ca206e0ddc025a136257768ec7cd2287",
+          "MIRA": "9253681ec06495463b09f701430d9a275216ee2d8f0b6b0f435df5403a4e1496"
+        },
+        "soccer_cmu_10_02": {
+          "AMP": "3612b9b92f9bf4c1c86976de731c1a6c1397b108b3dfcd3d7833f2b28f33b033",
+          "DeepMimic": "96e027035d30239bb500e8cea708c09a6389b2ad30c2d3ead95003e07db67615",
+          "ADD": "0671ec2b4f2030179776c84a45063ab2ed2deeb797ed8709913f7101a6cf6dc8",
+          "MIRA": "5be1003d393c0fc0f0985b83d715f1bb1ecc6c00ab8eeb0c4b352b7832af30d4"
+        }
+      }
+    },
+    "steps": {
+      "sofa003": 171,
+      "carry_box": 197,
+      "soccer_cmu_10_02": 129
+    },
+    "results": {
+      "sofa003": {
+        "AMP": {
+          "root_horizontal_speed_correlation": 0.9745080135206001,
+          "support_iou": 0.6015405002484678,
+          "planted_slip_cm_s": 1.0059669170460595,
+          "body_jerk_m_s3": 59.88475633024497
+        },
+        "DeepMimic": {
+          "root_horizontal_speed_correlation": 0.9836776221648655,
+          "support_iou": 0.5954097985347986,
+          "planted_slip_cm_s": 1.5379734372974323,
+          "body_jerk_m_s3": 65.7079111871382
+        },
+        "ADD": {
+          "root_horizontal_speed_correlation": 0.981125351636987,
+          "support_iou": 0.48588108292378057,
+          "planted_slip_cm_s": 0.8822534326411698,
+          "body_jerk_m_s3": 64.52100773291936
+        },
+        "MIRA": {
+          "root_horizontal_speed_correlation": 0.9870189652933118,
+          "support_iou": 0.6160469890510949,
+          "planted_slip_cm_s": 1.514781445743042,
+          "body_jerk_m_s3": 57.69227885309816
+        }
+      },
+      "carry_box": {
+        "AMP": {
+          "root_horizontal_speed_correlation": 0.9651116417318693,
+          "support_iou": 0.7504832213091245,
+          "planted_slip_cm_s": 2.6390672873982517,
+          "body_jerk_m_s3": 124.60258207598085
+        },
+        "DeepMimic": {
+          "root_horizontal_speed_correlation": 0.9664859597800948,
+          "support_iou": 0.7503608927932486,
+          "planted_slip_cm_s": 0.9627708591642156,
+          "body_jerk_m_s3": 110.3098692192767
+        },
+        "ADD": {
+          "root_horizontal_speed_correlation": 0.982151731115543,
+          "support_iou": 0.778432972358206,
+          "planted_slip_cm_s": 1.759031727041555,
+          "body_jerk_m_s3": 124.16398765675314
+        },
+        "MIRA": {
+          "root_horizontal_speed_correlation": 0.9925576273609578,
+          "support_iou": 0.7611945776646766,
+          "planted_slip_cm_s": 0.9202879183720166,
+          "body_jerk_m_s3": 128.0506008250805
+        }
+      },
+      "soccer_cmu_10_02": {
+        "AMP": {
+          "root_horizontal_speed_correlation": 0.9755239507255907,
+          "support_iou": 0.8346512933013622,
+          "planted_slip_cm_s": 4.976600205410253,
+          "body_jerk_m_s3": 337.4567185554109
+        },
+        "DeepMimic": {
+          "root_horizontal_speed_correlation": 0.97290127521407,
+          "support_iou": 0.7433008673741338,
+          "planted_slip_cm_s": 3.4904868801085827,
+          "body_jerk_m_s3": 348.45258928920776
+        },
+        "ADD": {
+          "root_horizontal_speed_correlation": 0.8318043222987513,
+          "support_iou": 0.7568069749160294,
+          "planted_slip_cm_s": 3.819868556588304,
+          "body_jerk_m_s3": 336.59677192539016
+        },
+        "MIRA": {
+          "root_horizontal_speed_correlation": 0.9945977448389658,
+          "support_iou": 0.8620291890265309,
+          "planted_slip_cm_s": 2.7203110406332747,
+          "body_jerk_m_s3": 327.75891038163815
+        }
+      }
+    },
+    "macro": {
+      "AMP": {
+        "root_horizontal_speed_correlation": 0.97171453532602,
+        "support_iou": 0.7288916716196515,
+        "planted_slip_cm_s": 2.8738781366181883,
+        "body_jerk_m_s3": 173.9813523205456
+      },
+      "DeepMimic": {
+        "root_horizontal_speed_correlation": 0.9743549523863434,
+        "support_iou": 0.6963571862340604,
+        "planted_slip_cm_s": 1.9970770588567435,
+        "body_jerk_m_s3": 174.82345656520752
+      },
+      "ADD": {
+        "root_horizontal_speed_correlation": 0.9316938016837604,
+        "support_iou": 0.6737070100660053,
+        "planted_slip_cm_s": 2.1537179054236764,
+        "body_jerk_m_s3": 175.0939224383542
+      },
+      "MIRA": {
+        "root_horizontal_speed_correlation": 0.9913914458310784,
+        "support_iou": 0.7464235852474341,
+        "planted_slip_cm_s": 1.7184601349161113,
+        "body_jerk_m_s3": 171.16726335327226
+      }
+    },
+    "sources": {
+      "sofa003": {
+        "AMP": {
+          "path": "PAPER/build/mira_motion_metric_audit/sofa003_AMP.npz",
+          "sha256": "4ca267186a36560f1b618a261a0b3ddd3bf8d5182130daba0f13a2e5e04fc76e"
+        },
+        "DeepMimic": {
+          "path": "PAPER/build/mira_motion_metric_audit/sofa003_DeepMimic.npz",
+          "sha256": "0129c9bea9846270a12ed06e0d9fd0f9050ca0c510d550fbb2fbce7f205a64a6"
+        },
+        "ADD": {
+          "path": "PAPER/build/mira_motion_metric_audit/sofa003_ADD.npz",
+          "sha256": "96b67bafacc2dfd99cfe2781bfb2b7112a728b210dd0176153c7cde5ff708f9d"
+        },
+        "MIRA": {
+          "path": "PAPER/build/mira_motion_metric_audit/sofa003_MIRA.npz",
+          "sha256": "a9d496b7a1c0d83799122e48e7120a8488f83be74c15c701ab9f46179788f77a"
+        }
+      },
+      "carry_box": {
+        "AMP": {
+          "path": "PAPER/build/mira_motion_metric_audit/carry_box_AMP.npz",
+          "sha256": "807d7f8f08a8dc2abab4eb7dbfeb47a9b5e8fa91a97573713191e0e1575ca00a"
+        },
+        "DeepMimic": {
+          "path": "PAPER/build/mira_motion_metric_audit/carry_box_DeepMimic.npz",
+          "sha256": "03afe692d77a5d107c23d61a21ca2a3a3b0779c5c9b3c019eb8674ffa15889ff"
+        },
+        "ADD": {
+          "path": "PAPER/build/mira_motion_metric_audit/carry_box_ADD.npz",
+          "sha256": "3a1fb6596f12c2b6a2cc5ebeb663e1e6683758db8af34d13d486924ead4d2104"
+        },
+        "MIRA": {
+          "path": "PAPER/build/mira_motion_metric_audit/carry_box_MIRA.npz",
+          "sha256": "30c091c8201cc967a168411cabdb85d8c40d5b98f75ae0517a15ed8bbccd6739"
+        }
+      },
+      "soccer_cmu_10_02": {
+        "AMP": {
+          "path": "PAPER/build/mira_motion_metric_audit/soccer_cmu_10_02_AMP.npz",
+          "sha256": "8773cd36057b590d1110488b9f32f0147c6612a92491753a092201e413a4e2da"
+        },
+        "DeepMimic": {
+          "path": "PAPER/build/mira_motion_metric_audit/soccer_cmu_10_02_DeepMimic.npz",
+          "sha256": "8189c2c93397f65e1bba7d1144ecab844f860434f63229ffc9b75803799d8949"
+        },
+        "ADD": {
+          "path": "PAPER/build/mira_motion_metric_audit/soccer_cmu_10_02_ADD.npz",
+          "sha256": "70dccc99ddacecd20954a660b500d05214194be9f56168ef5ed03f8a34979f36"
+        },
+        "MIRA": {
+          "path": "PAPER/build/mira_motion_metric_audit/soccer_cmu_10_02_MIRA.npz",
+          "sha256": "5addc56c5de450351891d185ff80b714dae6f37a65084c2b852d301186c9bc6f"
+        }
+      }
+    },
+    "soccer_trace_sources": {
+      "AMP": {
+        "path": "PAPER/build/mira_motion_metric_audit/soccer_cmu_10_02_AMP.npz",
+        "sha256": "8773cd36057b590d1110488b9f32f0147c6612a92491753a092201e413a4e2da"
+      },
+      "DeepMimic": {
+        "path": "PAPER/build/mira_motion_metric_audit/soccer_cmu_10_02_DeepMimic.npz",
+        "sha256": "8189c2c93397f65e1bba7d1144ecab844f860434f63229ffc9b75803799d8949"
+      },
+      "ADD": {
+        "path": "PAPER/build/mira_motion_metric_audit/soccer_cmu_10_02_ADD.npz",
+        "sha256": "70dccc99ddacecd20954a660b500d05214194be9f56168ef5ed03f8a34979f36"
+      },
+      "MIRA": {
+        "path": "PAPER/build/mira_motion_metric_audit/soccer_cmu_10_02_MIRA.npz",
+        "sha256": "5addc56c5de450351891d185ff80b714dae6f37a65084c2b852d301186c9bc6f"
+      }
+    }
+  },
+  "ablations": {
+    "mira": {
+      "windows": {
+        "26": [
+          0.06598674341757242,
+          0.027465472481743254,
+          0.04415487099252529,
+          0.21168358249493535,
+          1.091301672568079,
+          0.27062201082271015,
+          0.24118540569795116
+        ],
+        "60": [
+          0.055962928633046735,
+          0.031414624536667664,
+          0.038563098768221,
+          0.17583602655043554,
+          1.0111841958831065,
+          0.284865402630506,
+          0.23778043257188983
+        ]
+      },
+      "evaluated_steps": 60,
+      "training_samples": 524288000,
+      "model_file": "output/mira_cmnn64_group_rms_backflip_2000_8192_seed0_20261113/model.pt",
+      "model_sha256": "a672b2bfa95ee9a243c50ea6c2be298c93a682b2024a89b96abf08ffb1a711a1",
+      "source": {
+        "path": "PAPER/build/appendix_backflip_eval/mira/timeseries.npz",
+        "sha256": "fa1fa232a9951c42234412248a9b36e425ef472fb11a1e8fed0c121d70398853"
+      }
+    },
+    "signed": {
+      "windows": {
+        "26": [
+          0.06941340395174987,
+          0.03772919016661875,
+          0.0484438294602464,
+          0.22220403260983473,
+          1.1808743155650938,
+          0.3081816827543662,
+          0.27900046199199724
+        ],
+        "60": [
+          0.05928056624972366,
+          0.04063088886223341,
+          0.04176794349247454,
+          0.18408119117448224,
+          1.082836208572068,
+          0.30200015504015026,
+          0.26954932798386533
+        ]
+      },
+      "evaluated_steps": 60,
+      "training_samples": 524288000,
+      "model_file": "output/mira_signed_weights_backflip_2000_8192_seed0_20261122/model.pt",
+      "model_sha256": "d342c7f91d6accbc34e2a9ca0f7fcc0a8743e1ce152d52496bb7235be9cd402d",
+      "source": {
+        "path": "PAPER/build/appendix_backflip_eval/signed/timeseries.npz",
+        "sha256": "376df9ab9ee92d6cfc031132de3857b85b8b7b3b320a1d2064def949d2fa2ff6"
+      }
+    },
+    "no_sqrt": {
+      "windows": {
+        "26": [
+          0.058308638922041536,
+          0.11151072312727942,
+          0.06317166031483513,
+          0.2718300193239254,
+          1.232283512421418,
+          0.3568361240048454,
+          0.7198506661141157
+        ],
+        "60": [
+          0.07582244957385835,
+          0.1884501424446474,
+          0.07884156754580544,
+          0.2887804622424786,
+          1.2345859749232961,
+          0.4779892247719545,
+          0.7948128057423067
+        ]
+      },
+      "evaluated_steps": 60,
+      "training_samples": 524288000,
+      "model_file": "output/mira_cmnn64_no_sqrt_dg_backflip_2000_8192_seed0_20261121/model.pt",
+      "model_sha256": "80f5dcf27ef60c57e4ec9705a7f1252bb501e3b951d822793f6def0385449327",
+      "source": {
+        "path": "PAPER/build/appendix_backflip_eval/no_sqrt/timeseries.npz",
+        "sha256": "afac291c63c2a560d6ac4e3171625affa7f32deb94284218390ebc826f0f05d8"
+      }
+    },
+    "no_b": {
+      "windows": {
+        "26": [
+          0.06797517709585375,
+          0.1149627718533828,
+          0.06642700018514566,
+          0.27216904951777765,
+          1.5976006659150768,
+          0.2949418370492192,
+          0.8750909741191628
+        ]
+      },
+      "evaluated_steps": 26,
+      "training_samples": 524288000,
+      "model_file": "output/mira_ablation_backflip_matched_init_2000_8192_seed0_20261114/formal/no_b/model.pt",
+      "model_sha256": "374a256dc3200d75c102309747dcd1798c82d82a7b3813406e6cdcdab8a09361",
+      "source": {
+        "path": "PAPER/build/appendix_backflip_eval/no_b/timeseries.npz",
+        "sha256": "ea6f9e1f4e58cf6b85b8e03a9091479de83250c80ab6ac687b8f036b1959c826"
+      }
+    },
+    "no_a": {
+      "windows": {
+        "26": [
+          0.0849349224722923,
+          0.12636552403525386,
+          0.07585372534874925,
+          0.34667726121551823,
+          2.1448455590020434,
+          0.35069492766118715,
+          0.9596933235387461
+        ],
+        "60": [
+          0.12668662132555256,
+          0.13120630999261873,
+          0.07155573955787986,
+          0.3162305032257185,
+          1.840617505759777,
+          0.38537244851468133,
+          0.9465797380549096
+        ]
+      },
+      "evaluated_steps": 60,
+      "training_samples": 524288000,
+      "model_file": "output/mira_ablation_backflip_matched_init_2000_8192_seed0_20261114/formal/no_a/model.pt",
+      "model_sha256": "908192dd6c5fa5cdb74de14f807d844be9e2861698f18b20001d163cb0ecde4a",
+      "source": {
+        "path": "PAPER/build/appendix_backflip_eval/no_a/timeseries.npz",
+        "sha256": "0637c0664226a60e23bd37c1c62d88922bd5512efcb0655b21c0607a970b01ec"
+      }
+    },
+    "no_ab": {
+      "windows": {
+        "26": [
+          0.0678187693171052,
+          0.07749498471681503,
+          0.052437551119300436,
+          0.21564101556633922,
+          1.4134598314994946,
+          0.2687211188514574,
+          0.666768024463426
+        ]
+      },
+      "evaluated_steps": 28,
+      "training_samples": 524288000,
+      "model_file": "output/mira_ablation_backflip_matched_init_2000_8192_seed0_20261114/formal/no_ab/model.pt",
+      "model_sha256": "676f81cdb8c99f6ec6953cac3f27c788cbbb050b7e186dc63946c2a18a4056b9",
+      "source": {
+        "path": "PAPER/build/appendix_backflip_eval/no_ab/timeseries.npz",
+        "sha256": "b911348454e5101d5d5970ff294deab46c7d946f9d7610358608dc680291c259"
+      }
+    }
+  },
+  "tracking_columns": [
+    "Root_Pos_Err",
+    "Root_Rot_Err",
+    "Body_Pos_Err",
+    "Body_Rot_Err",
+    "Dof_Vel_Err",
+    "Root_Vel_Err",
+    "Root_Ang_Vel_Err"
+  ]
+}

@@ -9,6 +9,7 @@ import util.torch_util as torch_util
 class AMPEnv(deepmimic_env.DeepMimicEnv):
     def __init__(self, env_config, engine_config, num_envs, device, visualize, record_video=False):
         self._num_disc_obs_steps = env_config["num_disc_obs_steps"]
+        self._disc_track_global_root = env_config.get("disc_track_global_root")
         self._disc_dof_vel_obs = env_config.get("disc_dof_vel_obs", True)
         super().__init__(env_config=env_config, engine_config=engine_config, num_envs=num_envs, device=device,
                          visualize=visualize, record_video=record_video)
@@ -34,10 +35,15 @@ class AMPEnv(deepmimic_env.DeepMimicEnv):
         disc_obs = self._compute_disc_obs_demo(motion_ids, motion_times0)
         return disc_obs
 
+    def _track_global_disc_root(self):
+        if self._disc_track_global_root is None:
+            return self._track_global_root()
+        return self._disc_track_global_root
+
     def _compute_disc_obs_demo(self, motion_ids, motion_times0):
         root_pos, root_rot, root_vel, root_ang_vel, joint_rot, dof_vel, body_pos = self._fetch_disc_demo_data(motion_ids, motion_times0)
         
-        if (self._track_global_root()):
+        if (self._track_global_disc_root()):
             ref_root_pos = torch.zeros_like(root_pos[..., -1, :])
             ref_root_rot = torch.zeros_like(root_rot[..., -1, :])
             ref_root_rot[..., -1] = 1
@@ -223,7 +229,7 @@ class AMPEnv(deepmimic_env.DeepMimicEnv):
             dof_vel = dof_vel[env_ids]
             body_pos = body_pos[env_ids]
         
-        if (self._track_global_root()):
+        if (self._track_global_disc_root()):
             ref_root_pos = torch.zeros_like(root_pos[..., -1, :])
             ref_root_rot = torch.zeros_like(root_rot[..., -1, :])
             ref_root_rot[..., -1] = 1

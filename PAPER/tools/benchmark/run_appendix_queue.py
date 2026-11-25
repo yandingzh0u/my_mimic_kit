@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the single-seed appendix matrix with a full-size smoke gate."""
+"""Run the single-seed appendix or Run benchmark with a full-size smoke gate."""
 
 import argparse
 import json
@@ -72,6 +72,57 @@ def matrix(tag):
             yield f"{method}_{task}_2k_8192_seed0_{tag}", method, env, engine, agent
 
 
+def run_matrix(tag):
+    configs = ROOT / "PAPER/configs/envs"
+    engine = read_yaml(ROOT / "data/engines/isaac_lab_engine.yaml")
+    agents = dict(AGENTS, mira="mira_monotone_humanoid_agent.yaml")
+    reference = read_yaml(configs / "add_run_env.yaml")
+    for method in ("mira", "add", "deepmimic", "amp"):
+        env = read_yaml(configs / f"{'add' if method == 'mira' else method}_run_env.yaml")
+        # Match the actor's reference lookahead across rewards, including AMP.
+        # AMP retains its native transition history and discriminator loss.
+        for key in ("enable_tar_obs", "tar_obs_steps"):
+            env[key] = reference[key]
+        agent = read_yaml(ROOT / "data/agents" / agents[method])
+        if method == "amp":
+            # A looping style demo covers one cycle; anchor each transition
+            # to its final root so absolute forward travel cannot separate classes.
+            env["disc_track_global_root"] = False
+            agent["disc_eval_batch_size"] = 16384
+        name = (f"mira_cmnn64_group_rms_run_2000_8192_seed0_{tag}" if method == "mira"
+                else f"{method}_run_2k_8192_seed0_{tag}")
+        yield name, method, env, engine, agent
+
+
+def evaluate_run(queue, name, method):
+    destination = queue / "evaluation" / method
+    destination.mkdir(parents=True)
+    run_dir = OUTPUT / name
+    command = [
+        sys.executable, "-u", "PAPER/tools/evaluation/evaluate_checkpoint.py",
+        "--model-file", str(run_dir / "model.pt"),
+        "--env-config", str(run_dir / "env_config.yaml"),
+        "--engine-config", str(run_dir / "engine_config.yaml"),
+        "--agent-config", str(run_dir / "agent_config.yaml"),
+        "--motion", "run", "--method", method, "--steps", "60",
+        "--num-envs", "256", "--start-mode", "phase0", "--seed", "0",
+        "--out-dir", str(destination),
+    ]
+    with (destination / "console.log").open("x") as log:
+        subprocess.run(command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=True,
+                       env=dict(os.environ, ACCEPT_EULA="Y", OMNI_KIT_DISABLE_TELEMETRY="1"))
+    import numpy as np
+
+    with np.load(destination / "timeseries.npz") as trace:
+        alive, errors = trace["alive"], trace["tracking_error"]
+        names = trace["tracking_error_names"][:7].tolist()
+        # An early cutoff should remain visible; never pad an incomplete motion.
+        complete = alive.shape == (60, 256) and bool(alive.all())
+        return dict(evaluated_steps=int(alive.shape[0]), min_executed_steps=int(alive.sum(0).min()),
+                    mean_full_window_errors=dict(zip(names, errors[..., :7].mean((0, 1), dtype=np.float64)))
+                    if complete else None)
+
+
 def run(job, destination, rounds, smoke, resume=False, reserve_for_physx=False):
     console = destination / "console.log"
     if resume:
@@ -134,8 +185,11 @@ def run(job, destination, rounds, smoke, resume=False, reserve_for_physx=False):
     return rows, peak_mib, time.monotonic() - start
 
 
-def smoke_report(method, rows, peak_mib, elapsed):
+def smoke_report(method, rows, peak_mib, elapsed, check_tracking=False):
     required = ("Actor_Grad_Norm", "Adv_Std", "Critic_Loss", "Test_Episode_Length_Start0", "Peak_GPU_Memory_MB")
+    if check_tracking:
+        required += ("Root_Pos_Err", "Root_Rot_Err", "Body_Pos_Err", "Body_Rot_Err",
+                     "Dof_Vel_Err", "Root_Vel_Err", "Root_Ang_Vel_Err")
     if method != "deepmimic":
         required += ("Disc_Loss", "Disc_Reward_Mean", "Disc_Reward_Std", "Disc_Param_Grad_Norm", "Disc_Grad_Penalty")
     else:
@@ -159,6 +213,7 @@ def smoke_report(method, rows, peak_mib, elapsed):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--suite", choices=("appendix", "run"), default="appendix")
     parser.add_argument("--tag", required=True)
     parser.add_argument("--queue-dir", required=True, type=Path)
     parser.add_argument("--smoke-first", default="", help="Exact run name to pressure-test first")
@@ -167,7 +222,7 @@ def main():
     args = parser.parse_args()
     queue = args.queue_dir.resolve()
     queue.mkdir(parents=True, exist_ok=True)
-    plan = list(matrix(args.tag))
+    plan = list((run_matrix if args.suite == "run" else matrix)(args.tag))
     ordered_names = [name for name, *_ in plan]
     if args.smoke_first and args.smoke_first not in ordered_names:
         parser.error("--smoke-first must be an exact run name in this matrix")
@@ -244,15 +299,23 @@ def main():
                 print(f"{time.strftime('%F %T')} {phase} {name}", flush=True)
                 rows, peak_mib, elapsed = run(
                     jobs / name, destination, rounds, phase == "smoke", resume=phase == "formal" and name == interrupted,
-                    reserve_for_physx=bool(source) and method == "amp")
+                    reserve_for_physx=(bool(source) or args.suite == "run") and method == "amp")
                 if phase == "smoke":
-                    report = smoke_report(method, rows, peak_mib, elapsed)
+                    report = smoke_report(method, rows, peak_mib, elapsed, check_tracking=args.suite == "run")
                     write_json(destination / "pressure.json", report)
                     state["smoke_passed"].append(name)
                 else:
                     state["completed"].append(name)
                 write_json(queue / "status.json", state)
                 print(f"{time.strftime('%F %T')} passed {phase} {name} ({elapsed:.1f} s)", flush=True)
+        if args.suite == "run":
+            state["evaluation"] = {}
+            for name, method, *_ in plan:
+                state.update(phase="evaluation", current=name,
+                             directory=str(queue / "evaluation" / method))
+                write_json(queue / "status.json", state)
+                state["evaluation"][method] = evaluate_run(queue, name, method)
+                write_json(queue / "status.json", state)
         state.update(phase="complete", current=None, directory=None)
     except BaseException as exc:
         state.update(error=str(exc), failed_phase=state["phase"], phase="failed")

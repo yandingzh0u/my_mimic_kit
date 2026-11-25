@@ -24,6 +24,7 @@ DATA = ROOT / 'PAPER/artifacts/screenshots'
 ORIGINAL = DATA / 'mira_20261115'
 INTERACTIONS = DATA / 'mira_20261121_interactions'
 BACKFLIP_CAPTURE = DATA / 'mira_20261121_backflip'
+SOCCER_CAPTURE = DATA / 'mira_20261124_soccer'
 OUT = ROOT / 'PAPER/figures'
 NAME = 'mira_rollout_screenshots'
 # Six chronological frames per row. The longer strips continue in a second
@@ -41,22 +42,25 @@ H = sum(h * (2 if key in DOUBLE_MOTIONS else 1) for key, _, h in MOTIONS) + ROW_
 
 def load():
     items = []
+    tracking = json.loads((ROOT / 'PAPER/generated/mira_tracking_results.json').read_text())
     for motion, label, height in MOTIONS:
         if motion == 'backflip':
             directory = BACKFLIP_CAPTURE
+        elif motion == 'soccer':
+            directory = SOCCER_CAPTURE
         else:
             directory = (INTERACTIONS if motion in PROP_MOTIONS else ORIGINAL) / motion
         meta = json.loads((directory / 'metadata.json').read_text())
         expected = 12 if motion in DOUBLE_MOTIONS else 6
         assert len(meta['frames']) == expected, (motion, len(meta['frames']))
         assert meta['actual_policy_rollout'] and meta['deterministic_mean_action']
-        assert meta['training_updates'] == {'climb': 3000, 'soccer': 61}.get(motion, 2000)
+        assert meta['training_updates'] == {'climb': 3000}.get(motion, 2000)
         if motion in PROP_MOTIONS:
             assert meta['done_flag'] == 2
             assert meta['frames'][-1]['step'] == meta['executed_steps']
         if motion == 'soccer':
             assert meta['motion'] == 'cmu_10_02_physics'
-            assert meta['archive_replay_check']['ball_max_abs_position_delta_m'] < .01
+            assert meta['model_sha256'] == tracking['results']['MIRA']['soccer_cmu_10_02']['model_sha256']
         images, boxes = [], []
         for entry in meta['frames']:
             path = directory / entry['file']

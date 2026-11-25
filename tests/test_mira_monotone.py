@@ -220,6 +220,36 @@ def test_fixed_cmnn_activations_are_monotone_across_wide_input_range():
     assert (gradients >= 0).all()
 
 
+def test_no_anchor_logit_ablation_changes_only_the_learned_offset():
+    env = Env()
+    original = config()
+    no_anchor = copy.deepcopy(original)
+    no_anchor["model"]["disc_learn_anchor_logit"] = False
+    torch.manual_seed(17)
+    baseline = MIRAMonotoneAgent(original, env, "cpu")
+    torch.manual_seed(17)
+    ablated = MIRAMonotoneAgent(no_anchor, env, "cpu")
+    for key, value in ablated._model.state_dict().items():
+        if key != "_monotone_schema_version":
+            torch.testing.assert_close(value, baseline._model.state_dict()[key], atol=0, rtol=0)
+    assert len(ablated._model.get_disc_params()) == len(baseline._model.get_disc_params()) - 1
+    features = torch.cat((torch.zeros(1, FEATURE_DIM), torch.rand(32, FEATURE_DIM)))
+    torch.testing.assert_close(ablated._calc_disc_rewards(features), baseline._calc_disc_rewards(features),
+                               rtol=0, atol=0)
+    with torch.no_grad():
+        baseline._model._anchor_logit.fill_(0.75)
+    torch.testing.assert_close(ablated._model.eval_disc(features), baseline._model.eval_disc(features) - 0.75)
+
+    (policy, _), (reference, _) = physical_pair(env)
+    fill_buffers(ablated, policy, reference)
+    losses = ablated._compute_disc_loss({"disc_obs": policy[:16], "disc_obs_demo": reference[:16]})
+    assert torch.isfinite(losses["disc_loss"])
+    ablated._disc_optimizer.step(losses["disc_loss"])
+    torch.testing.assert_close(ablated._model.eval_disc(features[:1]), torch.zeros(1, 1), rtol=0, atol=1e-6)
+    with pytest.raises(RuntimeError, match="different monotone physical-error schema"):
+        ablated._model.load_state_dict(baseline._model.state_dict())
+
+
 def test_bce_updates_and_production_rewards_keep_every_metric_monotone():
     torch.manual_seed(47)
     env = Env()

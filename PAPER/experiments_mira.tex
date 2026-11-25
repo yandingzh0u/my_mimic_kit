@@ -1,158 +1,98 @@
-% Queue wide assets early so they can appear beside the experimental discussion.
-\begin{table}[t]
-\caption{MIRA configuration shared across motions.}
-\label{tab:config}
-\centering\small
-\setlength{\tabcolsep}{3.5pt}
-\begin{tabular}{ll}
-\toprule
-Component & Setting \\
-\midrule
-Physical error input & $64$ components, $7$ groups \\
-Energy network & $64\to341\to512\to1$ \\
-Activation & MixedELU \\
-Linear maps & nonnegative, diagonal-normalized \\
-Input normalization & group scale and $\sqrt{d_g}$ scaling \\
-Scale statistics & fixed after $10^8$ samples \\
-Actor / value network & MLP, hidden widths $1024$, $512$ \\
-Actor / value optimizer & SGD, lr $10^{-4}$ \\
-Discriminator optimizer & SGD, lr $2.5\times10^{-4}$ \\
-PPO settings & $\gamma=0.99$, GAE $0.95$, clip $0.2$ \\
-Replay capacity & $2\times10^5$ samples \\
-Output-weight regularizer & $0.01$ \\
-Gradient penalty & $0$ \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\input{generated/mira_main_table.tex}
-
 \begin{figure*}[!t]
 \centering
 \includegraphics[width=0.97\textwidth]{figures/mira_rollout_screenshots.pdf}
-\caption{Isaac Lab snapshots from policy rollouts. Sofa Sit, Box Carry, and
-Soccer are additional interaction examples with six keyframes each.
-Backflip, Climb, and Roll use twelve keyframes each. Backflip is sampled
-more densely during the airborne phase.}
+\caption{Isaac Lab snapshots of six motions tracked by MIRA.
+Box Carry is shown from a fixed camera so the box's displacement is visible.
+Backflip is sampled more densely during the airborne phase.}
 \label{fig:snapshots}
 \end{figure*}
-
-\begin{figure*}[!t]
-\centering
-\includegraphics[width=0.97\textwidth]{figures/mira_tracking_curves.pdf}
-\caption{Six-motion mean tracking curves from measured seed-0
-reference-start tests. Progress is the fraction of each run's training
-budget, as listed in Table~\ref{tab:main}.
-Errors cover executed trajectory portions; lower is better.}
-\label{fig:learning}
-\end{figure*}
-
-\input{generated/mira_ablation_table.tex}
-
-
 
 \section{Experiments}
 
 \subsection{Experimental Setup}
 \label{sec:setup}
-We evaluate MIRA on a $28$-DoF, $15$-body humanoid in Isaac Lab
-\cite{mittal2023isaaclab,makoviychuk2021isaacgym}. The benchmark comprises
-six skills: Roll, Climb, Backflip, Crawl, Get-Up, and Spin Kick. The main
-base training budget is $2000$ policy updates with $8192$ parallel
-environments and $32$ steps per update, corresponding to
-$5.24\times10^8$ environment samples. The Climb extension is specified
-in Table~\ref{tab:main}.
-The simulator runs at $120\,\mathrm{Hz}$ and PD joint-position actions are
-applied at $30\,\mathrm{Hz}$. MIRA uses the same configuration across motions
-(Table~\ref{tab:config}), without a gradient penalty or an additional
-handcrafted tracking reward.
+We use a $28$-DoF humanoid with $15$ rigid bodies in Isaac Lab
+\cite{mittal2023isaaclab,makoviychuk2021isaacgym} and compare MIRA with
+AMP, DeepMimic, and ADD on six motions (Fig.~\ref{fig:snapshots}).
+The base budget is $2000$ policy updates, $8192$ parallel environments,
+and $32$ steps per update, or $5.24\times10^8$ environment samples.
+Physics and PD joint-position control run at $120$ and
+$30\,\mathrm{Hz}$, respectively ($240$ and $60\,\mathrm{Hz}$ for Soccer). MIRA uses a single
+reward formulation across motions with no gradient penalty. All methods
+share the same policy observations, reset rules, and action interface
+within each of the three object-contact motions. Box Carry and Soccer
+use shared reference action targets. Appendix~\ref{app:protocol}
+details the setup and evaluation.
 
-Results use one training seed (seed~0) per configuration and deterministic
-reference-start tests recorded during training. Additional training seeds
-and a unified independent checkpoint evaluation remain \textbf{TODO}.
+\subsection{Cross-Motion Tracking}
+\input{generated/mira_tracking_table.tex}
+We report seven synchronized tracking errors for the robot's pose and
+velocities. For Sofa Sit, Box Carry, and Soccer, we evaluate the final
+checkpoints from the first reference frame in $256$ simulator replicas
+and compare the same $171$, $197$, and $129$ steps, respectively.
+For Backflip, Climb, and Roll, we select the latest logged reference-start
+test that spans $60$, $299$, and $60$ steps, respectively. These records
+compare equal motion durations and can use different training budgets.
+Each configuration uses one training seed.
 
-We report seven tracking errors: root position, root rotation, body position,
-body rotation, joint velocity, root linear velocity, and root angular
-velocity. Position errors use Euclidean distances; body positions are
-expressed relative to the root. Rotation errors use quaternion geodesic
-angles, with body orientations measured in world coordinates. Velocity
-errors use mean absolute component differences. The environment's body
-metrics average over its $15$ rigid bodies, while MIRA's input omits
-duplicated root entries from the body groups. All errors are computed on
-reference-aligned executed timesteps. Early-terminated trajectories are not
-padded, so their errors must be interpreted together with completion.
-The ablation table additionally marks whether each run reaches the full
-motion horizon.
+MIRA achieves the lowest six-motion average on six of the seven tracking
+errors among methods with full-window records (Table~\ref{tab:main}).
+Relative to the strongest available baseline for each measure, the
+largest reductions are in root position and rotation ($35.7\%$ and
+$42.2\%$), with body position and rotation errors also lower by $18.2\%$
+and $6.3\%$. The exception is joint velocity: MIRA's average is $3.3\%$
+above ADD's, primarily due to Roll and Climb.
+Appendices~\ref{app:motion_results} and \ref{app:dynamics} report the
+per-motion results and learning curves aligned by environment samples.
 
-\subsection{Quantitative Comparison}
-We compare MIRA with AMP, DeepMimic, and ADD. Table~\ref{tab:main} summarizes
-the seven tracking errors, with all six motions weighted equally. The
-table reports all four methods together and lists MIRA's per-motion
-results. The learned skills are illustrated in Fig.~\ref{fig:snapshots}.
-These measurements characterize the available seed-0 runs, rather than
-establishing uniform superiority across motions or training seeds.
+\subsection{Timing, Ground Support, and Smoothness}
+\input{generated/mira_motion_quality_table.tex}
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{figures/mira_soccer_timing.pdf}
+\caption{Timing during Soccer. Top: mean horizontal root speed. Bottom:
+foot--ground support, shown when at least half the replicas are in contact
+(or in inferred stance for the reference). Rows within each foot follow
+the legend order.}
+\label{fig:soccer_timing}
+\end{figure}
+Pose errors do not show whether a policy reproduces the timing of a
+motion or keeps its supporting foot in place. For Sofa Sit, Box Carry,
+and Soccer, we also measure horizontal root-speed correlation, temporal
+intersection over union (IoU) of ground support, stance slip, and body
+jerk. Slip and jerk characterize contact stability and smoothness,
+respectively, as in prior work \cite{yuan2023physdiff,winkler2022questsim,he2024omnih2o}.
+The measures concern the humanoid's motion; the protocol and thresholds
+are given in Appendix~\ref{app:protocol}.
 
-\subsection{Learning Dynamics}
-\label{sec:learning}
-Figure~\ref{fig:learning} reports body-position, body-rotation, and joint-velocity
-errors during training. Every method is averaged equally over the same six
-motions at equal fractions of each run's training budget. The four
-algorithms use the same evaluation and aggregation protocol, exposing
-differences in learning progress and final tracking accuracy. The curves
-do not establish an improvement
-on every motion or statistical significance across training seeds.
+MIRA leads on all four measures averaged over these three motions
+(Table~\ref{tab:motion_quality}). The clearest gains are in speed timing
+and stance slip: slip is $14.0\%$ lower than the next best method, while
+the difference in mean jerk is smaller ($1.6\%$).
+Figure~\ref{fig:soccer_timing} shows where the speed and support measures
+differ during the approach, kick, and recovery. MIRA's speed correlation
+is highest in all three motions, while other quality rankings depend
+on the motion (Appendix~\ref{app:motion_results}).
 
 \subsection{Ablation Study}
 \label{sec:ablation}
-We examine two components on Backflip: \emph{Monotone Error Modeling} and
-\emph{Diagonal Normalization}. Removing Monotone Error Modeling replaces
-the physical error vector with the ADD-style $172$-dimensional signed
-reference--policy differential, applies coordinate-wise normalization, and
-allows signed network weights. The compatible diagonal normalization is
-retained. Removing Diagonal Normalization preserves the physical error
-input and nonnegative weights but removes the layer-wise normalization
-during training. We also evaluate the configuration with both components
-removed.
+\input{generated/mira_matched_ablation_table.tex}
+On Backflip, we independently allow signed weights, remove the
+$\sqrt{d_g}$ factor, or remove diagonal normalization. The signed variant
+starts with the same nonnegative weight initialization and applies the
+diagonal scales to weight magnitudes, retaining the $1$-Lipschitz bound.
+The group-size variant keeps the historical group scales. The variant
+without diagonal normalization uses the same effective initial weights
+and keeps them nonnegative. All variants share the rollout budget and
+classification objective; Appendix~\ref{app:ablation} gives the full
+comparison.
 
-The binary classification objective, reward mapping, MixedELU activations,
-hidden widths, PPO settings, and training budget are shared. Configurations
-without diagonal normalization start from the corresponding normalized
-model's effective initial weights. This avoids introducing an arbitrary
-initial output-scale change. All variants retain the existing output-weight
-regularizer. This penalty is constant for the unit-norm normalized scalar
-head and becomes active when normalization is removed. Monotone Error
-Modeling is evaluated as a joint representation
-and constraint component, rather than an isolated dimensionality change.
-
-Table~\ref{tab:ablation} reports tracking errors and whether the
-reference-start evaluation reaches the full motion duration. Removing
-Monotone Error Modeling preserves completion but increases all seven errors
-in the available run. Both configurations without Diagonal Normalization
-terminate early. These comparisons evaluate the components as implemented;
-the additional seed repetitions remain pending.
-
-To inspect discriminator behavior, Fig.~\ref{fig:diagnostics} shows sampled
-input sensitivity, negative-sample logits, and numerically zero rewards.
-Removing Diagonal Normalization is accompanied by increased sensitivity,
-more negative scores, and reward saturation. These observations connect the
-constraint to the reward's operating behavior, without attributing the
-entire control gap to a single mechanism. The diagnostics use the measured
-Backflip run and do not stand in for a six-motion result.
-
-\FloatBarrier
-
-% The final diagnostic shares the page with the conclusion and references.
-\twocolumn[{
-\begin{minipage}{\textwidth}
-\MiraFigureType
-\centering
-\includegraphics[width=0.97\textwidth]{figures/mira_discriminator_diagnostics.pdf}
-\caption{Backflip discriminator diagnostics for the four ablations:
-sampled maximum score-gradient norm (left), mean negative logit (middle),
-and numerically zero rewards (right). Gradients use each model's normalized
-coordinates and its own rollouts; they are local operating diagnostics,
-not global bounds or common-state causal comparisons.}
-\label{fig:diagnostics}
-\vspace{12pt}
-\end{minipage}
-}]
+At the full $60$-step horizon, allowing signed weights gives higher
+errors than MIRA, and removing the group-size factor increases all
+seven errors. The variant without diagonal normalization stops after
+$26$ steps. Even on that common prefix, its body-position, body-rotation,
+and joint-velocity errors are $50\%$, $29\%$, and $46\%$ higher than MIRA's,
+respectively (Table~\ref{tab:ablation}). The unconstrained critic also
+shows larger observed score gradients and more near-zero rewards
+(Fig.~\ref{fig:diagnostics}). These observations describe the operating
+behavior of the trained critics in this run.

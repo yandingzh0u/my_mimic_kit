@@ -1,0 +1,270 @@
+\onecolumn
+\useRomanappendicesfalse
+\appendices
+
+\section{Proof of the Reward Guarantee}
+\label{app:proof}
+
+\begin{lemma}[Positive diagonal scaling]
+\label{lem:diagonal}
+Let $P\in\mathbb R_{\geq0}^{m\times n}$ and $\mathbf q\in\mathbb R_{>0}^{n}$.
+With $t_i=(P^\top P\mathbf q)_i/q_i$, define the $i$-th column of $W$
+as $P_{:i}/\sqrt{t_i}$ for $t_i>0$, and as zero otherwise.
+Then $W\geq 0$ and $\|W\|_2\leq 1$.
+\end{lemma}
+
+\noindent\emph{Proof.}
+Write $A=P^\top P$ and $T=\operatorname{diag}(\mathbf t)$.
+The matrix $A$ is symmetric with nonnegative entries. For any
+$\mathbf x\in\mathbb R^n$, expanding the square and using symmetry gives
+\begin{align}
+\mathbf x^\top(T-A)\mathbf x
+&= \sum_i \frac{x_i^2}{q_i}\sum_j A_{ij}q_j
+   - \sum_{i,j} A_{ij}x_i x_j \notag\\
+&= \frac12\sum_{i,j}A_{ij}q_i q_j
+       \left(\frac{x_i}{q_i}-\frac{x_j}{q_j}\right)^2
+\ \geq\ 0.
+\label{eq:diagonal_proof}
+\end{align}
+Thus $T\succeq P^\top P$, as in the diagonal construction of
+Araujo et al.~\cite{araujo2023unified}. If $P_{:i}\neq 0$, then
+$t_i\geq A_{ii}=\|P_{:i}\|_2^2>0$; if $P_{:i}=0$, then $t_i=0$.
+On the nonzero columns, multiplying the matrix inequality on both sides by
+$T^{-1/2}$ gives $W^\top W\preceq I$. Appending zero columns does not
+change the operator norm. Nonnegativity follows from scaling each
+nonzero column by a positive factor. \hfill$\square$
+
+\medskip
+\noindent\emph{Proof of Theorem~\ref{thm:reward}.}
+Every linear layer is coordinatewise nondecreasing by Lemma~\ref{lem:diagonal}
+and is $1$-Lipschitz in Euclidean norm; neither property depends on the bias.
+Let $f(x)=\operatorname{ELU}(x)$ with unit shape parameter. MixedELU applies
+one of $f(x)$, $-f(-x)$, or
+\[
+g(x)=
+\begin{cases}
+ f(x+1)-1, & x<0,\\
+ 1-f(1-x), & x\geq 0
+\end{cases}
+\]
+to each channel. The branches are continuous, including at the joining
+point $x=0$ in $g$, with slopes in $[0,1]$. Each scalar branch is therefore
+nondecreasing and $1$-Lipschitz. Summing squared coordinate differences
+gives the same Lipschitz bound for the coordinatewise activation in
+Euclidean norm. Composition preserves both properties for $E_\theta$.
+
+For $\mathbf z\leq\mathbf z'$ we have
+$E_\theta(\mathbf z)\leq E_\theta(\mathbf z')$, so anchoring and
+subtracting the energy in Eq.~\eqref{eq:mira_score} gives
+$s_\theta(\mathbf z)\geq s_\theta(\mathbf z')$. The additive terms
+$b+E_\theta(\mathbf 0)$ cancel from score differences, so the score
+also has Lipschitz constant at most $1$. Finally, the derivative of
+softplus is the sigmoid, which lies in $(0,1)$. Clipping the resulting
+scalar at a fixed upper cap preserves monotonicity and cannot increase
+any pairwise difference. Hence the reward is nonincreasing in each
+error component and is $1$-Lipschitz. Since $\mathbf 0\leq\mathbf z$
+for every valid input, $\mathbf 0$ maximizes the reward. \hfill$\square$
+
+\medskip
+\noindent\textbf{Scope.}
+For fixed scales, Eq.~\eqref{eq:physical_normalization} also preserves
+the componentwise ordering of the unnormalized error magnitudes.
+In particular,
+\[
+\|\mathbf z^{(g)}\|_2
+= \frac{\operatorname{RMS}(\mathbf e^{(g)})}{\max(\sigma_g,\epsilon)}.
+\]
+This identity explains the role of $\sqrt{d_g}$: repeating a group's
+components does not increase the group's normalized norm when the scale
+is fixed. The Euclidean bound is on $\mathbf z$, and the error scales
+affect what it means for two inputs to be close. The theorem permits
+ties, does not rank error vectors with opposing component changes,
+and makes no guarantee about changes in policy actions or closed-loop
+dynamics.
+
+\clearpage
+\section{Environment and Evaluation Protocol}
+\label{app:protocol}
+
+\begin{table}[!ht]
+\caption{MIRA implementation settings for the evaluated humanoid.}
+\label{tab:config}
+\centering\small
+\begin{tabular*}{0.91\linewidth}{@{\extracolsep{\fill}}ll@{}}
+\toprule
+Component & Setting \\
+\midrule
+Error and energy dimensions & $64\to341\to512\to1$; Box Carry uses $68$ input components \\
+Discriminator & MixedELU, nonnegative diagonal-normalized linear weights \\
+Error scale & Historical group means, floor $10^{-4}$, $\sqrt{d_g}$ scaling \\
+Statistics collection & First $10^8$ environment samples \\
+Policy and value networks & MLP with hidden widths $1024$ and $512$ \\
+Policy and value optimizers & SGD, learning rate $10^{-4}$ \\
+Discriminator optimizer & SGD, learning rate $2.5\times10^{-4}$, weight decay $10^{-4}$ \\
+PPO & $\gamma=0.99$, GAE $0.95$, clipping $0.2$ at $30\,\mathrm{Hz}$ \\
+Discriminator replay and regularization & $2\times10^5$ samples; output-weight regularizer $0.01$; no gradient penalty \\
+\bottomrule
+\end{tabular*}
+\end{table}
+
+\noindent\textbf{Reference and control.}
+All configurations use the same humanoid model within a motion. The
+actor observes current robot state and three future robot reference
+frames. Sofa Sit uses the Sofa003 reference and a fixed sofa. Box Carry
+uses a physics-recorded robot and box reference and a free $5$\,kg box.
+The carry policy sees the box state and its position and linear velocity
+targets three steps ahead. Its joint action is centered on the reference
+joint target at the same preview time. The carry discriminator adds box
+position and orientation errors and one hand-to-box position error per
+hand. Soccer uses a run-up and shot adapted from CMU
+motion~10\_02. A dynamic ball and a recorded PD command sequence are
+shared across methods; the policies output residual targets around that
+sequence. The evaluated Soccer configurations use $60\,\mathrm{Hz}$
+control with four physics substeps per action, $\gamma=0.99^{1/2}$,
+and GAE $0.95^{1/2}$.
+The benchmark therefore measures reference tracking in these shared
+control settings.
+
+\medskip
+\noindent\textbf{Windows and tracking errors.}
+The three object-contact clips are evaluated from a fixed reference
+start, using deterministic mean actions, with $256$ parallel simulator
+replicas of each trained policy. The tracking errors average the
+reference-aligned samples over time and replicas. For the logged
+Backflip, Climb, and Roll results, we select tests whose reported mean
+reference-start length reaches the respective horizon. Missing AMP
+records remain unreported. Root and body position use Euclidean
+distance, with body positions taken relative to the root. Root and body
+orientation use geodesic rotation angles in world coordinates.
+Velocity errors are mean absolute component differences. Reported body
+errors average over all $15$ rigid bodies, whereas the reward's body
+groups omit the separately represented root. Climb's matched
+$299$-step records use $4.98$, $5.77$, and $7.86$ in units of $10^8$
+environment samples for DeepMimic, ADD, and MIRA, respectively.
+The other populated cells of Table~\ref{tab:per_motion_errors}
+use $5.24\times10^8$ samples.
+
+\medskip
+\noindent\textbf{Motion-quality measures.}
+Speed correlation is the mean across replicas of the Pearson
+correlation between the reference and simulated planar root-speed
+series. Speeds are planar displacements multiplied by the sample
+rate after putting all traces on a $30\,\mathrm{Hz}$ grid.
+Ground-support labels for each reference foot require the lowest sole
+point to be at most $4$\,cm above the ground and the planar sole
+center speed to be at most $0.15$\,m/s. Simulated support uses a
+ground-normal contact force of at least $5$\,N. Let $S$ and $\hat S$
+denote the respective sets of simulated and reference support
+observations over feet, control steps, and replicas. Support timing
+is $|S\cap\hat S|/|S\cup\hat S|$, and stance slip averages simulated
+horizontal sole speed over $S\cap\hat S$. Scoring slip together with
+IoU distinguishes low slip from simply avoiding contact.
+Body jerk averages the Euclidean norm of the third finite difference
+of world positions, divided by $(1/30\,\mathrm{s})^3$, over all body
+points, replicas, and valid times on the $30\,\mathrm{Hz}$ grid.
+It quantifies motion smoothness; it is independent of the reference
+jerk. Each macro measure gives equal weight to the three motions.
+
+\clearpage
+\section{Per-Motion Results}
+\label{app:motion_results}
+The pose gains in the six-motion average in Table~\ref{tab:main} are
+accompanied by mixed joint-velocity results. Roll has the largest
+absolute joint-velocity gap to ADD, and Climb contributes the next
+largest gap (Table~\ref{tab:per_motion_errors}). In the object-contact
+subset, the two methods' mean joint-velocity errors are close:
+$0.27922$\,rad/s for MIRA and $0.27845$\,rad/s for ADD.
+
+\input{generated/mira_per_motion_table.tex}
+
+\input{generated/mira_per_motion_quality_table.tex}
+
+\noindent In the contact subset, MIRA obtains the strongest speed
+correlation for each motion. The lower mean stance slip is driven by
+Box Carry and Soccer; ADD has lower stance slip on Sofa Sit. For Box
+Carry, ADD has the highest support IoU, and DeepMimic has the lowest
+jerk. These per-motion comparisons distinguish the macro gains from
+performance on any individual clip.
+
+\clearpage
+\section{Learning Dynamics}
+\label{app:dynamics}
+The curves below use training-time reference-start tests. Their horizontal
+axis counts actual environment samples rather than progress relative to
+each run's final iteration. Figure~\ref{fig:learning} averages the six
+motions equally up to their shared base sample budget. Values between
+logged tests are linearly interpolated using the same sample grid.
+Tracking errors in these logs are computed on executed timesteps. For
+that reason, a low early error can describe a partially tracked
+reference; the curves alone cannot establish full-motion fidelity.
+The aligned endpoints in Table~\ref{tab:per_motion_errors} answer that
+separate question.
+
+\begin{figure}[!ht]
+\centering
+\includegraphics[width=\linewidth]{figures/mira_tracking_curves.pdf}
+\caption{Body-position, body-rotation, and joint-velocity errors averaged
+over the six motions at equal training sample counts. Lower is better.}
+\label{fig:learning}
+\end{figure}
+
+\noindent Figure~\ref{fig:velocity_detail} examines joint-velocity
+errors for Roll and Climb, where MIRA's largest terminal differences
+to ADD occur. The longer Climb runs continue to their last recorded
+tests; no continuation is inferred for runs that stop earlier.
+A portion of the Climb curves, particularly early in training,
+describes trajectories shorter than $299$ steps.
+
+\begin{figure}[!ht]
+\centering
+\includegraphics[width=\linewidth]{figures/mira_roll_climb_velocity.pdf}
+\caption{Joint-velocity error during training on Roll and Climb.
+The ADD Climb curve includes its continuation.}
+\label{fig:velocity_detail}
+\end{figure}
+
+\clearpage
+\section{Complete Backflip Ablations}
+\label{app:ablation}
+We evaluate all six checkpoints on Backflip from the reference start
+with deterministic mean actions and no automatic resets. Each trained
+for $5.24\times10^8$ samples. The compared windows are steps 1--60
+for variants with a full trace, and steps 1--26 for all variants.
+The two variants without diagonal normalization end at $26$ and
+$28$ steps. Neither contributes a full-window error. Each checkpoint
+is evaluated in $256$ simulator replicas.
+
+\input{generated/mira_full_ablation_table.tex}
+
+\noindent\textbf{Controls and combined perturbations.}
+The signed-weight variant retains physical errors, group scaling,
+and the effective nonnegative initialization. Its diagonal scaling is
+applied to magnitudes, so its signed effective matrix $W_s$ satisfies
+$\|W_s\mathbf x\|_2\leq\||W_s|\,|\mathbf x|\|_2\leq\|\mathbf x\|_2$.
+The \emph{Signed input} variant changes the representation to the
+$172$-component signed differential with per-coordinate scale estimates
+and permits signed weights. It uses signed-compatible diagonal
+normalization, and therefore measures a joint representation and
+network change. We additionally combine it with removing diagonal
+normalization. The same output-weight penalty coefficient applies in
+all variants, but the unnormalized output head can change its norm.
+
+\begin{figure}[!ht]
+\centering
+\includegraphics[width=\linewidth]{figures/mira_discriminator_diagnostics.pdf}
+\caption{Backflip discriminator diagnostics from the seed-0 training runs.
+Each model is probed on its own rollouts. Input-gradient norms are in the
+model's normalized input coordinates.}
+\label{fig:diagnostics}
+\end{figure}
+
+\noindent\textbf{Critic behavior.}
+For the two variants sharing the physical error representation,
+the terminal maximum sampled score-gradient norm is $0.995$ for
+MIRA and $10.214$ without diagonal normalization, and numerically
+zero rewards increase from $0\%$ to $39.72\%$ of samples.
+These are local measurements on different rollouts; they connect the
+constraint to the critic's score and reward ranges. Norms for the
+signed-differential input refer to different coordinates. Neither
+the diagnostic curves nor the rollout replicas quantify variation
+across independent training seeds.

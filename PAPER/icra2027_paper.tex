@@ -10,6 +10,8 @@
 \newcommand{\vect}[1]{\mathbf{#1}}
 \newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
 \newcommand{\tbd}{\textcolor{red}{TODO}}
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}{Lemma}
 \setcounter{topnumber}{3}
 \setcounter{dbltopnumber}{3}
 \setcounter{totalnumber}{4}
@@ -53,24 +55,11 @@ reward configuration.
 \end{abstract}
 
 \section{Introduction}
-Physics-based humanoid motion imitation requires the controller to
-reproduce a prescribed reference motion under dynamic constraints,
-actuator limits, and complex contact conditions. Whether an imitation
-succeeds is not a single geometric question. The root must translate and
-turn as the reference does, the articulated body must maintain consistent
-poses, joint and root velocities must stay synchronized with the reference
-motion, and contacts must occur at the right moments. Because these
-objectives have different physical units, numerical ranges, and dynamical
-characteristics, and are coupled through the robot dynamics, motion
-imitation is inherently a multi-objective control problem.
-
-Traditional methods transform several tracking errors separately and
-combine them into a scalar reward through manually chosen weights and
-scales. These coefficients determine both the relative importance and the
-numerical response of the tracking objectives. Because typical errors and
-dynamical difficulty change with the motion, a coefficient set that serves
-one skill need not serve another; in practice, reward design is often
-re-tuned whenever the reference motion changes.
+Physics-based motion imitation requires a humanoid to track position,
+orientation, and velocity while obeying dynamics and contact constraints.
+These objectives have different units and can compete. Conventional
+rewards combine them using manually selected weights and scales that may
+need retuning with a change of motion.
 
 Adversarial imitation offers a way to reduce manual reward design.
 Instead of declaring in advance how many meters of root-position error
@@ -86,43 +75,27 @@ The aggregation among tracking objectives can then be learned by the
 discriminator instead of specifying component-wise weights and scales by
 hand.
 
-Differential classification leaves two properties unspecified. First,
-separating the zero differential from policy residuals does not require a
-discriminator to rank two nonzero residuals consistently with physical
-tracking improvement. For example, reducing a rotation-representation
-coordinate difference need not reduce the actual angular error. Second,
-classification does not bound how rapidly a score changes near the policy's
-current states. A useful tracking reward therefore requires both an input
-ordering grounded in physical errors and control over its sensitivity.
+Differential classification alone neither orders nonzero errors by
+physical tracking quality nor bounds score sensitivity. A smaller
+difference in a rotation representation, for example, can correspond to
+a larger angular error. MIRA addresses both problems by learning on
+componentwise physical errors with normalized group scales. Its
+nonnegative weights and monotone activations preserve the ordering of
+physical errors, while learnable diagonal normalization bounds the
+sensitivity to those errors without a gradient penalty
+\cite{runje2023constrained,araujo2023unified}. We evaluate this reward on
+six humanoid motions and isolate the effects of the weight signs,
+group dimension scaling, and diagonal normalization.
 
-MIRA builds these properties into a single discriminator. A synchronized
-state pair is converted into a vector of nonnegative physical errors:
-Euclidean position distances, geodesic rotation angles, and absolute
-velocity gaps.
-Individual non-root bodies and joint-velocity components remain separate.
-Seven shared group scales account for physical units, and dimension
-normalization controls the contribution of group size to the input norm.
-Nonnegative weights and monotone activations make the energy nondecreasing
-in every error component. A positive, learnable diagonal normalization
-bounds each linear map's spectral norm without a gradient penalty
-\cite{araujo2023unified}. Anchoring the energy at zero error then produces
-a score that cannot decrease when all tracking errors improve.
-
-These guarantees apply in normalized physical-error coordinates. They do
-not specify how to trade a smaller body error against a larger root error,
-guarantee a nonzero response to every joint, or imply that PPO finds a
-globally optimal controller. We retain the original adversarial
-classification objective and reward mapping so that the experiments can
-examine the resulting tracking behavior directly.
-
-Our contributions are threefold. First, we formulate an adversarial
-tracking reward on componentwise physical errors with an explicit
-improvement ordering. Second, we combine constrained monotone networks
-\cite{runje2023constrained} with positive diagonal normalization to obtain
-one monotone, sensitivity-bounded reward model trained without a gradient
-penalty. Third, we evaluate a shared configuration on six humanoid skills
-and ablate the representation/monotonicity component and the normalization
-constraint, reporting both tracking errors and motion completion.
+\begin{figure*}[!t]
+\centering
+\includegraphics[width=\textwidth]{figures/mira_pipeline_reference.pdf}
+\caption{MIRA overview. Normalized physical errors and the zero-error
+positive sample train a monotone, Lipschitz-constrained discriminator.
+Its score provides a softplus imitation reward for PPO, closing the loop
+between the policy and physics simulation.}
+\label{fig:pipeline}
+\end{figure*}
 
 \section{Related Work}
 \textbf{Physics-based motion tracking and learned imitation objectives.}
@@ -162,16 +135,9 @@ their joint constraints to physical-error adversarial motion rewards.
 
 \section{Background}
 \subsection{Reference-Conditioned Motion Tracking}
-In reference-conditioned humanoid motion imitation, the controller must
-keep the executed motion continuously aligned with a time-synchronized
-reference trajectory. Let $s_t$ and $\hat{s}_t$ denote the current state
-and the reference state at time $t$. Tracking quality is jointly measured
-by several physical quantities, including root position and orientation,
-articulated body pose, and motion velocities. Let $\phi_i(s_t)$ extract
-the $i$-th tracking quantity from the current state and let
-$\phi_i(\hat{s}_t)$ denote its reference counterpart. These quantities
-may have different dimensions and physical units---positions are measured
-in meters, while rotations and velocities have their own representations.
+The policy tracks a synchronized reference trajectory while acting in
+a physics simulator. Let $s_t$ be the simulated state, $\hat{s}_t$ its
+reference, and $\phi_i(s)$ the $i$-th physical quantity of interest.
 
 \subsection{Handcrafted Objective Scalarization}
 Traditional methods partition the tracking quantities into $G$ objective
@@ -184,54 +150,20 @@ r_t^{\mathrm{hand}}
 \bigl\|\phi_g(\hat{s}_t)-\phi_g(s_t)\bigr\|_2^2\Bigr],
 \label{eq:hand}
 \end{equation}
-where $\phi_g$ extracts the tracking quantities in group $g$, while $w_g$
-and $\alpha_g$ set its relative importance and error scale. DeepMimic is a
-representative instance of this class: its tracking terms use weights and
-error scales specified before training and held fixed throughout
-\cite{peng2018deepmimic}. This is a fixed scalarization of the tracking
-objectives: the trade-off among groups is fixed through constant
-coefficients chosen before training starts.
-Because typical error magnitudes and dynamical characteristics differ
-across motions, one coefficient set need not serve all motions. Learned
-scalarization instead leaves the trade-off unspecified in advance and
-learns the aggregation among objectives from the error distribution that
-actually occurs during training.
+where $\phi_g$ extracts the quantities in group $g$, and $w_g$ and
+$\alpha_g$ specify its weight and scale before training
+\cite{peng2018deepmimic}. A learned reward instead estimates the
+aggregation from the errors observed during training.
 
 \subsection{Differential Adversarial Objectives}
 \label{sec:learned}
 
-Differential adversarial learning provides such a learned aggregation
-\cite{zhang2025add}. Consider $n$ non-negative objective losses
-$l^1,\ldots,l^n$ collected into a differential vector
-$\Delta=(l^1,\ldots,l^n)$, where each entry records the gap between the
-current solution and the ideal on one objective. When all objectives are
-simultaneously ideal, $\Delta=0$. A discriminator is trained to assign a
-high score to the ideal zero differential and lower scores to the nonzero
-differentials produced by the current policy. Because it receives all
-objective differentials jointly, the discriminator can learn a nonlinear
-aggregation of the objectives without fixed per-objective weights. Its
-sensitivity to individual objectives may vary across the residual space
-and throughout training, allowing the learned aggregation to adapt to the
-differential distribution encountered during optimization.
-
-In synchronized motion tracking, the differential can be formed directly
-from the feature residual between the current and reference states rather
-than from one scalar loss per objective. Perfect tracking again corresponds
-to the unique zero differential, while nonzero differentials preserve the
-magnitude, direction, and correlations of the tracking errors. The
-discriminator score can therefore be used to construct a policy reward
-that increases as the current differential is judged more consistent with
-perfect tracking.
-
-\begin{figure*}[!t]
-\centering
-\includegraphics[width=\textwidth]{figures/mira_pipeline_reference.pdf}
-\caption{MIRA overview. Normalized physical errors and the zero-error
-positive sample train a monotone, Lipschitz-constrained discriminator.
-Its score provides a softplus imitation reward for PPO, closing the loop
-between the policy and physics simulation.}
-\label{fig:pipeline}
-\end{figure*}
+ADD~\cite{zhang2025add} uses the signed differential between
+synchronized reference and policy features. It labels zero as the ideal
+differential and trains a discriminator to separate it from
+differentials encountered by the policy. Higher discriminator scores
+produce higher imitation rewards, allowing the model to learn the
+relative importance of the tracking objectives.
 
 \section{MIRA: Monotonic Imitation Rewards via Adversarial Learning}
 \label{sec:mira}
@@ -336,9 +268,8 @@ where $b$ is a learnable scalar, and the score at zero error is
 $s_\theta(\mathbf 0)=b$. In practice, the zero-error vector is fed into
 the network together with the error inputs of the current batch to
 compute $E_\theta(\mathbf 0)$, which is shared by all samples in that
-batch. Since $E_\theta$ is monotone, larger physical errors produce
-larger $E_\theta(\mathbf z)$ and lower discriminator scores
-$s_\theta(\mathbf z)$.
+batch. Since $E_\theta$ is monotone, increasing one error while
+holding the others fixed cannot increase the discriminator score.
 
 The discriminator is trained using binary cross-entropy. The ideal state
 in which all physical errors are zero, $\mathbf z^+=\mathbf 0$, serves
@@ -366,11 +297,12 @@ physical errors for scoring.
 The discriminator score is converted into an imitation reward using the
 same reward mapping as ADD:
 \begin{equation}
-r_t=\operatorname{softplus}\left(s_\theta(\mathbf z_t)\right).
+r_t=\min\left\{\operatorname{softplus}\left(s_\theta(\mathbf z_t)\right),
+              -\log(10^{-4})\right\}.
 \label{eq:reward}
 \end{equation}
-Since softplus is monotonically increasing, a higher discriminator score
-corresponds to a higher imitation reward. During training, the
+The reward cannot decrease as the score increases. The cap is the
+numerical safeguard used in the ADD reward implementation. During training, the
 discriminator updates its parameters using current samples and experience
 replay, while the policy is optimized through PPO using the learned
 reward. The two are updated alternately.
@@ -438,11 +370,21 @@ constraints for Lipschitz networks \cite{araujo2023unified}, guaranteeing:
 W\geq0,\qquad \|W\|_2\leq1.
 \label{eq:diagonal_bound}
 \end{equation}
-Thus, every linear layer maintains nonnegative weights and a spectral
-norm no greater than $1$. Combined with monotone, $1$-Lipschitz
-activation functions, the complete network $E_\theta$ and its associated
-imitation reward satisfy both monotonicity and a $1$-Lipschitz constraint
-in the normalized physical error space.
+The following guarantee holds for each fixed set of discriminator weights
+and normalization scales.
+
+\begin{theorem}[Monotone imitation reward]
+\label{thm:reward}
+Let $r$ be the reward in Eq.~\eqref{eq:reward}. For normalized physical
+errors $\mathbf z,\mathbf z'\in\mathbb R_{\geq0}^{d}$,
+\begin{align}
+\mathbf z\leq\mathbf z'&\ \Longrightarrow\ r(\mathbf z)\geq r(\mathbf z'),\notag\\
+|r(\mathbf z)-r(\mathbf z')|&\leq\|\mathbf z-\mathbf z'\|_2 .
+\end{align}
+The order is componentwise. In particular, zero error maximizes the reward.
+\end{theorem}
+Appendix~\ref{app:proof} proves the result. These properties govern how the
+reward responds to error changes; they place no bound on policy sensitivity.
 
 \input{experiments_mira.tex}
 
@@ -451,16 +393,17 @@ MIRA learns one adversarial imitation reward from componentwise physical
 tracking errors. Nonnegative weights and monotone activations provide a
 consistent error-improvement ordering, while learned diagonal
 normalization bounds sensitivity in normalized error coordinates without
-a gradient penalty. The six-skill seed-0 comparison with AMP,
-DeepMimic, and ADD reports tracking accuracy under the listed training
-budgets. Backflip ablations associate both model components
-with improved tracking; removing diagonal normalization also reduces
-motion completion. Further independent training seeds
-and evaluation across additional motions are needed to establish the
-generality of these empirical gains; monotonicity and bounded sensitivity
-alone do not guarantee a preferred trade-off among competing errors.
+a gradient penalty. Across six motions, MIRA's clearest empirical gains
+are in tracking the root, with smaller errors in articulated pose as well.
+The joint-velocity comparison identifies a remaining trade-off. In the
+three contact motions, MIRA tracks the timing of reference speed changes
+more closely and reduces foot slip during stance. The Backflip ablations
+separate the effects of monotonicity, group dimension scaling, and
+diagonal normalization. Further independent training seeds are needed to
+establish the generality of these results.
 
 \footnotesize
+\IEEEtriggeratref{6}
 \begin{thebibliography}{99}
 \setlength{\itemsep}{0pt}
 \bibitem{peng2018deepmimic}
@@ -525,5 +468,19 @@ and Benchmarks}, 2021.
 M.~Mittal \textit{et al.}, ``Orbit: A unified simulation framework for
 interactive robot learning environments,'' \emph{IEEE Robot. Autom.
 Lett.}, vol.~8, no.~6, 2023.
+\bibitem{winkler2022questsim}
+A.~Winkler, J.~Won, and Y.~Ye, \textquotedblleft QuestSim: Human motion tracking from sparse
+sensors with simulated avatars,\textquotedblright{} in \emph{SIGGRAPH Asia Conf. Papers}, 2022.
+\bibitem{yuan2023physdiff}
+Y.~Yuan, J.~Song, U.~Iqbal, A.~Vahdat, and J.~Kautz,
+\textquotedblleft PhysDiff: Physics-guided human motion diffusion model,\textquotedblright{}
+in \emph{Proc. ICCV}, 2023.
+\bibitem{he2024omnih2o}
+T.~He \textit{et al.}, \textquotedblleft OmniH2O: Universal and dexterous human-to-humanoid
+whole-body teleoperation and learning,\textquotedblright{} arXiv:2406.08858, 2024.
 \end{thebibliography}
+
+\clearpage
+\normalsize
+\input{appendix_mira.tex}
 \end{document}

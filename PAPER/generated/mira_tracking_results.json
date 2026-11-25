@@ -1,0 +1,596 @@
+{
+  "motions": {
+    "sofa003": "Sofa Sit",
+    "carry_box": "Box Carry",
+    "soccer_cmu_10_02": "Soccer",
+    "backflip": "Backflip",
+    "climb": "Climb",
+    "roll": "Roll"
+  },
+  "aligned_steps": {
+    "sofa003": 171,
+    "carry_box": 197,
+    "soccer_cmu_10_02": 129,
+    "backflip": 60,
+    "climb": 299,
+    "roll": 60
+  },
+  "seed": 0,
+  "metrics": [
+    "Root_Pos_Err",
+    "Root_Rot_Err",
+    "Body_Pos_Err",
+    "Body_Rot_Err",
+    "Dof_Vel_Err",
+    "Root_Vel_Err",
+    "Root_Ang_Vel_Err"
+  ],
+  "results": {
+    "AMP": {
+      "sofa003": {
+        "error": [
+          0.056431792541088356,
+          0.053544535318975274,
+          0.018978968201177816,
+          0.08017128262144979,
+          0.2226426754053546,
+          0.04912270119408351,
+          0.15148404791355657
+        ],
+        "source": {
+          "path": "PAPER/build/interaction_eval/sofa003/AMP/trajectories.npz",
+          "sha256": "fac0e8000e77eeb0761f9c55d3c56956d1fef1d837d8764a64266fbb95dc366a"
+        },
+        "steps": 171,
+        "episodes": 256,
+        "samples": 524288000,
+        "model_sha256": "ed160839faabe1a456ff65c7b9ea758a7ce3c1a47af0ab369664a9ea8f49b1a2",
+        "model_run": "output/amp_sofa003_2k_8192_seed0_20261122"
+      },
+      "carry_box": {
+        "error": [
+          0.06527277309782553,
+          0.07424715797195153,
+          0.029189624984485768,
+          0.11726076051740267,
+          0.3458140424732237,
+          0.08314523625152193,
+          0.2427189313854755
+        ],
+        "source": {
+          "path": "PAPER/build/interaction_eval/carry_box/AMP/trajectories.npz",
+          "sha256": "6c3f6a676e7af705a6e10e8d222deefc1997ca3db01c9c3fa3a2b07fa1a25519"
+        },
+        "steps": 197,
+        "episodes": 256,
+        "samples": 524288000,
+        "model_sha256": "38dcd5044c91fecc99b7ec8dd5b9a2ce337458ac02d0e4532259adbe4cb1ea43",
+        "model_run": "output/amp_carry_box_2k_8192_seed0_20261122"
+      },
+      "soccer_cmu_10_02": {
+        "error": [
+          0.1994264282613705,
+          0.18675762131801615,
+          0.04121415104483213,
+          0.17497908060249756,
+          0.48696134438582106,
+          0.16281121678734645,
+          0.4542616190258621
+        ],
+        "source": {
+          "path": "PAPER/build/interaction_eval/soccer_cmu_10_02/AMP/trajectories.npz",
+          "sha256": "807491cc77d08eef6a1f882520a2bc96df8891fc114e98eb69fb3f476c7f0fa1"
+        },
+        "steps": 129,
+        "episodes": 256,
+        "samples": 524288000,
+        "model_sha256": "3612b9b92f9bf4c1c86976de731c1a6c1397b108b3dfcd3d7833f2b28f33b033",
+        "model_run": "output/amp_soccer_cmu_10_02_2k_8192_seed0_20261122"
+      },
+      "backflip": {
+        "error": null,
+        "source": {
+          "path": "output/amp_backflip_2k_8192_seed0/train_metrics.jsonl",
+          "sha256": "cabd372ed7de491e9afcad8ace538d1b87c46ca804cf221f2bafd69601aea19a"
+        },
+        "reason": "No logged full-horizon test"
+      },
+      "climb": {
+        "error": null,
+        "source": {
+          "path": "output/amp_climb_2k_8192_seed0/train_metrics.jsonl",
+          "sha256": "f2acd42b39064d15475a57f74970890316a242603795c1dc2e7282175183cba6"
+        },
+        "reason": "No logged full-horizon test"
+      },
+      "roll": {
+        "error": [
+          0.5644740462303162,
+          1.6697959899902344,
+          0.44627702236175537,
+          1.53131902217865,
+          2.3432278633117676,
+          0.7330958247184753,
+          2.1443114280700684
+        ],
+        "source": {
+          "path": "output/amp_roll_2k_8192_seed0/train_metrics.jsonl",
+          "sha256": "42c57845f5866098f3faf360721c85aeede949dc7f87faaf918022e328d9f71f"
+        },
+        "source_line": 21,
+        "steps": 60,
+        "samples": 524288000,
+        "iteration": 1999,
+        "episodes": 8192
+      }
+    },
+    "DeepMimic": {
+      "sofa003": {
+        "error": [
+          0.06289455029921645,
+          0.06885522944839605,
+          0.01938531393517484,
+          0.10133998491980029,
+          0.26330480233501313,
+          0.061876240151731404,
+          0.1590554534750109
+        ],
+        "source": {
+          "path": "PAPER/build/interaction_eval/sofa003/DeepMimic/trajectories.npz",
+          "sha256": "13a7f423d700d1153816d9ba0cffb9322f1e46d87504372273ebb0ca0ffdde0d"
+        },
+        "steps": 171,
+        "episodes": 256,
+        "samples": 524288000,
+        "model_sha256": "5deed4cfd8a04b8925e0417c2cc0953794d218c414992ee268d0411d8757f1ed",
+        "model_run": "output/deepmimic_sofa003_2k_8192_seed0_20261122"
+      },
+      "carry_box": {
+        "error": [
+          0.03610127737646725,
+          0.07578330182600831,
+          0.02602891201430918,
+          0.12042824067002539,
+          0.39081494536330313,
+          0.07569102893807775,
+          0.23779208770887228
+        ],
+        "source": {
+          "path": "PAPER/build/interaction_eval/carry_box/DeepMimic/trajectories.npz",
+          "sha256": "8f4adccb1579b8b3b8dae3a95e8d26d5cbf059d7b91215022e8c5b0f21d8867e"
+        },
+        "steps": 197,
+        "episodes": 256,
+        "samples": 524288000,
+        "model_sha256": "950cf88300304390f68e4d7a63f4eb07df0d8af0752a17de0d3cddcc9ad4abdf",
+        "model_run": "output/deepmimic_carry_box_2k_8192_seed0_20261122"
+      },
+      "soccer_cmu_10_02": {
+        "error": [
+          0.058247818541718,
+          0.12886627136829829,
+          0.03810583000491294,
+          0.1446219034307235,
+          0.5202855870031567,
+          0.14136384048974868,
+          0.4818829978507575
+        ],
+        "source": {
+          "path": "PAPER/build/interaction_eval/soccer_cmu_10_02/DeepMimic/trajectories.npz",
+          "sha256": "4504bdab7dc0bc38a77f45c58827d2b1a14f24386789b801721d5fec51d83063"
+        },
+        "steps": 129,
+        "episodes": 256,
+        "samples": 524288000,
+        "model_sha256": "96e027035d30239bb500e8cea708c09a6389b2ad30c2d3ead95003e07db67615",
+        "model_run": "output/deepmimic_soccer_cmu_10_02_2k_8192_seed0_20261122"
+      },
+      "backflip": {
+        "error": [
+          0.05372215062379837,
+          0.0987393707036972,
+          0.03962826356291771,
+          0.17924095690250397,
+          1.2976140975952148,
+          0.2698861062526703,
+          0.7662243843078613
+        ],
+        "source": {
+          "path": "output/deepmimic_backflip_2k_8192_seed0/train_metrics.jsonl",
+          "sha256": "efeda9eee5a04f8a2696cae5598366bd841dd953f34840b7d5ba977b4f498a9b"
+        },
+        "source_line": 21,
+        "steps": 60,
+        "samples": 524288000,
+        "iteration": 1999,
+        "episodes": 8192
+      },
+      "climb": {
+        "error": [
+          0.08135832101106644,
+          0.12283575534820557,
+          0.05133390799164772,
+          0.2142358124256134,
+          0.7705951929092407,
+          0.17077891528606415,
+          0.4541895091533661
+        ],
+        "source": {
+          "path": "output/deepmimic_climb_2k_8192_seed0/train_metrics.jsonl",
+          "sha256": "bccc2a54057f4eabd3df97f01904ddecf88ef10e79505647613168078dab30ab"
+        },
+        "source_line": 20,
+        "steps": 299,
+        "samples": 498335744,
+        "iteration": 1900,
+        "episodes": 8192
+      },
+      "roll": {
+        "error": [
+          0.17523826658725739,
+          0.404291033744812,
+          0.1452537477016449,
+          0.5126147270202637,
+          1.3141194581985474,
+          0.341779887676239,
+          0.7329327464103699
+        ],
+        "source": {
+          "path": "output/deepmimic_roll_2k_8192_seed0/train_metrics.jsonl",
+          "sha256": "f1b2f467641e9caf257983c040435bcf228b25665b63fa13514d2d7a607f48e7"
+        },
+        "source_line": 21,
+        "steps": 60,
+        "samples": 524288000,
+        "iteration": 1999,
+        "episodes": 8192
+      }
+    },
+    "ADD": {
+      "sofa003": {
+        "error": [
+          0.04646427862966799,
+          0.04788440737407569,
+          0.024657882535457407,
+          0.10496349036919936,
+          0.2003091262942466,
+          0.0591121949392848,
+          0.12598424691680132
+        ],
+        "source": {
+          "path": "PAPER/build/interaction_eval/sofa003/ADD/trajectories.npz",
+          "sha256": "7bae7788ee4c8b90b2642eed31410940b88454ddd120d43652167ec73a86fafd"
+        },
+        "steps": 171,
+        "episodes": 256,
+        "samples": 524288000,
+        "model_sha256": "14949b3c3ef7ab8efc92367d1f90ca469c473b0c48bfada395a72d4d60e90b8d",
+        "model_run": "output/add_sofa003_2k_8192_seed0_20261122"
+      },
+      "carry_box": {
+        "error": [
+          0.03294003967091485,
+          0.02913552677058031,
+          0.01409496493463936,
+          0.050787593411976945,
+          0.24308095639612173,
+          0.05339627664696235,
+          0.14942130944029192
+        ],
+        "source": {
+          "path": "PAPER/build/interaction_eval/carry_box/ADD/trajectories.npz",
+          "sha256": "52493a8822cf8866552039beeb34eaad3e8c3ab40e405c6000d0018bf091d51d"
+        },
+        "steps": 197,
+        "episodes": 256,
+        "samples": 524288000,
+        "model_sha256": "060181432a88461b0c07515b588e3ca9ca206e0ddc025a136257768ec7cd2287",
+        "model_run": "output/add_carry_box_2k_8192_seed0_20261122"
+      },
+      "soccer_cmu_10_02": {
+        "error": [
+          0.09079787183623893,
+          0.15836748596113692,
+          0.05409802827312013,
+          0.16349759599292818,
+          0.39194958474236186,
+          0.1825877286496965,
+          0.4242242405848946
+        ],
+        "source": {
+          "path": "PAPER/build/interaction_eval/soccer_cmu_10_02/ADD/trajectories.npz",
+          "sha256": "119b5b730ac5865bcbb14ab0825b3573b935818341bbf4b0728be5328368193d"
+        },
+        "steps": 129,
+        "episodes": 256,
+        "samples": 524288000,
+        "model_sha256": "0671ec2b4f2030179776c84a45063ab2ed2deeb797ed8709913f7101a6cf6dc8",
+        "model_run": "output/add_soccer_cmu_10_02_2k_8192_seed0_20261122"
+      },
+      "backflip": {
+        "error": [
+          0.0904974415898323,
+          0.08917836844921112,
+          0.04373190551996231,
+          0.16522759199142456,
+          1.0422751903533936,
+          0.3528596758842468,
+          0.6060552000999451
+        ],
+        "source": {
+          "path": "output/add_backflip_2k_8192_seed0/train_metrics.jsonl",
+          "sha256": "df207e950daf7a1a1833de6ee60cbccebbd0875563ab2373a656e2487a58e576"
+        },
+        "source_line": 21,
+        "steps": 60,
+        "samples": 524288000,
+        "iteration": 1999,
+        "episodes": 8192
+      },
+      "climb": {
+        "error": [
+          0.07485271245241165,
+          0.04092942550778389,
+          0.02308606542646885,
+          0.08719152212142944,
+          0.49826425313949585,
+          0.11936303228139877,
+          0.2938639521598816
+        ],
+        "source": {
+          "path": "output/add_climb_2k_8192_seed0_resume500_v3/train_metrics.jsonl",
+          "sha256": "8d06617b77971182f848c81f8571d0773a9d80cae2cae03582bc3fa2f0f4ab2b"
+        },
+        "source_line": 3,
+        "steps": 299,
+        "samples": 576978944,
+        "iteration": 2200,
+        "episodes": 8192
+      },
+      "roll": {
+        "error": [
+          0.0778704509139061,
+          0.09265600144863129,
+          0.03988718241453171,
+          0.13888362050056458,
+          0.8337695598602295,
+          0.3278418183326721,
+          0.5531971454620361
+        ],
+        "source": {
+          "path": "output/add_roll_2k_8192_seed0/train_metrics.jsonl",
+          "sha256": "2c0768445855d558ed01992760672906ff500e7580a44f3b9fa07e1098d4935a"
+        },
+        "source_line": 21,
+        "steps": 60,
+        "samples": 524288000,
+        "iteration": 1999,
+        "episodes": 8192
+      }
+    },
+    "MIRA": {
+      "sofa003": {
+        "error": [
+          0.025096491194835303,
+          0.034925224082606995,
+          0.017563936409289604,
+          0.07353518342376994,
+          0.21264569150751636,
+          0.04435150317929275,
+          0.09389921422287348
+        ],
+        "source": {
+          "path": "PAPER/build/interaction_eval/sofa003/MIRA/trajectories.npz",
+          "sha256": "e37c41e570f9d0e9b3f2196d5393c747ee015eb76cffed7cf690ac15490ba5a0"
+        },
+        "steps": 171,
+        "episodes": 256,
+        "samples": 524288000,
+        "model_sha256": "f82f561af17fa13c19db3f6409a85296b07722d919db7b6e8298cef9df4569e4",
+        "model_run": "output/mira_cmnn64_group_rms_sofa003_2000_8192_seed0_20261122"
+      },
+      "carry_box": {
+        "error": [
+          0.017580952748884725,
+          0.03003617096982254,
+          0.014541790876081984,
+          0.06598122940536294,
+          0.26418848522059174,
+          0.04009299906167679,
+          0.1231318845701875
+        ],
+        "source": {
+          "path": "PAPER/build/interaction_eval/carry_box/MIRA/trajectories.npz",
+          "sha256": "964f2439acf626f0be38cb747f6cb546526cd4eb5a8e0cfbea031b8010ef7677"
+        },
+        "steps": 197,
+        "episodes": 256,
+        "samples": 524288000,
+        "model_sha256": "9253681ec06495463b09f701430d9a275216ee2d8f0b6b0f435df5403a4e1496",
+        "model_run": "output/mira_cmnn68_group_rms_carry_box_2000_8192_seed0_20261122"
+      },
+      "soccer_cmu_10_02": {
+        "error": [
+          0.04254726710781833,
+          0.07100021866414348,
+          0.02209362259406427,
+          0.08950373040735672,
+          0.36081176761979084,
+          0.06790778145631514,
+          0.23764330543087644
+        ],
+        "source": {
+          "path": "PAPER/build/interaction_eval/soccer_cmu_10_02/MIRA/trajectories.npz",
+          "sha256": "fbb5b16d9ece9474617d536204d41be365b87a7a5303987ec2e317981b744dae"
+        },
+        "steps": 129,
+        "episodes": 256,
+        "samples": 524288000,
+        "model_sha256": "5be1003d393c0fc0f0985b83d715f1bb1ecc6c00ab8eeb0c4b352b7832af30d4",
+        "model_run": "output/mira_cmnn64_group_rms_soccer_cmu_10_02_2000_8192_seed0_20261122"
+      },
+      "backflip": {
+        "error": [
+          0.054400209337472916,
+          0.030333857983350754,
+          0.03733622282743454,
+          0.17010456323623657,
+          0.9793452620506287,
+          0.2759517431259155,
+          0.23156985640525818
+        ],
+        "source": {
+          "path": "output/mira_cmnn64_group_rms_backflip_2000_8192_seed0_20261113/train_metrics.jsonl",
+          "sha256": "548f47c0c1f42357140978f4fa0f35925532c14130a6ef6b20374a194b91abf5"
+        },
+        "source_line": 21,
+        "steps": 60,
+        "samples": 524288000,
+        "iteration": 1999,
+        "episodes": 8192
+      },
+      "climb": {
+        "error": [
+          0.051897887140512466,
+          0.03655035421252251,
+          0.02499404177069664,
+          0.0955568477511406,
+          0.547290027141571,
+          0.09801299124956131,
+          0.23403510451316833
+        ],
+        "source": {
+          "path": "output/mira_cmnn64_group_rms_climb_2000_8192_seed0_20261113/train_metrics.jsonl",
+          "sha256": "8a2b7d6e9556b83e07a3a3063047a88ec443e3c8c5b075c5e8d3905b93af51ab"
+        },
+        "source_line": 33,
+        "steps": 299,
+        "samples": 786432000,
+        "iteration": 2999,
+        "episodes": 8192
+      },
+      "roll": {
+        "error": [
+          0.07446355372667313,
+          0.062108468264341354,
+          0.04671403765678406,
+          0.171269953250885,
+          0.9509138464927673,
+          0.3007301986217499,
+          0.45582085847854614
+        ],
+        "source": {
+          "path": "output/mira_cmnn64_group_rms_roll_2000_8192_seed0_20261115/train_metrics.jsonl",
+          "sha256": "4a3b6eb4b2e61b6a2fa3f7bc8ab951912e416ac93c83eb4baaea9214a5302d1c"
+        },
+        "source_line": 21,
+        "steps": 60,
+        "samples": 524288000,
+        "iteration": 1999,
+        "episodes": 8192
+      }
+    }
+  },
+  "macro_six": {
+    "AMP": null,
+    "DeepMimic": [
+      0.07792706407325399,
+      0.14989516040656956,
+      0.05328932920176788,
+      0.2120802708948217,
+      0.7594556805674126,
+      0.1768960031324219,
+      0.4720128631510397
+    ],
+    "ADD": [
+      0.06890379918216197,
+      0.07635853591856988,
+      0.033259338184029964,
+      0.11842523573125385,
+      0.5349414451309749,
+      0.18252678778904355,
+      0.35879101577730843
+    ],
+    "MIRA": [
+      0.04433106020936615,
+      0.0441590490294646,
+      0.027207275355725185,
+      0.11099191791245862,
+      0.5525325133388109,
+      0.13784120278241857,
+      0.22935003727015169
+    ]
+  },
+  "macro_contact": {
+    "AMP": [
+      0.10704366463342813,
+      0.10484977153631432,
+      0.029794248076831908,
+      0.12413704124711666,
+      0.3518060207547998,
+      0.09835971807765063,
+      0.28282153277496475
+    ],
+    "DeepMimic": [
+      0.0524145487391339,
+      0.09116826754756753,
+      0.027840018651465653,
+      0.12213004300684972,
+      0.391468444900491,
+      0.09297703652651927,
+      0.2929101796782136
+    ],
+    "ADD": [
+      0.05673406337894058,
+      0.07846247336859764,
+      0.030950291914405636,
+      0.10641622659136817,
+      0.2784465558109101,
+      0.09836540007864787,
+      0.23320993231399592
+    ],
+    "MIRA": [
+      0.028408237017179455,
+      0.04532053790552434,
+      0.018066449959811954,
+      0.07634004774549653,
+      0.279215314782633,
+      0.05078409456576156,
+      0.1515581347413125
+    ]
+  },
+  "curve_logs": {
+    "AMP": {
+      "sofa003": "output/amp_sofa003_2k_8192_seed0_20261122/train_metrics.jsonl",
+      "carry_box": "output/amp_carry_box_2k_8192_seed0_20261122/train_metrics.jsonl",
+      "soccer_cmu_10_02": "output/amp_soccer_cmu_10_02_2k_8192_seed0_20261122/train_metrics.jsonl",
+      "backflip": "output/amp_backflip_2k_8192_seed0/train_metrics.jsonl",
+      "climb": "output/amp_climb_2k_8192_seed0/train_metrics.jsonl",
+      "roll": "output/amp_roll_2k_8192_seed0/train_metrics.jsonl"
+    },
+    "DeepMimic": {
+      "sofa003": "output/deepmimic_sofa003_2k_8192_seed0_20261122/train_metrics.jsonl",
+      "carry_box": "output/deepmimic_carry_box_2k_8192_seed0_20261122/train_metrics.jsonl",
+      "soccer_cmu_10_02": "output/deepmimic_soccer_cmu_10_02_2k_8192_seed0_20261122/train_metrics.jsonl",
+      "backflip": "output/deepmimic_backflip_2k_8192_seed0/train_metrics.jsonl",
+      "climb": "output/deepmimic_climb_2k_8192_seed0/train_metrics.jsonl",
+      "roll": "output/deepmimic_roll_2k_8192_seed0/train_metrics.jsonl"
+    },
+    "ADD": {
+      "sofa003": "output/add_sofa003_2k_8192_seed0_20261122/train_metrics.jsonl",
+      "carry_box": "output/add_carry_box_2k_8192_seed0_20261122/train_metrics.jsonl",
+      "soccer_cmu_10_02": "output/add_soccer_cmu_10_02_2k_8192_seed0_20261122/train_metrics.jsonl",
+      "backflip": "output/add_backflip_2k_8192_seed0/train_metrics.jsonl",
+      "climb": "output/add_climb_2k_8192_seed0/train_metrics.jsonl",
+      "roll": "output/add_roll_2k_8192_seed0/train_metrics.jsonl"
+    },
+    "MIRA": {
+      "sofa003": "output/mira_cmnn64_group_rms_sofa003_2000_8192_seed0_20261122/train_metrics.jsonl",
+      "carry_box": "output/mira_cmnn68_group_rms_carry_box_2000_8192_seed0_20261122/train_metrics.jsonl",
+      "soccer_cmu_10_02": "output/mira_cmnn64_group_rms_soccer_cmu_10_02_2000_8192_seed0_20261122/train_metrics.jsonl",
+      "backflip": "output/mira_cmnn64_group_rms_backflip_2000_8192_seed0_20261113/train_metrics.jsonl",
+      "climb": "output/mira_cmnn64_group_rms_climb_2000_8192_seed0_20261113/train_metrics.jsonl",
+      "roll": "output/mira_cmnn64_group_rms_roll_2000_8192_seed0_20261115/train_metrics.jsonl"
+    }
+  }
+}

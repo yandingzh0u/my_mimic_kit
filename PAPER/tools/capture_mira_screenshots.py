@@ -24,6 +24,8 @@ INTERACTION_VIEWS = {
     'samp_sofa003': {'eye': (-2.09, -1.92, 1.94), 'target': (.42, .53, .74)},
     'continuous_box_transport': {'eye': (1.63, -4.15, 2.17), 'target': (1.63, .06, .72),
                                  'prop_color': (.55, .32, .13)},
+    'cmu_10_02_physics': {'eye': (1.62, -5.05, 2.40), 'target': (1.62, -.61, .73),
+                         'prop_color': (.84, .55, .12)},
 }
 
 

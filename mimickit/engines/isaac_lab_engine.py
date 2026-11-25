@@ -93,7 +93,7 @@ class IsaacLabEngine(engine.Engine):
             self._control_mode = engine.ControlMode.none
 
         self._env_offsets = self._compute_env_offsets(num_envs)
-        self._build_ground()
+        self._build_ground(config.get("ground_mesh"))
         
         if (visualize or record_video):
             self._build_lights()
@@ -640,7 +640,7 @@ class IsaacLabEngine(engine.Engine):
     def get_sim(self):
         return self._sim
     
-    def _build_ground(self):
+    def _build_ground(self, mesh_file=None):
         import isaaclab.sim as sim_utils
         from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
         import omni.kit.commands
@@ -655,6 +655,10 @@ class IsaacLabEngine(engine.Engine):
 
         physics_material = sim_utils.RigidBodyMaterialCfg(static_friction=1.0, dynamic_friction=1.0,
                                                           restitution=0.0)
+        if mesh_file is not None:
+            self._build_ground_mesh(mesh_file, physics_material, ground_col)
+            return
+
         plane_cfg = GroundPlaneCfg(physics_material=physics_material, color=ground_col,
                                     size=(texture_width, texture_width))
         self._ground = spawn_ground_plane(prim_path=ground_path, cfg=plane_cfg)
@@ -666,6 +670,48 @@ class IsaacLabEngine(engine.Engine):
         shader_path = ground_path + "/Looks/theGrid/Shader"
         shader_prim = self._stage.GetPrimAtPath(shader_path)
         shader_prim.GetAttribute("inputs:albedo_add").Set(10.0)
+        return
+
+    def _build_ground_mesh(self, mesh_file, physics_material, ground_color):
+        import isaaclab.sim as sim_utils
+        from pxr import Gf, UsdGeom, UsdPhysics, Vt
+
+        with np.load(mesh_file, allow_pickle=False) as asset:
+            vertices = np.ascontiguousarray(asset["vertices"], dtype=np.float32)
+            faces = np.ascontiguousarray(asset["triangles"], dtype=np.int32)
+        if (vertices.ndim != 2 or vertices.shape[1] != 3 or not vertices.size
+                or not np.isfinite(vertices).all() or faces.ndim != 2
+                or faces.shape[1] != 3 or not faces.size or faces.min() < 0
+                or faces.max() >= len(vertices)):
+            raise ValueError(f"Invalid ground triangle mesh: {mesh_file}")
+        if np.any(np.ptp(vertices[:, :2], axis=0) >= self._env_spacing):
+            raise ValueError(f"Ground mesh tiles must be smaller than env_spacing: {mesh_file}")
+
+        # Put every tile in the same world frame as its robot. One shared
+        # collider keeps the filtered ground contact tensor at one column.
+        offsets = self._env_offsets.cpu().numpy()
+        points = np.broadcast_to(vertices, (len(offsets), *vertices.shape)).copy()
+        points[:, :, :2] += offsets[:, None, :]
+        face_offsets = np.arange(len(offsets), dtype=np.int32) * len(vertices)
+        indices = faces[None, :, :] + face_offsets[:, None, None]
+        points = points.reshape(-1, 3)
+
+        mesh = UsdGeom.Mesh.Define(self._stage, GROUND_PATH)
+        mesh.CreateSubdivisionSchemeAttr(UsdGeom.Tokens.none)
+        mesh.CreatePointsAttr(Vt.Vec3fArray.FromNumpy(points))
+        mesh.CreateFaceVertexCountsAttr(Vt.IntArray.FromNumpy(np.full(len(indices) * len(faces), 3, dtype=np.int32)))
+        mesh.CreateFaceVertexIndicesAttr(Vt.IntArray.FromNumpy(indices.reshape(-1)))
+        mesh.CreateExtentAttr([Gf.Vec3f(*points.min(axis=0).tolist()),
+                               Gf.Vec3f(*points.max(axis=0).tolist())])
+        mesh.CreateDisplayColorAttr([Gf.Vec3f(*ground_color.tolist())])
+        self._ground = mesh.GetPrim()
+        UsdPhysics.MeshCollisionAPI.Apply(self._ground).CreateApproximationAttr("none")
+        UsdPhysics.CollisionAPI.Apply(self._ground)
+        UsdPhysics.RigidBodyAPI.Apply(self._ground).CreateKinematicEnabledAttr(True)
+
+        material_path = GROUND_PATH + "/physicsMaterial"
+        physics_material.func(material_path, physics_material)
+        sim_utils.bind_physics_material(GROUND_PATH, material_path)
         return
     
     def _compute_env_offsets(self, num_envs):
