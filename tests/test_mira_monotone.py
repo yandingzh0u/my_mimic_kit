@@ -17,7 +17,7 @@ from learning.add_agent import calc_unscaled_disc_reward
 from learning.mira_monotone_agent import MIRAMonotoneAgent
 from learning.mira_monotone_model import (
     ADDPairErrorMetrics, MIRAMonotoneModel, FEATURE_DIM, HIDDEN_WIDTHS,
-    MixedELU, aggregate_error_metrics)
+    GroupSortMaxMin, MixedELU, aggregate_error_metrics)
 from learning.add_model import ADDModel
 from learning.physical_error_normalizer import PhysicalErrorNormalizer
 import util.torch_util as torch_util
@@ -220,6 +220,41 @@ def test_fixed_cmnn_activations_are_monotone_across_wide_input_range():
     assert (gradients >= 0).all()
 
 
+def test_groupsort_maxmin_preserves_width_and_does_not_expand_distances():
+    activation = GroupSortMaxMin()
+    values = torch.tensor([[1., 3., 4., -2., 9.], [3., 1., 4., 4., -9.]])
+    torch.testing.assert_close(activation(values), torch.tensor([
+        [3., 1., 4., -2., 9.], [3., 1., 4., 4., -9.]]))
+    torch.testing.assert_close(activation(values[:, -1:]), values[:, -1:])
+    x, y = (torch.randn(64, 341) for _ in range(2))
+    assert ((activation(x) - activation(y)).norm(dim=-1) <= (x - y).norm(dim=-1) + 1e-5).all()
+    assert (activation(x + y.abs()) >= activation(x)).all()
+
+
+def test_groupsort_ablation_keeps_initial_weights_and_rejects_mismatched_checkpoints():
+    env = Env()
+    cfg = config()
+    candidate = copy.deepcopy(cfg)
+    candidate["model"]["disc_activation"] = "groupsort_maxmin"
+    torch.manual_seed(17)
+    baseline = MIRAMonotoneAgent(cfg, env, "cpu")
+    torch.manual_seed(17)
+    maxmin = MIRAMonotoneAgent(candidate, env, "cpu")
+    original, alternate = (copy.deepcopy(agent.state_dict()) for agent in (baseline, maxmin))
+    assert original.keys() == alternate.keys()
+    for key in original:
+        if key != "_model._monotone_schema_version":
+            torch.testing.assert_close(original[key], alternate[key], atol=0, rtol=0)
+    for agent, wrong in ((baseline, alternate), (maxmin, original)):
+        with pytest.raises(RuntimeError, match="different monotone physical-error schema"):
+            agent.load_state_dict(wrong, strict=True)
+    maxmin = MIRAMonotoneAgent(candidate, env, "cpu")
+    maxmin.load_state_dict(alternate, strict=True)
+    extra = maxmin._get_checkpoint_extra_state()
+    maxmin._load_checkpoint_extra_state(extra)
+    assert extra["monotone_disc"]["activation"] == "groupsort_maxmin"
+
+
 def test_no_anchor_logit_ablation_changes_only_the_learned_offset():
     env = Env()
     original = config()
@@ -250,10 +285,13 @@ def test_no_anchor_logit_ablation_changes_only_the_learned_offset():
         ablated._model.load_state_dict(baseline._model.state_dict())
 
 
-def test_bce_updates_and_production_rewards_keep_every_metric_monotone():
+@pytest.mark.parametrize("activation", ["mixed_elu", "groupsort_maxmin"])
+def test_bce_updates_and_production_rewards_keep_every_metric_monotone(activation):
     torch.manual_seed(47)
     env = Env()
-    agent = MIRAMonotoneAgent(config(), env, "cpu")
+    cfg = config()
+    cfg["model"]["disc_activation"] = activation
+    agent = MIRAMonotoneAgent(cfg, env, "cpu")
     (policy, _), (reference, _) = physical_pair(env)
     fill_buffers(agent, policy, reference)
     batch = {"disc_obs": policy[:16], "disc_obs_demo": reference[:16]}

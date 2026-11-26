@@ -162,6 +162,10 @@ class MIRAMonotoneAgent(ADDAgent):
         if not self._model.disc_learn_anchor_logit:
             score = state["monotone_disc"]["score"]
             state["monotone_disc"]["score"] = score.replace("learned_bias", "fixed_zero_bias", 1)
+        if self._model.disc_activation != "mixed_elu":
+            disc = state["monotone_disc"]
+            disc["activation"] = self._model.disc_activation
+            disc["score"] = disc["score"].replace("_CMNN_", "_")
         if layout.grip_release_aware:
             state["monotone_disc"]["carry_grip"] = "through_last_reference_contact"
         return state

@@ -21,6 +21,7 @@ MONOTONE_SCHEMA_VERSION = 4
 SIGNED_WEIGHT_SCHEMA_VERSION = 5
 FIXED_ANCHOR_SCHEMA_VERSION = 6
 SIGNED_FIXED_ANCHOR_SCHEMA_VERSION = 7
+MAXMIN_SCHEMA_OFFSET = 4
 HIDDEN_WIDTHS = (341, 512)
 METRIC_NAMES = ("root_pos", "root_rot", "body_pos", "body_rot",
                 "dof_vel", "root_vel", "root_ang_vel")
@@ -144,6 +145,17 @@ class MixedELU(nn.Module):
         return torch.cat((F.elu(convex), -F.elu(-concave), saturated), -1)
 
 
+class GroupSortMaxMin(nn.Module):
+    """Sort adjacent pairs (max, min); pass an unpaired last channel through."""
+    def forward(self, values):
+        paired = values.shape[-1] // 2 * 2
+        first, second = values[..., :paired:2], values[..., 1:paired:2]
+        swap = first < second
+        sorted_pairs = torch.stack((torch.where(swap, second, first),
+                                    torch.where(swap, first, second)), dim=-1).flatten(-2)
+        return torch.cat((sorted_pairs, values[..., paired:]), dim=-1)
+
+
 class ADDPairErrorMetrics(nn.Module):
     """Recover 64 physical components from the ORIGINAL paired ADD obs.
 
@@ -252,11 +264,15 @@ class MIRAMonotoneModel(ADDModel):
         self.disc_learn_anchor_logit = config.get("disc_learn_anchor_logit", True)
         if not isinstance(self.disc_learn_anchor_logit, bool):
             raise ValueError("disc_learn_anchor_logit must be a boolean")
+        self.disc_activation = config.get("disc_activation", "mixed_elu")
+        if self.disc_activation not in ("mixed_elu", "groupsort_maxmin"):
+            raise ValueError("disc_activation must be mixed_elu or groupsort_maxmin")
+        activation = MixedELU if self.disc_activation == "mixed_elu" else GroupSortMaxMin
         linear = signed_diagonal_linear if self.disc_signed_weights else positive_diagonal_linear
         self._pair_metrics = ADDPairErrorMetrics(env)
         self._disc_energy = nn.Sequential(
-            linear(self._pair_metrics.feature_dim, HIDDEN_WIDTHS[0]), MixedELU(),
-            linear(HIDDEN_WIDTHS[0], HIDDEN_WIDTHS[1]), MixedELU(),
+            linear(self._pair_metrics.feature_dim, HIDDEN_WIDTHS[0]), activation(),
+            linear(HIDDEN_WIDTHS[0], HIDDEN_WIDTHS[1]), activation(),
             linear(HIDDEN_WIDTHS[1], 1, bias=False))
         if self.disc_learn_anchor_logit:
             self._anchor_logit = nn.Parameter(torch.zeros(()))
@@ -266,6 +282,8 @@ class MIRAMonotoneModel(ADDModel):
             self.register_parameter("_anchor_logit", None)
             self.disc_schema_version = (SIGNED_FIXED_ANCHOR_SCHEMA_VERSION if self.disc_signed_weights
                                         else FIXED_ANCHOR_SCHEMA_VERSION)
+        if self.disc_activation == "groupsort_maxmin":
+            self.disc_schema_version += MAXMIN_SCHEMA_OFFSET
         self.register_buffer("_monotone_schema_version", torch.tensor(self.disc_schema_version, dtype=torch.int64))
 
     def pair_to_error_metrics(self, policy, reference):
