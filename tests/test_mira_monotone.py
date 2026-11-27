@@ -17,7 +17,7 @@ from learning.add_agent import calc_unscaled_disc_reward
 from learning.mira_monotone_agent import MIRAMonotoneAgent
 from learning.mira_monotone_model import (
     ADDPairErrorMetrics, MIRAMonotoneModel, FEATURE_DIM, HIDDEN_WIDTHS,
-    GroupSortMaxMin, MixedELU, aggregate_error_metrics)
+    aggregate_error_metrics)
 from learning.add_model import ADDModel
 from learning.physical_error_normalizer import PhysicalErrorNormalizer
 import util.torch_util as torch_util
@@ -212,120 +212,40 @@ def test_same_actor_critic_and_no_new_loss_weights_or_reward_multipliers():
     assert all((layer.weight >= 0).all() for layer in linears)
 
 
-def test_fixed_cmnn_activations_are_monotone_across_wide_input_range():
-    values = torch.linspace(-100, 100, 2048)[:, None].expand(-1, 513).clone().requires_grad_(True)
-    outputs = MixedELU()(values)
-    gradients = torch.autograd.grad(outputs.sum(), values)[0]
-    assert torch.isfinite(outputs).all() and torch.isfinite(gradients).all()
-    assert (gradients >= 0).all()
-
-
-def test_groupsort_maxmin_preserves_width_and_does_not_expand_distances():
-    activation = GroupSortMaxMin()
-    values = torch.tensor([[1., 3., 4., -2., 9.], [3., 1., 4., 4., -9.]])
-    torch.testing.assert_close(activation(values), torch.tensor([
-        [3., 1., 4., -2., 9.], [3., 1., 4., 4., -9.]]))
-    torch.testing.assert_close(activation(values[:, -1:]), values[:, -1:])
-    x, y = (torch.randn(64, 341) for _ in range(2))
-    assert ((activation(x) - activation(y)).norm(dim=-1) <= (x - y).norm(dim=-1) + 1e-5).all()
-    assert (activation(x + y.abs()) >= activation(x)).all()
-
-
-def test_groupsort_ablation_keeps_initial_weights_and_rejects_mismatched_checkpoints():
+def test_unaveraged_classification_loss_updates_the_builtin_output_bias():
+    torch.manual_seed(13)
     env = Env()
-    cfg = config()
-    candidate = copy.deepcopy(cfg)
-    candidate["model"]["disc_activation"] = "groupsort_maxmin"
-    torch.manual_seed(17)
-    baseline = MIRAMonotoneAgent(cfg, env, "cpu")
-    torch.manual_seed(17)
-    maxmin = MIRAMonotoneAgent(candidate, env, "cpu")
-    original, alternate = (copy.deepcopy(agent.state_dict()) for agent in (baseline, maxmin))
-    assert original.keys() == alternate.keys()
-    for key in original:
-        if key != "_model._monotone_schema_version":
-            torch.testing.assert_close(original[key], alternate[key], atol=0, rtol=0)
-    for agent, wrong in ((baseline, alternate), (maxmin, original)):
-        with pytest.raises(RuntimeError, match="different monotone physical-error schema"):
-            agent.load_state_dict(wrong, strict=True)
-    maxmin = MIRAMonotoneAgent(candidate, env, "cpu")
-    maxmin.load_state_dict(alternate, strict=True)
-    extra = maxmin._get_checkpoint_extra_state()
-    maxmin._load_checkpoint_extra_state(extra)
-    assert extra["monotone_disc"]["activation"] == "groupsort_maxmin"
-
-
-def test_output_bias_matches_initial_scores_but_changes_positive_gradient():
-    env = Env()
-    original = config()
-    biased = copy.deepcopy(original)
-    biased["model"]["disc_output_bias"] = True
-    torch.manual_seed(17)
-    anchored = MIRAMonotoneAgent(original, env, "cpu")
-    rng = torch.random.get_rng_state()
-    torch.manual_seed(17)
-    candidate = MIRAMonotoneAgent(biased, env, "cpu")
-    assert torch.equal(rng, torch.random.get_rng_state())
-    old_state, new_state = anchored.state_dict(), copy.deepcopy(candidate.state_dict())
-    for key in (old_state.keys() & new_state.keys()) - {"_model._monotone_schema_version"}:
-        torch.testing.assert_close(old_state[key], new_state[key], atol=0, rtol=0)
-    assert anchored.calc_num_params() == candidate.calc_num_params()
-    x = torch.cat((torch.zeros(1, FEATURE_DIM), torch.rand(32, FEATURE_DIM)))
-    torch.testing.assert_close(anchored._model.eval_disc(x), candidate._model.eval_disc(x),
-                               rtol=1e-6, atol=1e-6)
-    torch.testing.assert_close(anchored._calc_disc_rewards(x), candidate._calc_disc_rewards(x),
-                               rtol=1e-6, atol=1e-6)
-    with pytest.raises(RuntimeError, match="different monotone physical-error schema"):
-        candidate.load_state_dict(old_state)
-    candidate.load_state_dict(new_state)
-    candidate._load_checkpoint_extra_state(candidate._get_checkpoint_extra_state())
-
-    for agent in (anchored, candidate):
-        positive = agent._model.eval_disc(x[:1]).flatten()
-        agent._disc_loss_pos(positive).backward()
-    assert torch.count_nonzero(anchored._model._disc_energy[0].bias.grad) == 0
-    assert torch.count_nonzero(candidate._model._disc_energy[0].bias.grad) > 0
-    torch.testing.assert_close(anchored._model._anchor_logit.grad, torch.tensor(-0.5))
-    torch.testing.assert_close(candidate._model._disc_energy[-1].bias.grad, torch.tensor([0.5]))
-
-
-def test_no_anchor_logit_ablation_changes_only_the_learned_offset():
-    env = Env()
-    original = config()
-    no_anchor = copy.deepcopy(original)
-    no_anchor["model"]["disc_learn_anchor_logit"] = False
-    torch.manual_seed(17)
-    baseline = MIRAMonotoneAgent(original, env, "cpu")
-    torch.manual_seed(17)
-    ablated = MIRAMonotoneAgent(no_anchor, env, "cpu")
-    for key, value in ablated._model.state_dict().items():
-        if key != "_monotone_schema_version":
-            torch.testing.assert_close(value, baseline._model.state_dict()[key], atol=0, rtol=0)
-    assert len(ablated._model.get_disc_params()) == len(baseline._model.get_disc_params()) - 1
-    features = torch.cat((torch.zeros(1, FEATURE_DIM), torch.rand(32, FEATURE_DIM)))
-    torch.testing.assert_close(ablated._calc_disc_rewards(features), baseline._calc_disc_rewards(features),
-                               rtol=0, atol=0)
-    with torch.no_grad():
-        baseline._model._anchor_logit.fill_(0.75)
-    torch.testing.assert_close(ablated._model.eval_disc(features), baseline._model.eval_disc(features) - 0.75)
+    agent = MIRAMonotoneAgent(config(), env, "cpu")
+    energy = agent._model._disc_energy
+    assert all(isinstance(energy[i], torch.nn.ReLU) for i in (1, 3))
+    bias = energy[-1].bias
+    assert bias.shape == (1,) and bias.requires_grad
+    old_bias = bias.detach().clone()
 
     (policy, _), (reference, _) = physical_pair(env)
-    fill_buffers(ablated, policy, reference)
-    losses = ablated._compute_disc_loss({"disc_obs": policy[:16], "disc_obs_demo": reference[:16]})
-    assert torch.isfinite(losses["disc_loss"])
-    ablated._disc_optimizer.step(losses["disc_loss"])
-    torch.testing.assert_close(ablated._model.eval_disc(features[:1]), torch.zeros(1, 1), rtol=0, atol=1e-6)
-    with pytest.raises(RuntimeError, match="different monotone physical-error schema"):
-        ablated._model.load_state_dict(baseline._model.state_dict())
+    fill_buffers(agent, policy, reference)
+    batch = {"disc_obs": policy[:16], "disc_obs_demo": reference[:16]}
+    scores = []
+    hook = energy.register_forward_hook(lambda _, args, out: scores.append(-out.detach().flatten()))
+    try:
+        loss = agent._compute_disc_loss(batch)
+    finally:
+        hook.remove()
+
+    # One real positive and two negative batches, with no appended zero input.
+    assert len(scores) == 1 and scores[0].shape == (1 + 2 * len(batch["disc_obs"]),)
+    logits = scores[0]
+    expected = torch.nn.functional.softplus(-logits[0]) + torch.nn.functional.softplus(logits[1:]).mean()
+    torch.testing.assert_close(loss["disc_cls_loss"], expected)
+    torch.testing.assert_close(loss["disc_loss"], expected + loss["disc_logit_reg_loss"])
+    agent._disc_optimizer.step(loss["disc_loss"])
+    assert torch.isfinite(bias.grad).all() and not torch.equal(bias.detach(), old_bias)
 
 
-@pytest.mark.parametrize("activation", ["mixed_elu", "groupsort_maxmin"])
-def test_bce_updates_and_production_rewards_keep_every_metric_monotone(activation):
+def test_bce_updates_and_production_rewards_keep_every_metric_monotone():
     torch.manual_seed(47)
     env = Env()
-    cfg = config()
-    cfg["model"]["disc_activation"] = activation
-    agent = MIRAMonotoneAgent(cfg, env, "cpu")
+    agent = MIRAMonotoneAgent(config(), env, "cpu")
     (policy, _), (reference, _) = physical_pair(env)
     fill_buffers(agent, policy, reference)
     batch = {"disc_obs": policy[:16], "disc_obs_demo": reference[:16]}
@@ -353,8 +273,8 @@ def test_bce_updates_and_production_rewards_keep_every_metric_monotone(activatio
     assert (gradient.norm(dim=-1) <= 1 + 5e-6).all()
     displacement = torch.linalg.vector_norm(before - after, dim=-1)
     assert ((second - first).abs() <= displacement + 5e-6).all()
-    torch.testing.assert_close(agent._model.eval_disc(torch.zeros(1, FEATURE_DIM)).squeeze(),
-                               agent._model._anchor_logit, rtol=0, atol=1e-7)
+    zero_score = agent._model.eval_disc(torch.zeros(1, FEATURE_DIM))
+    assert (zero_score >= first - 1e-6).all()
     for layer in agent._model._disc_energy:
         if isinstance(layer, torch.nn.Linear):
             assert (layer.weight >= 0).all()
@@ -381,7 +301,7 @@ def test_paired_reward_api_uses_exact_original_add_clipping(chunk):
             agent._model.eval_disc(torch.zeros(8, wrong_width))
 
 
-def test_normalizer_completion_preserves_zero_anchor_and_frozen_reward_function():
+def test_normalizer_completion_preserves_zero_input_and_frozen_reward_function():
     env = Env()
     agent = MIRAMonotoneAgent(config(), env, "cpu").eval()
     (policy, _), (reference, _) = physical_pair(env)
@@ -434,41 +354,6 @@ def test_physical_normalizer_preserves_old_group_statistics_without_averaging_fe
                                rtol=2e-5, atol=1e-6)
     assert torch.count_nonzero(actual_delta[:, :30]) == 0
     assert torch.count_nonzero(actual_delta[:, 31:]) == 0
-
-
-def test_no_sqrt_uses_running_group_scales_for_reward_and_bce():
-    env = Env()
-    agent = MIRAMonotoneAgent(config() | {"disc_group_size_scaling": False}, env, "cpu")
-    (policy, _), (reference, _) = physical_pair(env)
-    fill_buffers(agent, policy, reference)
-    features = agent._pair_error_metrics(policy, reference)
-    norm = agent._disc_obs_norm
-    expected_scales = aggregate_error_metrics(features).mean(0).clamp_min(1e-4)
-    per_feature_scale = torch.repeat_interleave(expected_scales, torch.tensor([1, 1, 14, 14, 28, 3, 3]))
-    expected_inputs = features / per_feature_scale
-    agent._compute_rewards()
-    norm.update()
-    torch.testing.assert_close(norm.normalize(features), expected_inputs)
-    torch.testing.assert_close(norm.unnormalize(expected_inputs), features)
-    torch.testing.assert_close(agent._exp_buffer.get_data_flat("reward"),
-                               agent._calc_disc_rewards(expected_inputs))
-    assert int(norm.get_count()) == len(features)
-    assert norm.training_state_dict()["new_count"] == 0
-
-    calls = []
-    handle = agent._model._disc_energy.register_forward_pre_hook(
-        lambda _, inputs: calls.append(inputs[0].detach().clone()))
-    try:
-        loss = agent._compute_disc_loss({"disc_obs": policy[:16], "disc_obs_demo": reference[:16]})
-    finally:
-        handle.remove()
-    assert loss["disc_loss"].isfinite()
-    torch.testing.assert_close(calls[0][1:17], expected_inputs[:16])
-    assert (agent._get_checkpoint_extra_state()["monotone_disc"]["input_scaling"]
-            == "seven_metric_history_broadcast")
-    grouped = MIRAMonotoneAgent(config(), Env(), "cpu")
-    with pytest.raises(RuntimeError, match="group geometry"):
-        grouped.load_state_dict(agent.state_dict(), strict=False)
 
 
 @pytest.mark.parametrize("release_aware", [False, True])
@@ -547,7 +432,8 @@ def test_strict_checkpoint_roundtrip_and_rejection_of_legacy_reward_semantics():
     with pytest.raises(RuntimeError, match="monotone"):
         restored.load_state_dict(bad, strict=False)
     bad = copy.deepcopy(saved)
-    bad["_model._monotone_schema_version"] = torch.tensor(2, dtype=torch.int64)
+    # A former discriminator with the same parameter shapes is still incompatible.
+    bad["_model._monotone_schema_version"] = torch.tensor(16, dtype=torch.int64)
     with pytest.raises(RuntimeError, match="monotone"):
         restored.load_state_dict(bad, strict=False)
     bad = copy.deepcopy(saved)
@@ -572,8 +458,7 @@ def test_strict_checkpoint_roundtrip_and_rejection_of_legacy_reward_semantics():
         restored._load_checkpoint_extra_state(bad_extra)
 
 
-@pytest.mark.parametrize("legacy_names", [False, True])
-def test_training_checkpoint_keeps_pending_group_scale_statistics(tmp_path, legacy_names):
+def test_training_checkpoint_keeps_pending_group_scale_statistics(tmp_path):
     agent = MIRAMonotoneAgent(config(), Env(), "cpu").eval()
     (policy, _), (reference, _) = physical_pair(agent._env)
     fill_buffers(agent, policy, reference)
@@ -586,13 +471,6 @@ def test_training_checkpoint_keeps_pending_group_scale_statistics(tmp_path, lega
     assert pending["new_count"] == 17
     torch.testing.assert_close(pending["new_sum_abs"],
                                aggregate_error_metrics(features[:17]).sum(0))
-    if legacy_names:
-        payload["metadata"]["agent_class"] = "DAREMonotoneAgent"
-        state = payload["model_state_dict"]
-        state["_model._dare_schema_version"] = state.pop("_model._mira_schema_version")
-        extra = payload["agent_extra_state"]
-        extra["dare_reward"] = extra.pop("mira_reward")
-        torch.save(payload, checkpoint_path)
     restored = MIRAMonotoneAgent(config(), Env(), "cpu").eval()
     restored.resume(checkpoint_path)
     assert restored._iter == 8

@@ -1,9 +1,7 @@
 # MIRA with a constrained monotonic discriminator
 
-The maintained MIRA implementation uses one Constrained Monotonic Neural
-Network (CMNN), following [Runje & Shankaranarayana, ICML 2023](https://proceedings.mlr.press/v202/runje23a.html).
-It replaces ADD's discriminator; the actor, critic, BCE labels and ADD reward
-mapping remain the same.
+MIRA replaces ADD's discriminator with a single monotone ReLU network.
+It retains ADD's actor, critic, BCE labels and reward mapping.
 
 Paired policy/reference observations are converted to 64 physical errors:
 root position distance, root rotation angle, 14 non-root body position
@@ -18,11 +16,15 @@ not averaged before entering the network. The zero Root-relative body
 position and duplicate Root body rotation are omitted from the input; the
 original seven metrics are reconstructed for evaluation and scale statistics.
 One `64 → 341 → 512 → 1` network learns their joint energy `E` using
-nonnegative weights, learnable diagonal normalization and mixed monotonic ELU
-activations. Its discriminator score is `s(e) = b - (E(e) - E(0))`.
-Reducing an error while holding the others fixed cannot reduce the score.
-The reward uses ADD's existing numerically clipped `-log(1 - sigmoid(s))`
-mapping, with no extra multiplier. GP is disabled.
+nonnegative weights, learnable diagonal normalization and ReLU in both hidden
+layers. The final linear layer has an ordinary learnable scalar bias. The
+discriminator score is `s(e) = -E(e)`. Reducing an error while holding the
+others fixed cannot reduce the score.
+
+The classification loss is the sum of the positive BCE at zero error and
+the mean negative BCE on the policy/replay batch. The existing head weight
+penalty is added separately. The reward uses ADD's numerically clipped
+`-log(1 - sigmoid(s))` mapping, with no extra multiplier. GP is disabled.
 
 All three linear layers use the non-residual construction in
 [Araujo et al., ICLR 2023](https://arxiv.org/abs/2303.03169), Theorem 1 and
@@ -52,20 +54,24 @@ Train backflip for 2000 updates with 8192 environments and seed 0:
 python mimickit/run.py \
   --arg_file PAPER/configs/args/mira_2k_8192_args.txt \
   --env_config PAPER/configs/envs/mira_backflip_env.yaml \
-  --out_dir output/mira_cmnn_backflip
+  --out_dir output/mira_relu_backflip
 ```
 
 The agent configuration is
 [`mira_monotone_humanoid_agent.yaml`](../data/agents/mira_monotone_humanoid_agent.yaml).
-For an ablation of the square-root group-size factor, set
-`disc_group_size_scaling: false` in a copy of the agent configuration.
-The discriminator still divides the 64 physical errors by their running
-group scales. The default also divides by the square root of group size.
+Each physical component is divided by its running group scale and by the
+square root of the group size.
 
-The physical-64 model uses monotone schema 4 with fixed group-RMS input
-geometry. Old SN7 and seven-input
-diagonal checkpoints use earlier schemas and must be evaluated with their original source; they are not silently
-loaded or resumed by the new model. Strict resume also checks configuration
-hashes, so resume a diagonal run with its frozen configurations and source.
-Historical results and source snapshots under `output/` are retained for
-reproduction; they are not runtime dependencies.
+The ReLU implementation uses checkpoint schema 26. Earlier MIRA checkpoints
+must be evaluated or resumed with their original source and configuration,
+using the run's frozen snapshot where available. Historical results are kept
+under `output/`. They record the versions that were actually trained.
+
+To play a soccer checkpoint trained with the current implementation:
+
+```bash
+python mimickit/run.py \
+  --arg_file args/mira_monotone_humanoid_soccer_cmu_10_02_args.txt \
+  --mode test --num_envs 1 --visualize true \
+  --model_file /path/to/new/model.pt
+```

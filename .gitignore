@@ -11,14 +11,6 @@ output/**/*
 !output/**/console.log
 !output/**/train_metrics.jsonl
 !output/**/summary.json
-# Keep this run's logs, configurations and audit records in version control.
-!output/phase_disc_from_zero_20261104/**/*.txt
-!output/phase_disc_from_zero_20261104/**/*.log
-!output/phase_disc_from_zero_20261104/**/*.jsonl
-!output/phase_disc_from_zero_20261104/**/*.json
-!output/phase_disc_from_zero_20261104/**/*.yaml
-!output/phase_disc_from_zero_20261104/**/*.md
-output/phase_disc_from_zero_20261104/source_snapshot/
 .vscode/
 wandb/
 PAPER/*.aux

@@ -10,7 +10,7 @@ import pytest
 import torch
 
 from learning.diagonal_normalization import PositiveDiagonalRescaling
-from learning.mira_monotone_model import positive_diagonal_linear, signed_diagonal_linear
+from learning.mira_monotone_model import positive_diagonal_linear
 
 
 SHAPES = ((341, 64), (512, 341), (1, 512))
@@ -31,28 +31,6 @@ def _positive(shape, dtype=torch.float64):
 
 def _norm(weight):
     return torch.linalg.svdvals(weight.detach().double())[0].item()
-
-
-@pytest.mark.parametrize("shape", SHAPES)
-def test_signed_ablation_matches_initial_weights_and_preserves_bound(shape):
-    out_features, in_features = shape
-    with torch.random.fork_rng(devices=[]):
-        torch.manual_seed(0)
-        positive = positive_diagonal_linear(in_features, out_features)
-        torch.manual_seed(0)
-        signed = signed_diagonal_linear(in_features, out_features)
-    initial = positive.weight.detach()
-    torch.testing.assert_close(signed.weight, initial, rtol=0, atol=0)
-    torch.testing.assert_close(signed.bias, positive.bias, rtol=0, atol=0)
-    with torch.no_grad():
-        signed.parametrizations.weight.original[::2, ::3].neg_()
-    effective = signed.weight
-    assert (effective < 0).any()
-    torch.testing.assert_close(effective.abs(), initial, rtol=0, atol=0)
-    assert _norm(effective) <= 1 + 1e-5
-    effective.square().sum().backward()
-    grad = signed.parametrizations.weight.original.grad
-    assert torch.isfinite(grad).all() and grad.norm() > 0
 
 
 @pytest.mark.parametrize("shape", SHAPES)
@@ -187,8 +165,7 @@ def test_parameter_and_checkpoint_roundtrip_include_learned_q():
 
 def test_all_three_factory_shapes_preserve_sign_and_bound_without_sn():
     for out_features, in_features in SHAPES:
-        layer = positive_diagonal_linear(in_features, out_features,
-                                         bias=out_features != 1)
+        layer = positive_diagonal_linear(in_features, out_features)
         assert isinstance(layer, torch.nn.Linear)
         assert layer.weight.shape == (out_features, in_features)
         assert (layer.weight >= 0).all()

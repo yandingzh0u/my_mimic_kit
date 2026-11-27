@@ -2,15 +2,12 @@ import yaml
 
 from util.logger import Logger
 
-_LEGACY_AGENT_NAMES = {"DAREMonotone": "MIRAMonotone", "DAREAblation": "MIRAAblation"}
-
 def build_agent(agent_file, env, device):
     if (agent_file is None or agent_file == ""):
         agent_name = "Dummy"
     else:
         agent_config = load_agent_file(agent_file)
         agent_name = agent_config["agent_name"]
-        agent_name = _LEGACY_AGENT_NAMES.get(agent_name, agent_name)
 
     Logger.print("Building {} agent".format(agent_name))
 
@@ -38,10 +35,6 @@ def build_agent(agent_file, env, device):
     elif (agent_name == "MIRAMonotone"):
         import learning.mira_monotone_agent as mira_monotone_agent
         agent = mira_monotone_agent.MIRAMonotoneAgent(
-            config=agent_config, env=env, device=device)
-    elif (agent_name == "MIRAAblation"):
-        import learning.mira_ablation_agent as mira_ablation_agent
-        agent = mira_ablation_agent.MIRAAblationAgent(
             config=agent_config, env=env, device=device)
     elif (agent_name == "LCP"):
         import learning.lcp_agent as lcp_agent

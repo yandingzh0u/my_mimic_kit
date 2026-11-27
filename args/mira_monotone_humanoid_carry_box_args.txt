@@ -1,6 +1,6 @@
 --mode train
---num_envs 512
---max_samples 32768000
+--num_envs 8192
+--max_samples 524288000
 --rand_seed 0
 --visualize false
 
@@ -8,4 +8,4 @@
 --env_config data/envs/mira_monotone_humanoid_carry_box_env.yaml
 --agent_config data/agents/mira_monotone_humanoid_agent.yaml
 
---out_dir output/mira_cmnn68_group_rms_carry_box_repro
+--out_dir output/mira_relu_carry_box

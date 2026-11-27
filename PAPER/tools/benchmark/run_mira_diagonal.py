@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Freeze a CMNN experiment or resume its full training checkpoint.
+"""Freeze a MIRA experiment or resume its full training checkpoint.
 
 Examples (use the Isaac Lab Python environment):
   python PAPER/tools/benchmark/run_mira_diagonal.py --updates 30 --out-dir output/diagnostics/diagonal_smoke
@@ -253,7 +253,7 @@ def train(args):
 
     def layout(agent):
         model = agent._model
-        assert FEATURE_DIM == 64 and MONOTONE_SCHEMA_VERSION == 4
+        assert FEATURE_DIM == 64
         assert int(model._monotone_schema_version) == MONOTONE_SCHEMA_VERSION
         assert not any(type(module).__name__ == "_SpectralNorm" for module in model._disc_energy.modules())
         diagonal = []
@@ -284,7 +284,7 @@ def train(args):
     def anchored_probe_energy(agent):
         with torch.no_grad():
             score = agent._model.eval_disc(fixed_probe(agent)).squeeze(-1)
-            return (agent._model._anchor_logit - score).detach().clone()
+            return score[0] - score
 
     def capture_env(*values, **kwargs):
         env = original_env(*values, **kwargs)
@@ -362,7 +362,8 @@ def train(args):
                 features = agent._model.pair_to_error_metrics(policy[selection], reference[selection])
                 normalized = agent._disc_obs_norm.normalize(features)
                 score = agent._model.eval_disc(normalized).squeeze(-1)
-                energy = agent._model._anchor_logit - score
+                zero_score = agent._model.eval_disc(torch.zeros_like(normalized[:1])).squeeze()
+                energy = zero_score - score
                 from learning.add_agent import calc_unscaled_disc_reward
                 reward = calc_unscaled_disc_reward(score)
                 quantiles = normalized.new_tensor([0., .5, .95, .99, 1.])
@@ -461,7 +462,8 @@ def train(args):
                 assert normalized.shape[-1] == FEATURE_DIM
                 assert bool(torch.isfinite(normalized).all()) and bool((normalized >= 0).all())
                 rollout_score = model.eval_disc(normalized).squeeze(-1)
-                rollout_energy = model._anchor_logit - rollout_score
+                zero_score = model.eval_disc(torch.zeros_like(normalized[:1])).squeeze()
+                rollout_energy = zero_score - rollout_score
                 previous_scale = track["normalizer_scale_before_iteration"].clamp_min(
                     agent._disc_obs_norm._min_diff)
                 previous_feature_scale = torch.empty(FEATURE_DIM, device=sample.device,
@@ -475,7 +477,7 @@ def train(args):
                 previous_normalized = (sample / previous_feature_scale).clamp(
                     -agent._disc_obs_norm._clip, agent._disc_obs_norm._clip)
                 previous_scale_score = model.eval_disc(previous_normalized).squeeze(-1)
-                previous_scale_energy = model._anchor_logit - previous_scale_score
+                previous_scale_energy = zero_score - previous_scale_score
                 assert bool(torch.isfinite(rollout_score).all())
                 assert bool(torch.isfinite(rollout_energy).all())
                 from learning.add_agent import calc_unscaled_disc_reward
@@ -524,10 +526,9 @@ def train(args):
             physical_gradient = gradient * inverse_feature_scales
             with torch.no_grad():
                 zero_score = model.eval_disc(torch.zeros_like(z[:1]))
-                assert torch.allclose(zero_score.flatten(), model._anchor_logit.reshape(-1), atol=1e-6, rtol=1e-6)
                 improved = model.eval_disc(z.detach() * .99)
                 assert bool((improved >= score.detach() - 2e-5).all())
-                assert bool((score <= model._anchor_logit + 2e-5).all())
+                assert bool((score.detach() <= zero_score + 2e-5).all())
                 # A separate finite perturbation test covers all coordinates,
                 # including feature axes absent from a particular rollout.
                 coordinate_base = normalized[0:1].expand(FEATURE_DIM, -1)
@@ -646,7 +647,7 @@ def train(args):
         argv.extend(["--" + kind + "_config", str(out / ("frozen_" + kind + ".yaml"))])
     if args.resume:
         argv.extend(["--resume_file", str(out / "checkpoint.pt")])
-    protocol = {"experiment": "CMNN64_physical_errors_positive_learned_diagonal_group_rms", "from_zero": True,
+    protocol = {"experiment": "MIRA64_physical_errors_positive_learned_diagonal_group_rms", "from_zero": True,
                 "motion": args.motion,
                 "resumed": False, "initialization_checkpoint": None,
                 "schema": MONOTONE_SCHEMA_VERSION, "discriminator_input_dim": FEATURE_DIM,

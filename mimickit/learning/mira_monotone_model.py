@@ -1,9 +1,7 @@
-"""Unpooled physical errors -> one anchored, componentwise monotone score.
+"""Unpooled physical errors to a componentwise monotone score.
 
-CMNN activations follow Runje & Shankaranarayana (ICML 2023), equations 4-6.
-All three linear layers use the non-residual diagonal construction from
-Araujo et al. (ICLR 2023), Theorem 1 and Appendix C.3, instead of SN.
-It adds a physical-error ordering prior, not a prior-free imitation reward.
+The ReLU energy network uses nonnegative weights and the non-residual
+diagonal construction of Araujo et al. (ICLR 2023), Theorem 1 and Appendix C.3.
 """
 
 import torch
@@ -17,13 +15,7 @@ import util.torch_util as torch_util
 from util.carry_geometry import CarryGeometry
 
 
-MONOTONE_SCHEMA_VERSION = 4
-SIGNED_WEIGHT_SCHEMA_VERSION = 5
-FIXED_ANCHOR_SCHEMA_VERSION = 6
-SIGNED_FIXED_ANCHOR_SCHEMA_VERSION = 7
-MAXMIN_SCHEMA_OFFSET = 4
-RELU_SCHEMA_OFFSET = 8
-OUTPUT_BIAS_SCHEMA_OFFSET = 12
+MONOTONE_SCHEMA_VERSION = 26
 HIDDEN_WIDTHS = (341, 512)
 METRIC_NAMES = ("root_pos", "root_rot", "body_pos", "body_rot",
                 "dof_vel", "root_vel", "root_ang_vel")
@@ -108,54 +100,14 @@ class PositiveWeight(nn.Module):
         return weight.abs()
 
 
-def positive_diagonal_linear(in_features, out_features, bias=True):
-    layer = nn.Linear(in_features, out_features, bias=bias)
+def positive_diagonal_linear(in_features, out_features):
+    layer = nn.Linear(in_features, out_features, bias=True)
     parametrize.register_parametrization(layer, "weight", PositiveWeight())
     normalization = PositiveDiagonalRescaling(
         in_features, device=layer.weight.device, dtype=layer.weight.dtype)
     normalization.initialize_from_weight(layer.weight)
     parametrize.register_parametrization(layer, "weight", normalization)
     return layer
-
-
-class SignedMagnitudeDiagonalRescaling(PositiveDiagonalRescaling):
-    """Apply the same diagonal scales to signed weights as to their magnitudes."""
-    def forward(self, weight):
-        # If B bounds |W| entrywise, then |W x| <= B |x|. In this case
-        # B is exactly the production magnitude-normalized weight matrix.
-        return weight.sign() * super().forward(weight.abs())
-
-
-def signed_diagonal_linear(in_features, out_features, bias=True):
-    layer = nn.Linear(in_features, out_features, bias=bias)
-    with torch.no_grad():
-        layer.weight.abs_()  # Match MIRA at initialization, then allow both signs.
-    normalization = SignedMagnitudeDiagonalRescaling(
-        in_features, device=layer.weight.device, dtype=layer.weight.dtype)
-    normalization.initialize_from_weight(layer.weight)
-    parametrize.register_parametrization(layer, "weight", normalization)
-    return layer
-
-
-class MixedELU(nn.Module):
-    """Fixed equal split: convex, concave and saturating monotone activations."""
-    def forward(self, values):
-        convex, concave, saturated = torch.tensor_split(values, 3, dim=-1)
-        saturated = torch.where(
-            saturated < 0, F.elu(saturated + 1) - 1,
-            -F.elu(1 - saturated) + 1)
-        return torch.cat((F.elu(convex), -F.elu(-concave), saturated), -1)
-
-
-class GroupSortMaxMin(nn.Module):
-    """Sort adjacent pairs (max, min); pass an unpaired last channel through."""
-    def forward(self, values):
-        paired = values.shape[-1] // 2 * 2
-        first, second = values[..., :paired:2], values[..., 1:paired:2]
-        swap = first < second
-        sorted_pairs = torch.stack((torch.where(swap, second, first),
-                                    torch.where(swap, first, second)), dim=-1).flatten(-2)
-        return torch.cat((sorted_pairs, values[..., paired:]), dim=-1)
 
 
 class ADDPairErrorMetrics(nn.Module):
@@ -253,59 +205,13 @@ class ADDPairErrorMetrics(nn.Module):
 
 class MIRAMonotoneModel(ADDModel):
     """Same baseline actor/critic; one monotone physical-error discriminator."""
-    def __init__(self, config, env):
-        super().__init__(config, env)
-        # Historical format marker; the separate monotone schema below now
-        # rejects old SN weights instead of silently loading another model.
-        self.register_buffer("_mira_schema_version", torch.tensor(2, dtype=torch.int64))
-
     def _build_disc(self, config, env):
-        self.disc_signed_weights = config.get("disc_signed_weights", False)
-        if not isinstance(self.disc_signed_weights, bool):
-            raise ValueError("disc_signed_weights must be a boolean")
-        self.disc_output_bias = config.get("disc_output_bias", False)
-        if not isinstance(self.disc_output_bias, bool):
-            raise ValueError("disc_output_bias must be a boolean")
-        self.disc_learn_anchor_logit = config.get("disc_learn_anchor_logit", not self.disc_output_bias)
-        if not isinstance(self.disc_learn_anchor_logit, bool):
-            raise ValueError("disc_learn_anchor_logit must be a boolean")
-        if self.disc_output_bias and self.disc_learn_anchor_logit:
-            raise ValueError("Use either an output-layer bias or a learned anchor logit")
-        self.disc_activation = config.get("disc_activation", "mixed_elu")
-        activations = {"mixed_elu": MixedELU, "groupsort_maxmin": GroupSortMaxMin, "relu": nn.ReLU}
-        if self.disc_activation not in activations:
-            raise ValueError(f"disc_activation must be one of {tuple(activations)}")
-        activation = activations[self.disc_activation]
-        linear = signed_diagonal_linear if self.disc_signed_weights else positive_diagonal_linear
         self._pair_metrics = ADDPairErrorMetrics(env)
         self._disc_energy = nn.Sequential(
-            linear(self._pair_metrics.feature_dim, HIDDEN_WIDTHS[0]), activation(),
-            linear(HIDDEN_WIDTHS[0], HIDDEN_WIDTHS[1]), activation(),
-            linear(HIDDEN_WIDTHS[1], 1, bias=False))
-        if self.disc_output_bias:
-            # Match the anchored scorer at b=0 without an extra random draw.
-            # After this initialization the bias is independent and E(0)
-            # is not subtracted in the forward pass.
-            with torch.no_grad():
-                final = self._disc_energy[-1]
-                zero = final.weight.new_zeros((1, self._pair_metrics.feature_dim))
-                final.bias = nn.Parameter(-self._disc_energy(zero).reshape(1))
-            self.register_parameter("_anchor_logit", None)
-            self.disc_schema_version = OUTPUT_BIAS_SCHEMA_OFFSET + (
-                SIGNED_WEIGHT_SCHEMA_VERSION if self.disc_signed_weights else MONOTONE_SCHEMA_VERSION)
-        elif self.disc_learn_anchor_logit:
-            self._anchor_logit = nn.Parameter(torch.zeros(()))
-            self.disc_schema_version = (SIGNED_WEIGHT_SCHEMA_VERSION if self.disc_signed_weights
-                                        else MONOTONE_SCHEMA_VERSION)
-        else:
-            self.register_parameter("_anchor_logit", None)
-            self.disc_schema_version = (SIGNED_FIXED_ANCHOR_SCHEMA_VERSION if self.disc_signed_weights
-                                        else FIXED_ANCHOR_SCHEMA_VERSION)
-        if self.disc_activation == "groupsort_maxmin":
-            self.disc_schema_version += MAXMIN_SCHEMA_OFFSET
-        elif self.disc_activation == "relu":
-            self.disc_schema_version += RELU_SCHEMA_OFFSET
-        self.register_buffer("_monotone_schema_version", torch.tensor(self.disc_schema_version, dtype=torch.int64))
+            positive_diagonal_linear(self._pair_metrics.feature_dim, HIDDEN_WIDTHS[0]), nn.ReLU(),
+            positive_diagonal_linear(HIDDEN_WIDTHS[0], HIDDEN_WIDTHS[1]), nn.ReLU(),
+            positive_diagonal_linear(HIDDEN_WIDTHS[1], 1))
+        self.register_buffer("_monotone_schema_version", torch.tensor(MONOTONE_SCHEMA_VERSION, dtype=torch.int64))
 
     def pair_to_error_metrics(self, policy, reference):
         return self._pair_metrics(policy, reference)
@@ -314,28 +220,14 @@ class MIRAMonotoneModel(ADDModel):
     def aggregate_error_metrics(features):
         return aggregate_error_metrics(features)
 
-    def eval_disc_raw(self, disc_obs):
+    def eval_disc(self, disc_obs):
         feature_dim = self._pair_metrics.feature_dim
         if disc_obs.ndim != 2 or disc_obs.shape[-1] != feature_dim:
             raise ValueError(f"MIRAMonotone expects {feature_dim} normalized physical errors")
-        if self.disc_output_bias:
-            return -self._disc_energy(disc_obs)
-        anchor = disc_obs.new_zeros((1, feature_dim))
-        # Sample and anchor share the same deterministic effective weights.
-        energy = self._disc_energy(torch.cat((disc_obs, anchor), dim=0))
-        relative_energy = energy[:-1] - energy[-1:]
-        if self._anchor_logit is None:
-            return -relative_energy
-        return self._anchor_logit - relative_energy
-
-    def eval_disc(self, disc_obs):
-        return self.eval_disc_raw(disc_obs)
+        return -self._disc_energy(disc_obs)
 
     def get_disc_params(self):
-        params = list(self._disc_energy.parameters())
-        if self._anchor_logit is not None:
-            params.append(self._anchor_logit)
-        return params
+        return list(self._disc_energy.parameters())
 
     def get_disc_logit_weights(self):
         return self._disc_energy[-1].weight.flatten()
@@ -344,11 +236,7 @@ class MIRAMonotoneModel(ADDModel):
                               strict, missing_keys, unexpected_keys, error_msgs):
         version = state_dict.get(prefix + "_monotone_schema_version")
         if (version is None or version.dtype != torch.int64 or version.numel() != 1
-                or int(version.item()) != self.disc_schema_version):
+                or int(version.item()) != MONOTONE_SCHEMA_VERSION):
             error_msgs.append("Cannot load a different monotone physical-error schema")
-        old_marker = prefix + "_dare_schema_version"
-        new_marker = prefix + "_mira_schema_version"
-        if new_marker not in state_dict and old_marker in state_dict:
-            state_dict[new_marker] = state_dict.pop(old_marker)
         super()._load_from_state_dict(state_dict, prefix, local_metadata,
                                      strict, missing_keys, unexpected_keys, error_msgs)

@@ -29,7 +29,6 @@ INTERACTIONS = (
     ("sofa003", "mira_cmnn64_group_rms_sofa003_2000_8192_seed0_20261122"),
     ("carry_box", "mira_cmnn68_group_rms_carry_box_2000_8192_seed0_20261122"),
 )
-BACKFLIP = "mira_cmnn64_group_rms_backflip_2000_8192_seed0_20261113"
 
 
 def read_yaml(path):
@@ -43,13 +42,6 @@ def write_json(path, value):
 
 
 def matrix(tag):
-    source = OUTPUT / BACKFLIP
-    agent = read_yaml(source / "frozen_agent.yaml")
-    agent["agent_name"] = "MIRAMonotone"
-    agent["model"]["disc_signed_weights"] = True
-    yield (f"mira_signed_weights_backflip_2000_8192_seed0_{tag}", "mira",
-           read_yaml(source / "frozen_env.yaml"), read_yaml(source / "frozen_engine.yaml"), agent)
-
     amp_frames = read_yaml(ROOT / "PAPER/configs/envs/amp_backflip_env.yaml")["num_disc_obs_steps"]
     for task, name in INTERACTIONS:
         source = OUTPUT / name

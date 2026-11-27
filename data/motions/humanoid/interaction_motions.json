@@ -11,11 +11,11 @@
       "source": "CooHOI SingleAgent policy PhysX rollout with smoothing and release feedback",
       "environment_config": "data/envs/mira_monotone_humanoid_carry_box_env.yaml",
       "training_args": "args/mira_monotone_humanoid_carry_box_args.txt",
-      "training_run": "output/mira_cmnn68_group_rms_carry_box_2000_512_seed0_20261120",
+      "training_run": "output/mira_cmnn68_group_rms_carry_box_2000_8192_seed0_20261122",
       "mira_training": {
         "from_zero": true,
         "updates": 2000,
-        "num_envs": 512,
+        "num_envs": 8192,
         "seed": 0
       },
       "reference_audit": {
@@ -79,11 +79,11 @@
       "source": "Retargeted SAMP sofa003_stageII reference, with local SAMP research assets.",
       "environment_config": "data/envs/mira_monotone_humanoid_sofa003_env.yaml",
       "training_args": "args/mira_monotone_humanoid_sofa003_args.txt",
-      "training_run": "output/mira_cmnn64_group_rms_sofa003_2000_512_seed0_20261121",
+      "training_run": "output/mira_cmnn64_group_rms_sofa003_2000_8192_seed0_20261122",
       "mira_training": {
         "from_zero": true,
         "updates": 2000,
-        "num_envs": 512,
+        "num_envs": 8192,
         "seed": 0
       },
       "object_asset": "data/assets/objects/samp_sofa003.usd"
@@ -96,17 +96,10 @@
       "fps": 30,
       "duration_s": 1.5333333333,
       "object": "freely simulated football",
-      "source": "Isaac Lab reference rollout using the pre-existing Spin Kick policy; the listed interaction run learned from this reference with a fresh model.",
+      "source": "Isaac Lab reference rollout using the pre-existing Spin Kick policy.",
       "actor_checkpoint": "output/mira_cmnn64_group_rms_spinkick_2000_8192_seed0_20261115/model.pt",
       "environment_config": "data/envs/mira_monotone_humanoid_soccer_spin_kick_env.yaml",
       "training_args": "args/mira_monotone_humanoid_soccer_spin_kick_args.txt",
-      "training_run": "output/mira_cmnn64_group_rms_soccer_spin_kick_2000_512_seed0_20261121",
-      "mira_training": {
-        "from_zero": true,
-        "updates": 2000,
-        "num_envs": 512,
-        "seed": 0
-      },
       "reference_audit": {
         "lane": 22,
         "foot": "right_foot",

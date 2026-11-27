@@ -1,24 +1,19 @@
-"""Single monotone physical-error discriminator; original BCE/ADD/PPO mapping."""
+"""Monotone physical-error discriminator with ADD rewards and PPO."""
 
 import torch
 
 from learning.add_agent import ADDAgent, calc_unscaled_disc_reward
 from learning.ppo_agent import PPOAgent
 from learning.mira_monotone_model import (
-    MIRAMonotoneModel, HIDDEN_WIDTHS, physical_feature_slices)
+    MIRAMonotoneModel, HIDDEN_WIDTHS, MONOTONE_SCHEMA_VERSION, physical_feature_slices)
 from learning.physical_error_normalizer import PhysicalErrorNormalizer, aggregate_physical_groups
 import util.torch_util as torch_util
 
 
 class MIRAMonotoneAgent(ADDAgent):
-    """One CMNN scorer, zero-error BCE, original ADD reward and uniform PPO."""
-
-    CHECKPOINT_AGENT_ALIASES = ("DAREMonotoneAgent",)
+    """One positive-weight ReLU scorer, zero-error BCE, original ADD reward and uniform PPO."""
 
     def _load_params(self, config):
-        self._disc_group_size_scaling = config.get("disc_group_size_scaling", True)
-        if not isinstance(self._disc_group_size_scaling, bool):
-            raise ValueError("disc_group_size_scaling must be a boolean")
         if config.get("disc_group_negatives", False):
             raise ValueError("MIRAMonotone uses only real paired observations, not structured negatives")
         if "disc_reward_scale" in config:
@@ -40,8 +35,7 @@ class MIRAMonotoneAgent(ADDAgent):
         PPOAgent._build_normalizers(self)
         dtype = torch_util.numpy_dtype_to_torch(self._env.get_disc_obs_space().dtype)
         self._disc_obs_norm = PhysicalErrorNormalizer(
-            device=self._device, dtype=dtype, feature_slices=physical_feature_slices(self._env),
-            group_size_scaling=self._disc_group_size_scaling)
+            device=self._device, dtype=dtype, feature_slices=physical_feature_slices(self._env))
 
     @torch.no_grad()
     def _pair_error_metrics(self, policy, reference):
@@ -103,7 +97,7 @@ class MIRAMonotoneAgent(ADDAgent):
         # The zero positive and all negatives share one effective forward.
         scores = self._model.eval_disc(torch.cat((self._pos_diff[None], normalized), 0)).squeeze(-1)
         positive, negative = scores[:1], scores[1:]
-        cls_loss = 0.5 * (self._disc_loss_pos(positive) + self._disc_loss_neg(negative))
+        cls_loss = self._disc_loss_pos(positive) + self._disc_loss_neg(negative)
         logit_loss = self._model.get_disc_logit_weights().square().sum()
         logit_reg_loss = self._disc_logit_reg * logit_loss
         neg_acc, pos_acc = self._compute_disc_acc(negative, positive)
@@ -135,17 +129,18 @@ class MIRAMonotoneAgent(ADDAgent):
         layout = self._model._pair_metrics
         metric_count = {7: "seven", 11: "eleven", 12: "twelve"}[len(layout.metric_names)]
         state["monotone_disc"] = {
-            "version": self._model.disc_schema_version,
+            "version": MONOTONE_SCHEMA_VERSION,
             "metrics": layout.metric_names, "hidden_widths": HIDDEN_WIDTHS,
             "input": f"same_frame_unpooled_{layout.feature_dim}_physical_errors",
             "features": {name: (part.start, part.stop)
                          for name, part in layout.feature_slices.items()},
             "body_positions": "nonroot_root_relative_world_axes_L2",
             "body_rotations": "nonroot_world_geodesic",
-            "input_scaling": (metric_count + "_metric_history_broadcast"
-                              + ("_with_fixed_group_rms" if self._disc_group_size_scaling else "")),
+            "input_scaling": f"{metric_count}_metric_history_broadcast_with_fixed_group_rms",
             "first_layer": "free_positive_dense_no_group_budget",
-            "score": "learned_bias_minus_anchored_positive_diagonal_CMNN_energy",
+            "score": "negative_energy_with_learnable_output_bias",
+            "activation": "relu",
+            "classification_loss": "positive_bce_plus_negative_bce",
             "normalization": "SLL_nonresidual_positive_diagonal_logdomain_Perron_init",
             "learned_diagonal_parameters": sum(
                 layer.parametrizations.weight[-1].log_q.numel()
@@ -153,23 +148,6 @@ class MIRAMonotoneAgent(ADDAgent):
                 if isinstance(layer, torch.nn.Linear)),
             "reward": "original_ADD_clipped_mapping_no_multiplier",
         }
-        if self._model.disc_signed_weights:
-            state["monotone_disc"].update({
-                "first_layer": "signed_dense_no_group_budget",
-                "score": "learned_bias_minus_anchored_signed_diagonal_energy",
-                "normalization": "same_positive_diagonal_scales_on_weight_magnitudes",
-            })
-        if self._model.disc_output_bias:
-            score = state["monotone_disc"]["score"]
-            state["monotone_disc"]["score"] = score.replace(
-                "learned_bias_minus_anchored_", "negative_output_biased_", 1)
-        elif not self._model.disc_learn_anchor_logit:
-            score = state["monotone_disc"]["score"]
-            state["monotone_disc"]["score"] = score.replace("learned_bias", "fixed_zero_bias", 1)
-        if self._model.disc_activation != "mixed_elu":
-            disc = state["monotone_disc"]
-            disc["activation"] = self._model.disc_activation
-            disc["score"] = disc["score"].replace("_CMNN_", "_")
         if layout.grip_release_aware:
             state["monotone_disc"]["carry_grip"] = "through_last_reference_contact"
         return state
@@ -184,7 +162,7 @@ class MIRAMonotoneAgent(ADDAgent):
             saved["features"] = {name: tuple(part) for name, part in saved["features"].items()}
         if saved != expected:
             raise ValueError("Cannot resume with different monotone physical-error semantics")
-        if state.get("mira_reward", state.get("dare_reward")) != {
+        if state.get("mira_reward") != {
                 "version": 2, "logits": "raw_discriminator_output",
                 "mapping": "original_ADD_without_reward_multiplier"}:
             raise ValueError("Cannot resume a legacy scaled MIRA reward checkpoint")

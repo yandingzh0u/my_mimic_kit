@@ -10,7 +10,7 @@ configurations remain in their usual repository directories.
 | --- | --- |
 | `icra2027_paper.tex`, `mira.pdf` | Main manuscript and compiled paper |
 | `experiments_mira.tex`, `appendix_mira.tex` | Experiment section and supplementary material |
-| `figures/` | Current figures, editable PowerPoint sources, and G1 illustration assets |
+| `figures/` | Current figures, editable PowerPoint sources, and simulator illustration assets |
 | `generated/` | Measured data exports, provenance, and native LaTeX tables |
 | `configs/envs/`, `configs/args/` | Paper-specific environment and training configurations |
 | `tools/` | Data/figure generation, screenshot capture, benchmark and evaluation tools |
@@ -57,9 +57,10 @@ python -m pytest PAPER/tests/test_paper_eval_metrics.py PAPER/tests/test_paper_e
 ## Relocation and provenance
 
 [relocation_manifest.json](relocation_manifest.json) records the previous and
-current directories, including experiment runs under `output/`. Historical
-experiment records, frozen source snapshots,
-model files, and archive members keep their original bytes. Paths recorded
+current directories, including experiment runs under `output/`. The manuscript
+tables describe the original runs. See [the MIRA README](../docs/README_MIRA.md)
+for the current ReLU implementation. Historical experiment records, frozen
+source snapshots, model files, and archive members keep their original bytes. Paths recorded
 inside historical records are preserved; current run directories use `mira_`.
 `tools/paths.py` translates those recorded paths to their current locations;
 the current benchmark runner can resume moved runs without editing their
