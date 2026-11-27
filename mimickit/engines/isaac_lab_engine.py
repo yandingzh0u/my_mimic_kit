@@ -585,6 +585,10 @@ class IsaacLabEngine(engine.Engine):
         else:
             num_dofs = 0
         return num_dofs
+
+    def get_obj_dof_names(self, obj_id):
+        names = self._objs[obj_id].joint_names
+        return tuple(names[i] for i in self._dof_order_sim2common[obj_id].tolist())
     
     def get_obj_body_names(self, obj_id):
         obj = self._objs[obj_id]

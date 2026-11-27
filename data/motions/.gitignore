@@ -6,6 +6,8 @@
 !/humanoid/humanoid_carry_box_box_track.npy
 !/humanoid/humanoid_soccer_spin_kick.pkl
 !/humanoid/humanoid_soccer_spin_kick_ball_track.npy
+!/humanoid/humanoid_skateboard_turn.pkl
+!/humanoid/humanoid_skateboard_turn_board.npz
 !/humanoid/interaction_motions.json
 !/humanoid/parc/
 !/humanoid/parc/humanoid_run_jump_gap04.pkl

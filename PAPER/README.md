@@ -23,6 +23,13 @@ configurations remain in their usual repository directories.
 See [FIGURE_GUIDE.md](FIGURE_GUIDE.md) for figure details and
 [generated/README.md](generated/README.md) for data interpretation.
 
+## PARC motion candidates
+
+| Display name | Action | Run ID |
+| --- | --- | --- |
+| Turning Run | Run up onto a low platform, turn, and run down | `platform20` (PARC `platform_018`) |
+| Jump Down | Jump from a raised platform and land on the lower surface | `drop_turn3329` (PARC `teaser_3329`) |
+
 ## Regenerate and compile
 
 ```bash

@@ -159,7 +159,11 @@ class MIRAMonotoneAgent(ADDAgent):
                 "score": "learned_bias_minus_anchored_signed_diagonal_energy",
                 "normalization": "same_positive_diagonal_scales_on_weight_magnitudes",
             })
-        if not self._model.disc_learn_anchor_logit:
+        if self._model.disc_output_bias:
+            score = state["monotone_disc"]["score"]
+            state["monotone_disc"]["score"] = score.replace(
+                "learned_bias_minus_anchored_", "negative_output_biased_", 1)
+        elif not self._model.disc_learn_anchor_logit:
             score = state["monotone_disc"]["score"]
             state["monotone_disc"]["score"] = score.replace("learned_bias", "fixed_zero_bias", 1)
         if self._model.disc_activation != "mixed_elu":

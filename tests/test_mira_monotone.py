@@ -255,6 +255,40 @@ def test_groupsort_ablation_keeps_initial_weights_and_rejects_mismatched_checkpo
     assert extra["monotone_disc"]["activation"] == "groupsort_maxmin"
 
 
+def test_output_bias_matches_initial_scores_but_changes_positive_gradient():
+    env = Env()
+    original = config()
+    biased = copy.deepcopy(original)
+    biased["model"]["disc_output_bias"] = True
+    torch.manual_seed(17)
+    anchored = MIRAMonotoneAgent(original, env, "cpu")
+    rng = torch.random.get_rng_state()
+    torch.manual_seed(17)
+    candidate = MIRAMonotoneAgent(biased, env, "cpu")
+    assert torch.equal(rng, torch.random.get_rng_state())
+    old_state, new_state = anchored.state_dict(), copy.deepcopy(candidate.state_dict())
+    for key in (old_state.keys() & new_state.keys()) - {"_model._monotone_schema_version"}:
+        torch.testing.assert_close(old_state[key], new_state[key], atol=0, rtol=0)
+    assert anchored.calc_num_params() == candidate.calc_num_params()
+    x = torch.cat((torch.zeros(1, FEATURE_DIM), torch.rand(32, FEATURE_DIM)))
+    torch.testing.assert_close(anchored._model.eval_disc(x), candidate._model.eval_disc(x),
+                               rtol=1e-6, atol=1e-6)
+    torch.testing.assert_close(anchored._calc_disc_rewards(x), candidate._calc_disc_rewards(x),
+                               rtol=1e-6, atol=1e-6)
+    with pytest.raises(RuntimeError, match="different monotone physical-error schema"):
+        candidate.load_state_dict(old_state)
+    candidate.load_state_dict(new_state)
+    candidate._load_checkpoint_extra_state(candidate._get_checkpoint_extra_state())
+
+    for agent in (anchored, candidate):
+        positive = agent._model.eval_disc(x[:1]).flatten()
+        agent._disc_loss_pos(positive).backward()
+    assert torch.count_nonzero(anchored._model._disc_energy[0].bias.grad) == 0
+    assert torch.count_nonzero(candidate._model._disc_energy[0].bias.grad) > 0
+    torch.testing.assert_close(anchored._model._anchor_logit.grad, torch.tensor(-0.5))
+    torch.testing.assert_close(candidate._model._disc_energy[-1].bias.grad, torch.tensor([0.5]))
+
+
 def test_no_anchor_logit_ablation_changes_only_the_learned_offset():
     env = Env()
     original = config()

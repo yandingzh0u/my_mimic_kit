@@ -22,6 +22,8 @@ SIGNED_WEIGHT_SCHEMA_VERSION = 5
 FIXED_ANCHOR_SCHEMA_VERSION = 6
 SIGNED_FIXED_ANCHOR_SCHEMA_VERSION = 7
 MAXMIN_SCHEMA_OFFSET = 4
+RELU_SCHEMA_OFFSET = 8
+OUTPUT_BIAS_SCHEMA_OFFSET = 12
 HIDDEN_WIDTHS = (341, 512)
 METRIC_NAMES = ("root_pos", "root_rot", "body_pos", "body_rot",
                 "dof_vel", "root_vel", "root_ang_vel")
@@ -261,20 +263,37 @@ class MIRAMonotoneModel(ADDModel):
         self.disc_signed_weights = config.get("disc_signed_weights", False)
         if not isinstance(self.disc_signed_weights, bool):
             raise ValueError("disc_signed_weights must be a boolean")
-        self.disc_learn_anchor_logit = config.get("disc_learn_anchor_logit", True)
+        self.disc_output_bias = config.get("disc_output_bias", False)
+        if not isinstance(self.disc_output_bias, bool):
+            raise ValueError("disc_output_bias must be a boolean")
+        self.disc_learn_anchor_logit = config.get("disc_learn_anchor_logit", not self.disc_output_bias)
         if not isinstance(self.disc_learn_anchor_logit, bool):
             raise ValueError("disc_learn_anchor_logit must be a boolean")
+        if self.disc_output_bias and self.disc_learn_anchor_logit:
+            raise ValueError("Use either an output-layer bias or a learned anchor logit")
         self.disc_activation = config.get("disc_activation", "mixed_elu")
-        if self.disc_activation not in ("mixed_elu", "groupsort_maxmin"):
-            raise ValueError("disc_activation must be mixed_elu or groupsort_maxmin")
-        activation = MixedELU if self.disc_activation == "mixed_elu" else GroupSortMaxMin
+        activations = {"mixed_elu": MixedELU, "groupsort_maxmin": GroupSortMaxMin, "relu": nn.ReLU}
+        if self.disc_activation not in activations:
+            raise ValueError(f"disc_activation must be one of {tuple(activations)}")
+        activation = activations[self.disc_activation]
         linear = signed_diagonal_linear if self.disc_signed_weights else positive_diagonal_linear
         self._pair_metrics = ADDPairErrorMetrics(env)
         self._disc_energy = nn.Sequential(
             linear(self._pair_metrics.feature_dim, HIDDEN_WIDTHS[0]), activation(),
             linear(HIDDEN_WIDTHS[0], HIDDEN_WIDTHS[1]), activation(),
             linear(HIDDEN_WIDTHS[1], 1, bias=False))
-        if self.disc_learn_anchor_logit:
+        if self.disc_output_bias:
+            # Match the anchored scorer at b=0 without an extra random draw.
+            # After this initialization the bias is independent and E(0)
+            # is not subtracted in the forward pass.
+            with torch.no_grad():
+                final = self._disc_energy[-1]
+                zero = final.weight.new_zeros((1, self._pair_metrics.feature_dim))
+                final.bias = nn.Parameter(-self._disc_energy(zero).reshape(1))
+            self.register_parameter("_anchor_logit", None)
+            self.disc_schema_version = OUTPUT_BIAS_SCHEMA_OFFSET + (
+                SIGNED_WEIGHT_SCHEMA_VERSION if self.disc_signed_weights else MONOTONE_SCHEMA_VERSION)
+        elif self.disc_learn_anchor_logit:
             self._anchor_logit = nn.Parameter(torch.zeros(()))
             self.disc_schema_version = (SIGNED_WEIGHT_SCHEMA_VERSION if self.disc_signed_weights
                                         else MONOTONE_SCHEMA_VERSION)
@@ -284,6 +303,8 @@ class MIRAMonotoneModel(ADDModel):
                                         else FIXED_ANCHOR_SCHEMA_VERSION)
         if self.disc_activation == "groupsort_maxmin":
             self.disc_schema_version += MAXMIN_SCHEMA_OFFSET
+        elif self.disc_activation == "relu":
+            self.disc_schema_version += RELU_SCHEMA_OFFSET
         self.register_buffer("_monotone_schema_version", torch.tensor(self.disc_schema_version, dtype=torch.int64))
 
     def pair_to_error_metrics(self, policy, reference):
@@ -297,6 +318,8 @@ class MIRAMonotoneModel(ADDModel):
         feature_dim = self._pair_metrics.feature_dim
         if disc_obs.ndim != 2 or disc_obs.shape[-1] != feature_dim:
             raise ValueError(f"MIRAMonotone expects {feature_dim} normalized physical errors")
+        if self.disc_output_bias:
+            return -self._disc_energy(disc_obs)
         anchor = disc_obs.new_zeros((1, feature_dim))
         # Sample and anchor share the same deterministic effective weights.
         energy = self._disc_energy(torch.cat((disc_obs, anchor), dim=0))
