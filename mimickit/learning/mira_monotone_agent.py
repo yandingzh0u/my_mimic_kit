@@ -98,18 +98,14 @@ class MIRAMonotoneAgent(ADDAgent):
         scores = self._model.eval_disc(torch.cat((self._pos_diff[None], normalized), 0)).squeeze(-1)
         positive, negative = scores[:1], scores[1:]
         cls_loss = self._disc_loss_pos(positive) + self._disc_loss_neg(negative)
-        logit_loss = self._model.get_disc_logit_weights().square().sum()
-        logit_reg_loss = self._disc_logit_reg * logit_loss
         neg_acc, pos_acc = self._compute_disc_acc(negative, positive)
         zero = scores.new_zeros(())
         info = {
-            "disc_loss": cls_loss + logit_reg_loss,
+            "disc_loss": cls_loss,
             "disc_cls_loss": cls_loss.detach(),
             "disc_grad_penalty": zero,
             "disc_neg_grad_penalty": zero,
             "disc_pos_grad_penalty": zero,
-            "disc_logit_loss": logit_loss.detach(),
-            "disc_logit_reg_loss": logit_reg_loss.detach(),
             "disc_pos_acc": pos_acc.detach(), "disc_neg_acc": neg_acc.detach(),
             "disc_pos_logit": positive.mean().detach(),
             "disc_neg_logit": negative.mean().detach(),
@@ -137,15 +133,11 @@ class MIRAMonotoneAgent(ADDAgent):
             "body_positions": "nonroot_root_relative_world_axes_L2",
             "body_rotations": "nonroot_world_geodesic",
             "input_scaling": f"{metric_count}_metric_history_broadcast_with_fixed_group_rms",
-            "first_layer": "free_positive_dense_no_group_budget",
+            "first_layer": "q_free_nonnegative_normalized_dense",
             "score": "negative_energy_with_learnable_output_bias",
             "activation": "relu",
             "classification_loss": "positive_bce_plus_negative_bce",
-            "normalization": "SLL_nonresidual_positive_diagonal_logdomain_Perron_init",
-            "learned_diagonal_parameters": sum(
-                layer.parametrizations.weight[-1].log_q.numel()
-                for layer in self._model._disc_energy
-                if isinstance(layer, torch.nn.Linear)),
+            "weight_constraint": "forward_q_free_diagonal_normalization",
             "reward": "original_ADD_clipped_mapping_no_multiplier",
         }
         if layout.grip_release_aware:

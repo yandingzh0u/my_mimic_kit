@@ -16,29 +16,26 @@ not averaged before entering the network. The zero Root-relative body
 position and duplicate Root body rotation are omitted from the input; the
 original seven metrics are reconstructed for evaluation and scale statistics.
 One `64 → 341 → 512 → 1` network learns their joint energy `E` using
-nonnegative weights, learnable diagonal normalization and ReLU in both hidden
-layers. The final linear layer has an ordinary learnable scalar bias. The
+nonnegative linear contractions and ReLU in both hidden layers. The final
+linear layer has an ordinary learnable scalar bias. The
 discriminator score is `s(e) = -E(e)`. Reducing an error while holding the
 others fixed cannot reduce the score.
 
 The classification loss is the sum of the positive BCE at zero error and
-the mean negative BCE on the policy/replay batch. The existing head weight
-penalty is added separately. The reward uses ADD's numerically clipped
+the mean negative BCE on the policy/replay batch; MIRA has no discriminator
+logit regularizer. The reward uses ADD's numerically clipped
 `-log(1 - sigmoid(s))` mapping, with no extra multiplier. GP is disabled.
 
-All three linear layers use the non-residual construction in
-[Araujo et al., ICLR 2023](https://arxiv.org/abs/2303.03169), Theorem 1 and
-Appendix C.3: `W = P diag(sqrt(q / (P.T @ (P @ q))))`, with `P >= 0` and
-positive learned `q`. This adds 917 log-q parameters, retains the L2 operator
-norm bound, and introduces no free output gain or new loss coefficient.
-The ordinary discriminator SGD and its existing weight decay also update
-these parameters. A deterministic Perron initialization recovers SN for a
-shared strictly positive raw weight matrix; this does not imply identical
-random initialization of separately constructed old and new networks.
-Training uses stable log-domain reductions, including explicit zero-weight
-handling, without an SN module. The unit sensitivity bound applies to the
-normalized 64-dimensional input, not unnormalized physical units. The scalar Head L2 penalty remains nearly
-constant under this construction; restoring that penalty is not its purpose.
+The optimizer learns the same matrices used in the forward pass. After each
+discriminator SGD step, negative entries in its candidate `U` are clipped to
+zero. This gives `C`, the nearest nonnegative matrix in Frobenius norm. If
+`C` has spectral norm above one, `C` is divided by that norm. This is the
+smallest uniform reduction that enforces the bound and leaves the ratios of
+positive entries intact. The two steps are a feasibility repair, not the
+Frobenius projection onto the joint constraint set. They are applied outside
+backpropagation, so a zero connection can become positive in a later update.
+No auxiliary weight coordinates or new loss coefficients are needed.
+The unit sensitivity bound applies to the normalized input coordinates.
 
 The supported environment uses global, single-frame, 172-dimensional ADD
 observations for the 15-body/28-DOF humanoid. Replay retains paired raw
@@ -62,7 +59,7 @@ The agent configuration is
 Each physical component is divided by its running group scale and by the
 square root of the group size.
 
-The ReLU implementation uses checkpoint schema 26. Earlier MIRA checkpoints
+The direct-weight ReLU implementation uses checkpoint schema 29. Earlier MIRA checkpoints
 must be evaluated or resumed with their original source and configuration,
 using the run's frozen snapshot where available. Historical results are kept
 under `output/`. They record the versions that were actually trained.

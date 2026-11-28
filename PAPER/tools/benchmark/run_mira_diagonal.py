@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
-"""Freeze a MIRA experiment or resume its full training checkpoint.
+"""Freeze a q-free normalized MIRA experiment or resume its full checkpoint.
 
 Examples (use the Isaac Lab Python environment):
-  python PAPER/tools/benchmark/run_mira_diagonal.py --updates 30 --out-dir output/diagnostics/diagonal_smoke
-  python PAPER/tools/benchmark/run_mira_diagonal.py --updates 2000 --out-dir output/diagonal_formal
-  python PAPER/tools/benchmark/run_mira_diagonal.py --motion climb --updates 2000 --out-dir output/diagonal_climb
-  python PAPER/tools/benchmark/run_mira_diagonal.py --motion crawl --updates 2000 --out-dir output/diagonal_crawl
-  python PAPER/tools/benchmark/run_mira_diagonal.py --updates 2000 --out-dir output/diagonal_formal --resume
-  python PAPER/tools/benchmark/run_mira_diagonal.py --updates 2500 --out-dir output/diagonal_formal --resume
+  python PAPER/tools/benchmark/run_mira_diagonal.py --updates 3 --out-dir output/diagnostics/direct_weight_smoke
+  python PAPER/tools/benchmark/run_mira_diagonal.py --updates 2000 --out-dir output/direct_weight_backflip
+  python PAPER/tools/benchmark/run_mira_diagonal.py --motion climb --updates 2000 --out-dir output/direct_weight_climb
+  python PAPER/tools/benchmark/run_mira_diagonal.py --updates 2500 --out-dir output/direct_weight_backflip --resume
 
 Resume uses the experiment's frozen training sources and configuration. Its
 hooks only observe training; no model methods or objectives are replaced.
@@ -68,6 +66,7 @@ def preflight(motion="backflip"):
     assert config["disc_grad_penalty"] == 0
     assert config["task_reward_weight"] == 0 and config["disc_reward_weight"] == 1
     assert "disc_reward_scale" not in config
+    assert "disc_logit_reg" not in config
     assert config["disc_optimizer"] == {"type": "SGD", "learning_rate": 2.5e-4, "weight_decay": .0001}
     for kind in ("actor", "critic"):
         optimizer = config[kind + "_optimizer"]
@@ -85,7 +84,7 @@ def preflight(motion="backflip"):
             path = ROOT / path
         assert path.is_file(), str(path)
         assets[key] = {"path": str(path.resolve()), "sha256": sha(path)}
-    assert (ROOT / "mimickit/learning/diagonal_normalization.py").is_file()
+    assert (ROOT / "mimickit/learning/mira_monotone_model.py").is_file()
     return {"motion": motion,
             "configs": {kind: {"path": str(ROOT / rel), "sha256": sha(ROOT / rel)}
                         for kind, rel in CONFIGS.items()}, "runtime_assets": assets}
@@ -172,16 +171,14 @@ def train(args):
     import torch
     import run as production_run
     from learning.base_agent import BaseAgent
-    # Historical runs still execute their byte-identical frozen modules.
-    if (ROOT / "mimickit/learning/mira_monotone_agent.py").is_file():
-        model_module = import_module("learning.mira_monotone_model")
-        MIRAMonotoneAgent = import_module("learning.mira_monotone_agent").MIRAMonotoneAgent
-    else:
-        model_module = import_module("learning.dare_monotone_model")
-        MIRAMonotoneAgent = import_module("learning.dare_monotone_agent").DAREMonotoneAgent
+    model_module = import_module("learning.mira_monotone_model")
+    NonnegativeNormalizedLinear = model_module.NonnegativeNormalizedLinear
+    MIRAMonotoneAgent = import_module("learning.mira_monotone_agent").MIRAMonotoneAgent
     FEATURE_DIM = model_module.FEATURE_DIM
     FEATURE_SLICES = model_module.FEATURE_SLICES
     MONOTONE_SCHEMA_VERSION = model_module.MONOTONE_SCHEMA_VERSION
+    dimensions = (FEATURE_DIM, *model_module.HIDDEN_WIDTHS, 1)
+    layer_indices = (0, 2, 4)
     aggregate_error_metrics = model_module.aggregate_error_metrics
     torch.set_num_threads(4)
     total_samples = args.updates * NUM_ENVS * STEPS
@@ -255,25 +252,39 @@ def train(args):
         model = agent._model
         assert FEATURE_DIM == 64
         assert int(model._monotone_schema_version) == MONOTONE_SCHEMA_VERSION
-        assert not any(type(module).__name__ == "_SpectralNorm" for module in model._disc_energy.modules())
-        diagonal = []
-        for index, dim in zip((0, 2, 4), (FEATURE_DIM, 341, 512)):
+        layers = []
+        for index, dim_in, dim_out in zip(layer_indices, dimensions, dimensions[1:]):
             layer = model._disc_energy[index]
-            parametrizations = layer.parametrizations.weight
-            assert len(parametrizations) == 2
-            assert type(parametrizations[0]).__name__ == "PositiveWeight"
-            assert type(parametrizations[1]).__name__ == "PositiveDiagonalRescaling"
-            assert parametrizations[1].log_q.numel() == dim
-            diagonal.append(parametrizations[1].log_q)
+            assert type(layer) is NonnegativeNormalizedLinear
+            assert layer.raw_weight.shape == (dim_out, dim_in) and layer.bias.shape == (dim_out,)
+            layers.append(layer)
+        assert all(type(model._disc_energy[index]) is torch.nn.ReLU for index in (1, 3))
         optimizer_params = [p for group in agent._disc_optimizer._optimizer.param_groups for p in group["params"]]
         assert len({id(p) for p in optimizer_params}) == len(optimizer_params)
-        assert {id(p) for p in model.get_disc_params()} == {id(p) for p in optimizer_params}
-        assert all(sum(p is q for p in optimizer_params) == 1 for q in diagonal)
-        return diagonal
+        assert ({id(p) for layer in layers for p in (layer.raw_weight, layer.bias)}
+                == {id(p) for p in model.get_disc_params()}
+                == {id(p) for p in optimizer_params})
+        return layers
+
+    def effective_weights(layers):
+        return [layer.effective_weight().detach() for layer in layers]
+
+    @torch.no_grad()
+    def verify_weights(weights):
+        norms, ranges = [], []
+        for weight in weights:
+            assert bool(torch.isfinite(weight).all()) and bool((weight >= 0).all())
+            # Independent audit, deliberately use CPU double SVD rather than
+            # the training update's numerical method.
+            norms.append(float(torch.linalg.matrix_norm(weight.detach().to("cpu", torch.float64), ord=2)))
+            ranges.append({"min": float(weight.min()), "max": float(weight.max()),
+                           "zero_fraction": float((weight == 0).float().mean())})
+        assert all(norm <= 1 + 4 * torch.finfo(weight.dtype).eps for norm, weight in zip(norms, weights)), norms
+        return norms, ranges
 
     def fixed_probe(agent):
         # Deterministic normalized inputs consume no RNG and are independent
-        # of the moving physical-error normalizer. Tracking anchored energy
+        # of the moving physical-error normalizer. Tracking score differences
         # separately prevents a changing scalar bias from hiding a frozen net.
         identity = torch.eye(FEATURE_DIM, device=agent._device)
         return torch.cat((identity.new_zeros((1, FEATURE_DIM)), identity,
@@ -281,7 +292,7 @@ def train(args):
                           identity.new_ones((1, FEATURE_DIM)),
                           identity.new_full((1, FEATURE_DIM), 2)), 0)
 
-    def anchored_probe_energy(agent):
+    def relative_probe_energy(agent):
         with torch.no_grad():
             score = agent._model.eval_disc(fixed_probe(agent)).squeeze(-1)
             return score[0] - score
@@ -294,7 +305,8 @@ def train(args):
     def capture_agent(*values, **kwargs):
         agent = original_build(*values, **kwargs)
         track["agent"] = agent
-        diagonal = layout(agent)
+        layers = layout(agent)
+        weights = effective_weights(layers)
         if args.resume:
             return agent
         optimizers = {}
@@ -303,6 +315,7 @@ def train(args):
             optimizers[name] = {"class": "SGD", "steps": 0,
                                 "groups": [{k: v for k, v in group.items() if k != "params"}
                                            for group in opt._optimizer.param_groups]}
+        norms, ranges = verify_weights(weights)
         initial = {"from_zero": True, "resumed": False, "schema": MONOTONE_SCHEMA_VERSION,
                    "discriminator_input_dim": FEATURE_DIM, "physical_metric_count": len(METRICS),
                    "initial_normalizer_scale": agent._disc_obs_norm.get_abs_mean().detach().cpu().tolist(),
@@ -310,14 +323,15 @@ def train(args):
                    "actor_initial_sha256": fingerprint(agent._model, ("_actor_layers.", "_action_dist.")),
                    "critic_initial_sha256": fingerprint(agent._model, ("_critic_layers.", "_critic_out.")),
                    "disc_parameter_count": sum(p.numel() for p in agent._model.get_disc_params()),
-                   "diagonal_parameter_count": sum(q.numel() for q in diagonal),
+                   "effective_weight_parameter_count": sum(weight.numel() for weight in weights),
+                   "exact_spectral_norms": norms, "effective_weight_ranges": ranges,
                    "optimizers": optimizers, "checkpoint_extra": agent._get_checkpoint_extra_state()}
         expected = json.loads((out / "expected_initialization.json").read_text())
         initial["baseline_initialization_comparison_available"] = expected is not None
         if expected is not None:
             assert all(initial[key] == expected[key] for key in ("actor_initial_sha256", "critic_initial_sha256"))
             initial["baseline_actor_critic_initialization_matches"] = True
-        track["initial_probe_energy"] = anchored_probe_energy(agent)
+        track["initial_probe_energy"] = relative_probe_energy(agent)
         track["previous_probe_energy"] = track["initial_probe_energy"].clone()
         initial["fixed_probe_initial_energy"] = track["initial_probe_energy"].cpu().tolist()
         save(out / "initial_state.json", initial)
@@ -329,7 +343,7 @@ def train(args):
         assert agent._resume_pending
         assert agent._iter == restored_updates
         assert agent._sample_count == resume_checkpoint["trainer_state"]["sample_count"]
-        layout(agent)
+        verify_weights(effective_weights(layout(agent)))
         for name, value in agent.state_dict().items():
             assert torch.equal(value.detach().cpu(), resume_checkpoint["model_state_dict"][name]), name
         steps = {}
@@ -339,7 +353,7 @@ def train(args):
             steps[name] = expected
         initial = json.loads((out / "initial_state.json").read_text())
         track["initial_probe_energy"] = torch.tensor(initial["fixed_probe_initial_energy"], device=agent._device)
-        track["previous_probe_energy"] = anchored_probe_energy(agent)
+        track["previous_probe_energy"] = relative_probe_energy(agent)
         save(resume_dir / "restored_state.json", {
             "status": "verified", "restored_updates": restored_updates,
             "restored_samples": agent._sample_count, "optimizer_steps": steps,
@@ -368,7 +382,7 @@ def train(args):
                 reward = calc_unscaled_disc_reward(score)
                 quantiles = normalized.new_tensor([0., .5, .95, .99, 1.])
                 distributions = {}
-                for name, values in (("anchored_energy", energy), ("score", score),
+                for name, values in (("energy_relative_to_zero_error", energy), ("score", score),
                                      ("reward", reward),
                                      ("normalized_input_L2", normalized.norm(dim=-1))):
                     assert bool(torch.isfinite(values).all()), name
@@ -412,7 +426,8 @@ def train(args):
         previous = model.training
         model.eval()
         try:
-            diagonal = layout(agent)
+            layers = layout(agent)
+            weights = effective_weights(layers)
             real_gradients = {}
             for name, parameter in agent.named_parameters():
                 assert bool(torch.isfinite(parameter).all()), name
@@ -427,7 +442,7 @@ def train(args):
                 grad_norm = float(gradient.detach().double().norm())
                 real_gradients[name] = {"L2": grad_norm,
                                         "max_abs": float(gradient.detach().abs().max())}
-                if name.endswith(("weight.original", "log_q")):
+                if name.endswith(".raw_weight"):
                     assert grad_norm > 0, "Zero real training gradient: " + name
             for key in ("disc_grad_penalty", "disc_pos_grad_penalty", "disc_neg_grad_penalty"):
                 assert scalar(train_info[key]) == 0
@@ -436,10 +451,7 @@ def train(args):
             effective_scale = scale.clamp_min(agent._disc_obs_norm._min_diff)
             assert bool((effective_scale >= 1e-4).all())
             with torch.no_grad():
-                norms = [float(torch.linalg.matrix_norm(model._disc_energy[index].weight.double(), ord=2))
-                         for index in (0, 2, 4)]
-                assert max(norms) <= 1.0001, norms
-                assert all(bool((model._disc_energy[index].weight >= 0).all()) for index in (0, 2, 4))
+                norms, ranges = verify_weights(weights)
                 for key in ("obs", "action", "reward", "disc_obs", "disc_obs_demo"):
                     for chunk in agent._exp_buffer.get_data_flat(key).split(4096):
                         assert bool(torch.isfinite(chunk).all()), key
@@ -488,7 +500,7 @@ def train(args):
                 distributions = {
                     name: dict(zip(("min", "P50", "P95", "P99", "max"),
                                    torch.quantile(values, quantiles).cpu().tolist()))
-                    for name, values in (("anchored_energy", rollout_energy),
+                    for name, values in (("energy_relative_to_zero_error", rollout_energy),
                                          ("score", rollout_score), ("reward", rollout_reward),
                                          ("normalized_input_L2", normalized.norm(dim=-1)))}
                 normalizer_effect = {
@@ -504,15 +516,15 @@ def train(args):
                         ("min", "P50", "P95", "P99", "max"),
                         torch.quantile(previous_scale_energy, quantiles).cpu().tolist())),
                     "score_after_normalizer_update": distributions["score"],
-                    "energy_after_normalizer_update": distributions["anchored_energy"],
+                    "energy_after_normalizer_update": distributions["energy_relative_to_zero_error"],
                     "score_change_max_abs": float((rollout_score - previous_scale_score).abs().max()),
                 }
                 feature_quantiles = torch.quantile(normalized, quantiles, dim=0).cpu().tolist()
-                current_probe = anchored_probe_energy(agent)
+                current_probe = relative_probe_energy(agent)
                 from_initial = (current_probe - track["initial_probe_energy"]).abs()
                 since_previous = (current_probe - track["previous_probe_energy"]).abs()
-                assert float(from_initial.max()) > 0, "Anchored energy stayed exactly at initialization"
-                assert float(since_previous.max()) > 0, "Anchored energy did not change since previous pressure check"
+                assert float(from_initial.max()) > 0, "Fixed score differences stayed at initialization"
+                assert float(since_previous.max()) > 0, "Fixed score differences did not change since previous pressure check"
                 track["previous_probe_energy"] = current_probe.clone()
             z = normalized[:64].detach().requires_grad_(True)
             score = model.eval_disc(z)
@@ -550,12 +562,12 @@ def train(args):
                     "real_last_training_parameter_gradients": real_gradients,
                     "fixed_probe_energy_change_from_initial_max": float(from_initial.max()),
                     "fixed_probe_energy_change_since_previous_check_max": float(since_previous.max()),
-                    "log_q_ranges": [{"min": float(q.detach().min()), "max": float(q.detach().max())} for q in diagonal],
+                    "effective_weight_ranges": ranges,
                     "minimum_coordinate_energy_gradient": float(gradient.min()),
                     "maximum_score_gradient_L2": float(gradient.norm(dim=-1).max()),
                     "mean_normalized_energy_gradient_by_feature": gradient.mean(0).detach().cpu().tolist(),
                     "mean_physical_energy_gradient_by_feature": physical_gradient.mean(0).detach().cpu().tolist(),
-                    "diagonal_optimizer_coverage": True,
+                    "effective_weight_optimizer_coverage": True,
                     "validation_overhead_seconds": time.monotonic() - started}
         finally:
             model.train(previous)
@@ -588,7 +600,7 @@ def train(args):
             audit = {"completed_updates": complete, **pressure(agent, train_info)}
             append(out / "constraint_rounds.jsonl", audit)
             row["last_pressure_check"] = audit
-            print("DIAGONAL_CHECK " + json.dumps(audit, sort_keys=True), flush=True)
+            print("MIRA_CONSTRAINT_CHECK " + json.dumps(audit, sort_keys=True), flush=True)
         append(out / "training_rounds.jsonl", row)
         save(out / "progress.json", row)
         if complete == track.get("resumed_at_update", 0) + 1:
@@ -603,10 +615,12 @@ def train(args):
         checkpoint = torch.load(out / "checkpoint.pt", map_location="cpu", weights_only=False)
         assert checkpoint["trainer_state"]["next_iter"] == args.updates
         assert checkpoint["trainer_state"]["sample_count"] == total_samples
-        saved_q = {name: value for name, value in checkpoint["model_state_dict"].items() if name.endswith(".log_q")}
-        diagonal_count = FEATURE_DIM + 341 + 512
-        assert len(saved_q) == 3 and sum(q.numel() for q in saved_q.values()) == diagonal_count
-        assert all(bool(torch.isfinite(q).all()) for q in saved_q.values())
+        saved_raw_weights = [checkpoint["model_state_dict"][f"_model._disc_energy.{index}.raw_weight"]
+                             for index in layer_indices]
+        for weight, dim_in, dim_out in zip(saved_raw_weights, dimensions, dimensions[1:]):
+            assert weight.shape == (dim_out, dim_in)
+        current_layers = layout(agent)
+        norms, _ = verify_weights(effective_weights(current_layers))
         previous = agent._model.training
         agent._model.eval()
         try:
@@ -625,7 +639,9 @@ def train(args):
         finally:
             agent._model.train(previous)
         result = {"status": "passed", "saved_next_iter": args.updates,
-                  "saved_samples": total_samples, "saved_diagonal_parameters": diagonal_count,
+                  "saved_samples": total_samples,
+                  "saved_effective_weight_parameters": sum(weight.numel() for weight in effective_weights(current_layers)),
+                  "saved_exact_spectral_norms": norms,
                   "model_and_optimizer_state_reload": True, "probe_max_absolute_difference": 0,
                   "continued_PPO_updates": 0, "physics_resume_tested": False}
         save(out / "checkpoint_check.json", result)
@@ -639,7 +655,7 @@ def train(args):
         production_run.train = continue_train
     else:
         MIRAMonotoneAgent._compute_rewards = observe_first_rewards
-    argv = ["diagonal_cmnn", "--mode", "train", "--num_envs", str(NUM_ENVS),
+    argv = ["mira_direct_weights", "--mode", "train", "--num_envs", str(NUM_ENVS),
             "--visualize", "false", "--devices", "cuda:0", "--master_port", "6497",
             "--rand_seed", str(SEED), "--out_dir", str(out), "--save_int_models", "true",
             "--max_samples", str(total_samples)]
@@ -647,7 +663,7 @@ def train(args):
         argv.extend(["--" + kind + "_config", str(out / ("frozen_" + kind + ".yaml"))])
     if args.resume:
         argv.extend(["--resume_file", str(out / "checkpoint.pt")])
-    protocol = {"experiment": "MIRA64_physical_errors_positive_learned_diagonal_group_rms", "from_zero": True,
+    protocol = {"experiment": "MIRA64_q_free_nonnegative_normalized_weights", "from_zero": True,
                 "motion": args.motion,
                 "resumed": False, "initialization_checkpoint": None,
                 "schema": MONOTONE_SCHEMA_VERSION, "discriminator_input_dim": FEATURE_DIM,
@@ -687,12 +703,15 @@ def train(args):
     except BaseException as exc:
         save(out / "status.json", {"status": "failed", "error": repr(exc),
                                    "traceback": traceback.format_exc(), "seconds": time.monotonic() - started})
-        raise
-    finally:
-        env = track.get("env")
-        launcher = getattr(getattr(env, "_engine", None), "_app_launcher", None)
-        if launcher is not None:
-            launcher.app.close()
+        traceback.print_exc()
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(1)
+    # Checkpoints, metadata and verification reports have been written and closed.
+    # Isaac Lab shutdown can hang here; this is a standalone one-GPU worker.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)
 
 
 def main():
@@ -718,6 +737,14 @@ def main():
             parser.error("--motion must match the original experiment when resuming")
         args.motion = saved_motion
         ROOT = (args.out_dir.resolve() / "source_snapshot").resolve()
+        if args.resume:
+            frozen_runner = ROOT / RUNNER_REL
+            if not frozen_runner.is_file():
+                parser.error("Run this historical experiment with its original frozen runner")
+            if Path(__file__).resolve() != frozen_runner:
+                if manifest["files"].get(str(RUNNER_REL)) != sha(frozen_runner):
+                    parser.error("The frozen runner no longer matches the experiment manifest")
+                os.execv(sys.executable, [sys.executable, "-u", str(frozen_runner), *sys.argv[1:]])
     else:
         args.motion = args.motion or "backflip"
     CONFIGS["env"] = Path(f"PAPER/configs/envs/mira_{args.motion}_env.yaml")

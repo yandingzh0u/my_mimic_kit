@@ -1,21 +1,15 @@
-"""Unpooled physical errors to a componentwise monotone score.
-
-The ReLU energy network uses nonnegative weights and the non-residual
-diagonal construction of Araujo et al. (ICLR 2023), Theorem 1 and Appendix C.3.
-"""
+"""Unpooled physical errors to a componentwise monotone score."""
 
 import torch
 from torch import nn
 import torch.nn.functional as F
-from torch.nn.utils import parametrize
 
 from learning.add_model import ADDModel
-from learning.diagonal_normalization import PositiveDiagonalRescaling
 import util.torch_util as torch_util
 from util.carry_geometry import CarryGeometry
 
 
-MONOTONE_SCHEMA_VERSION = 26
+MONOTONE_SCHEMA_VERSION = 30
 HIDDEN_WIDTHS = (341, 512)
 METRIC_NAMES = ("root_pos", "root_rot", "body_pos", "body_rot",
                 "dof_vel", "root_vel", "root_ang_vel")
@@ -95,19 +89,36 @@ def _physical_rotation_quat(tan_norm):
     return torch.cat((wxyz[..., 1:], wxyz[..., :1]), -1)
 
 
-class PositiveWeight(nn.Module):
-    def forward(self, weight):
-        return weight.abs()
+class NonnegativeNormalizedLinear(nn.Module):
+    """A q-free nonnegative diagonal-normalized linear layer.
 
+    The effective matrix is P diag(P.T P 1)^(-1/2), with P = V^2. The
+    normalization is evaluated in float64 and is homogeneous in V, so the
+    raw parameter scale cannot become an unbounded output gain.
+    """
+    def __init__(self, in_features, out_features):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.raw_weight = nn.Parameter(torch.empty(out_features, in_features))
+        self.bias = nn.Parameter(torch.empty(out_features))
+        bound = in_features ** -0.5
+        nn.init.uniform_(self.raw_weight, -bound, bound)
+        nn.init.uniform_(self.bias, -bound, bound)
 
-def positive_diagonal_linear(in_features, out_features):
-    layer = nn.Linear(in_features, out_features, bias=True)
-    parametrize.register_parametrization(layer, "weight", PositiveWeight())
-    normalization = PositiveDiagonalRescaling(
-        in_features, device=layer.weight.device, dtype=layer.weight.dtype)
-    normalization.initialize_from_weight(layer.weight)
-    parametrize.register_parametrization(layer, "weight", normalization)
-    return layer
+    def effective_weight(self):
+        raw = self.raw_weight.to(torch.float64)
+        scale = raw.detach().abs().amax().clamp_min(torch.finfo(torch.float64).tiny)
+        positive = (raw / scale).square()
+        column_budget = positive.T @ positive.sum(dim=1)
+        live = column_budget > 0
+        safe_budget = torch.where(live, column_budget, torch.ones_like(column_budget))
+        normalized = positive * safe_budget.rsqrt().unsqueeze(0)
+        return torch.where(live.unsqueeze(0), normalized, torch.zeros_like(normalized)).to(
+            self.raw_weight.dtype)
+
+    def forward(self, inputs):
+        return F.linear(inputs, self.effective_weight(), self.bias)
 
 
 class ADDPairErrorMetrics(nn.Module):
@@ -208,9 +219,9 @@ class MIRAMonotoneModel(ADDModel):
     def _build_disc(self, config, env):
         self._pair_metrics = ADDPairErrorMetrics(env)
         self._disc_energy = nn.Sequential(
-            positive_diagonal_linear(self._pair_metrics.feature_dim, HIDDEN_WIDTHS[0]), nn.ReLU(),
-            positive_diagonal_linear(HIDDEN_WIDTHS[0], HIDDEN_WIDTHS[1]), nn.ReLU(),
-            positive_diagonal_linear(HIDDEN_WIDTHS[1], 1))
+            NonnegativeNormalizedLinear(self._pair_metrics.feature_dim, HIDDEN_WIDTHS[0]), nn.ReLU(),
+            NonnegativeNormalizedLinear(HIDDEN_WIDTHS[0], HIDDEN_WIDTHS[1]), nn.ReLU(),
+            NonnegativeNormalizedLinear(HIDDEN_WIDTHS[1], 1))
         self.register_buffer("_monotone_schema_version", torch.tensor(MONOTONE_SCHEMA_VERSION, dtype=torch.int64))
 
     def pair_to_error_metrics(self, policy, reference):
@@ -229,14 +240,18 @@ class MIRAMonotoneModel(ADDModel):
     def get_disc_params(self):
         return list(self._disc_energy.parameters())
 
-    def get_disc_logit_weights(self):
-        return self._disc_energy[-1].weight.flatten()
-
     def _load_from_state_dict(self, state_dict, prefix, local_metadata,
                               strict, missing_keys, unexpected_keys, error_msgs):
         version = state_dict.get(prefix + "_monotone_schema_version")
         if (version is None or version.dtype != torch.int64 or version.numel() != 1
                 or int(version.item()) != MONOTONE_SCHEMA_VERSION):
             error_msgs.append("Cannot load a different monotone physical-error schema")
+        else:
+            for index, layer in enumerate(self._disc_energy):
+                key = prefix + f"_disc_energy.{index}.raw_weight"
+                raw_weight = state_dict.get(key)
+                if isinstance(layer, NonnegativeNormalizedLinear) and raw_weight is not None:
+                    if not raw_weight.is_floating_point() or not torch.isfinite(raw_weight).all():
+                        error_msgs.append("Invalid raw weight in MIRA checkpoint: " + key)
         super()._load_from_state_dict(state_dict, prefix, local_metadata,
                                      strict, missing_keys, unexpected_keys, error_msgs)

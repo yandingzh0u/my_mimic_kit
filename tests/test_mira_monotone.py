@@ -17,7 +17,7 @@ from learning.add_agent import calc_unscaled_disc_reward
 from learning.mira_monotone_agent import MIRAMonotoneAgent
 from learning.mira_monotone_model import (
     ADDPairErrorMetrics, MIRAMonotoneModel, FEATURE_DIM, HIDDEN_WIDTHS,
-    aggregate_error_metrics)
+    NonnegativeNormalizedLinear, aggregate_error_metrics)
 from learning.add_model import ADDModel
 from learning.physical_error_normalizer import PhysicalErrorNormalizer
 import util.torch_util as torch_util
@@ -206,10 +206,13 @@ def test_same_actor_critic_and_no_new_loss_weights_or_reward_multipliers():
     for a, b in zip(baseline.get_actor_params() + baseline.get_critic_params(),
                     monotone.get_actor_params() + monotone.get_critic_params()):
         torch.testing.assert_close(a, b, rtol=0, atol=0)
-    linears = [layer for layer in monotone._disc_energy if isinstance(layer, torch.nn.Linear)]
+    linears = [layer for layer in monotone._disc_energy if isinstance(layer, NonnegativeNormalizedLinear)]
     assert [(layer.in_features, layer.out_features) for layer in linears] == [
         (64, HIDDEN_WIDTHS[0]), (*HIDDEN_WIDTHS,), (HIDDEN_WIDTHS[1], 1)]
-    assert all((layer.weight >= 0).all() for layer in linears)
+    assert all((layer.effective_weight() >= 0).all() for layer in linears)
+    assert all(torch.linalg.svdvals(layer.effective_weight().double())[0] <= 1 + 1e-6
+               for layer in linears)
+    assert all(set(dict(layer.named_parameters())) == {"raw_weight", "bias"} for layer in linears)
 
 
 def test_unaveraged_classification_loss_updates_the_builtin_output_bias():
@@ -237,9 +240,21 @@ def test_unaveraged_classification_loss_updates_the_builtin_output_bias():
     logits = scores[0]
     expected = torch.nn.functional.softplus(-logits[0]) + torch.nn.functional.softplus(logits[1:]).mean()
     torch.testing.assert_close(loss["disc_cls_loss"], expected)
-    torch.testing.assert_close(loss["disc_loss"], expected + loss["disc_logit_reg_loss"])
+    torch.testing.assert_close(loss["disc_loss"], expected)
+    assert "disc_logit_reg_loss" not in loss
     agent._disc_optimizer.step(loss["disc_loss"])
     assert torch.isfinite(bias.grad).all() and not torch.equal(bias.detach(), old_bias)
+
+
+def test_q_free_layer_has_a_finite_nonnegative_unit_bounded_effective_weight():
+    layer = NonnegativeNormalizedLinear(7, 3)
+    effective = layer.effective_weight()
+    assert torch.isfinite(effective).all() and (effective >= 0).all()
+    assert torch.linalg.svdvals(effective.double())[0] <= 1 + 1e-6
+    with torch.no_grad():
+        layer.raw_weight.zero_()
+    zero_effective = layer.effective_weight()
+    torch.testing.assert_close(zero_effective, torch.zeros_like(zero_effective))
 
 
 def test_bce_updates_and_production_rewards_keep_every_metric_monotone():
@@ -276,8 +291,10 @@ def test_bce_updates_and_production_rewards_keep_every_metric_monotone():
     zero_score = agent._model.eval_disc(torch.zeros(1, FEATURE_DIM))
     assert (zero_score >= first - 1e-6).all()
     for layer in agent._model._disc_energy:
-        if isinstance(layer, torch.nn.Linear):
-            assert (layer.weight >= 0).all()
+        if isinstance(layer, NonnegativeNormalizedLinear):
+            effective = layer.effective_weight()
+            assert (effective >= 0).all()
+            assert torch.linalg.svdvals(effective.detach().double())[0] <= 1 + 1e-6
 
 
 @pytest.mark.parametrize("chunk", [0, 1, 9])
@@ -432,10 +449,14 @@ def test_strict_checkpoint_roundtrip_and_rejection_of_legacy_reward_semantics():
     with pytest.raises(RuntimeError, match="monotone"):
         restored.load_state_dict(bad, strict=False)
     bad = copy.deepcopy(saved)
-    # A former discriminator with the same parameter shapes is still incompatible.
-    bad["_model._monotone_schema_version"] = torch.tensor(16, dtype=torch.int64)
+    # The former directly constrained discriminator must not silently load.
+    bad["_model._monotone_schema_version"] = torch.tensor(29, dtype=torch.int64)
     with pytest.raises(RuntimeError, match="monotone"):
         restored.load_state_dict(bad, strict=False)
+    bad = copy.deepcopy(saved)
+    bad["_model._disc_energy.4.raw_weight"][0, 0] = float("nan")
+    with pytest.raises(RuntimeError, match="Invalid raw weight"):
+        restored.load_state_dict(bad, strict=True)
     bad = copy.deepcopy(saved)
     bad["_model._pair_metrics.parent_ids"][0] = 11
     with pytest.raises(RuntimeError, match="character schema"):
